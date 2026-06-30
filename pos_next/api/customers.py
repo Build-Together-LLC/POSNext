@@ -40,10 +40,14 @@ def get_customers(search_term="", pos_profile=None, limit=20):
         # Return all customers (for client-side filtering)
         filters["disabled"] = 0
         customer_limit = limit if limit not in (None, 0) else frappe.db.count("Customer", filters)
+        fields = ["name", "customer_name", "mobile_no", "email_id"]
+        if frappe.get_meta("Customer").has_field("custom_vehicle_no"):
+            fields.append("custom_vehicle_no")
+
         result = frappe.get_all(
             "Customer",
             filters=filters,
-            fields=["name", "customer_name", "mobile_no", "email_id"],
+            fields=fields,
             limit=customer_limit,
             order_by="customer_name asc",
         )
@@ -56,7 +60,7 @@ def get_customers(search_term="", pos_profile=None, limit=20):
 
 
 @frappe.whitelist()
-def create_customer(customer_name, mobile_no=None, email_id=None, customer_group="Individual", territory="All Territories"):
+def create_customer(customer_name, mobile_no=None, email_id=None, customer_group="Individual", territory="All Territories", custom_vehicle_no=None):
     """
     Create a new customer from POS.
 
@@ -66,6 +70,7 @@ def create_customer(customer_name, mobile_no=None, email_id=None, customer_group
         email_id (str): Email address (optional)
         customer_group (str): Customer group (default: Individual)
         territory (str): Territory (default: All Territories)
+        custom_vehicle_no (str): Vehicle number (optional)
 
     Returns:
         dict: Created customer document
@@ -86,6 +91,7 @@ def create_customer(customer_name, mobile_no=None, email_id=None, customer_group
             "territory": territory or "All Territories",
             "mobile_no": mobile_no or "",
             "email_id": email_id or "",
+            "custom_vehicle_no": custom_vehicle_no or "",
         }
     )
 

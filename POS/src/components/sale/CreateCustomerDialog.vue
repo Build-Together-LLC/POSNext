@@ -99,6 +99,14 @@
 					<Input v-model="customerData.email_id" type="email" :placeholder="__('Enter email address')" />
 				</div>
 
+				<!-- Vehicle Number -->
+				<div>
+					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+						{{ __("Vehicle Number") }}
+					</label>
+					<Input v-model="customerData.custom_vehicle_no" type="text" :placeholder="__('Enter vehicle number')" />
+				</div>
+
 				<!-- Customer Group -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
@@ -232,6 +240,7 @@ const customerData = ref({
 	customer_name: "",
 	mobile_no: "",
 	email_id: "",
+	custom_vehicle_no: "",
 	customer_group: "Individual",
 	territory: "All Territories",
 })
@@ -339,6 +348,7 @@ const createCustomerResource = createResource({
 			territory: customerData.value.territory || __("All Territories"),
 			mobile_no: customerData.value.mobile_no || "",
 			email_id: customerData.value.email_id || "",
+			custom_vehicle_no: customerData.value.custom_vehicle_no || "",
 		},
 	}),
 	onSuccess: (data) => {
@@ -430,6 +440,7 @@ const resetForm = () => {
 		customer_name: "",
 		mobile_no: "",
 		email_id: "",
+		custom_vehicle_no: "",
 		customer_group: "Individual",
 		territory: "All Territories",
 	})

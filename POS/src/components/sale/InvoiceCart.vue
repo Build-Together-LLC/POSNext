@@ -82,8 +82,9 @@
 							<p class="text-xs font-semibold text-gray-900 truncate">
 								{{ customer.customer_name || customer.name }}
 							</p>
-							<p v-if="customer.mobile_no" class="text-[10px] text-gray-500 truncate">
-								{{ customer.mobile_no }}
+							<p class="text-[10px] text-gray-500 truncate flex items-center gap-1.5 mt-0.5">
+								<span v-if="customer.mobile_no">📱 {{ customer.mobile_no }}</span>
+								<span v-if="customer.custom_vehicle_no">🚗 {{ customer.custom_vehicle_no }}</span>
 							</p>
 						</div>
 					</div>
@@ -175,7 +176,10 @@
 								</div>
 								<div class="flex-1 min-w-0">
 									<p class="text-[11px] font-semibold text-gray-900 truncate">{{ cust.customer_name }}</p>
-									<p v-if="cust.mobile_no" class="text-[9px] text-gray-600">{{ cust.mobile_no }}</p>
+									<div class="flex items-center gap-1.5">
+										<span v-if="cust.mobile_no" class="text-[9px] text-gray-600">{{ cust.mobile_no }}</span>
+										<span v-if="cust.custom_vehicle_no" class="text-[9px] text-gray-600">{{ cust.custom_vehicle_no }}</span>
+									</div>
 								</div>
 							</button>
 						</div>
@@ -990,11 +994,13 @@ const customerResults = computed(() => {
 			const name = (cust.customer_name || "").toLowerCase()
 			const mobile = (cust.mobile_no || "").toLowerCase()
 			const id = (cust.name || "").toLowerCase()
+			const vehicle = (cust.custom_vehicle_no || "").toLowerCase()
 
 			return (
 				name.includes(searchValue) ||
 				mobile.includes(searchValue) ||
-				id.includes(searchValue)
+				id.includes(searchValue) ||
+				vehicle.includes(searchValue)
 			)
 		})
 		.slice(0, 20)
