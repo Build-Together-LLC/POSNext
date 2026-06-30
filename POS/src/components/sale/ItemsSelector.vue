@@ -373,14 +373,19 @@
 						</div>
 
 						<!-- Item Details -->
-						<div class="min-w-0">
-							<h3 class="text-[10px] sm:text-xs font-semibold text-gray-900 truncate mb-0.5 leading-tight">
-								{{ item.item_name }}
-							</h3>
-							<p class="text-[9px] sm:text-[10px] text-gray-500 leading-tight">
+						<div class="min-w-0 flex justify-between items-end gap-1">
+							<div class="min-w-0">
+								<h3 class="text-[10px] sm:text-xs font-semibold text-gray-900 truncate mb-0.5 leading-tight" :title="item.item_name">
+									{{ item.item_name }}
+								</h3>
+								<p class="text-[9px] sm:text-[10px] text-gray-500 leading-tight">
 									<span class="font-semibold text-blue-600">{{ formatCurrency(item.rate || item.price_list_rate || 0) }}</span>
 									<span class="text-gray-400">/ {{ item.uom || item.stock_uom || __('Nos', null, 'UOM') }}</span>
-							</p>
+								</p>
+							</div>
+							<span class="text-[9px] sm:text-[10px] text-gray-400 font-medium truncate flex-shrink-0" :title="item.item_code">
+								{{ item.item_code }}
+							</span>
 						</div>
 					</div>
 				</div>

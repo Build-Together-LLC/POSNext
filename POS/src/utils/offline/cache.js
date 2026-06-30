@@ -6,7 +6,7 @@ import { offlineState } from "./offlineState"
 const CACHE_STRUCTURE = {
 	// Define what gets cached
 	items: ["item_code", "item_name", "item_group", "barcodes", "price", "stock"],
-	customers: ["name", "customer_name", "mobile_no", "email_id"],
+	customers: ["name", "customer_name", "mobile_no", "email_id", "custom_vehicle_no"],
 	item_prices: ["price_list", "item_code", "price"],
 	local_stock: ["item_code", "warehouse", "actual_qty"],
 	payment_methods: [
@@ -253,13 +253,15 @@ export const searchCachedCustomers = async (searchTerm = "", limit = 50) => {
 
 		const term = searchTerm.toLowerCase()
 
-		// Search by name, mobile, or email
+		// Search by name, mobile, email, or custom vehicle no
 		const results = await db.customers
 			.where("customer_name")
 			.startsWithIgnoreCase(term)
 			.or("mobile_no")
 			.startsWithIgnoreCase(term)
 			.or("email_id")
+			.startsWithIgnoreCase(term)
+			.or("custom_vehicle_no")
 			.startsWithIgnoreCase(term)
 			.limit(limit)
 			.toArray()
