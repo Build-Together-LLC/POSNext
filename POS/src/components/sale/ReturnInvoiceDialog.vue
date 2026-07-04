@@ -249,6 +249,19 @@
 												</p>
 												<p class="text-xs text-gray-500 mt-0.5">@ {{ formatCurrency(item.rate) }}/{{ item.uom }}</p>
 											</div>
+											<!-- Good/Bad stock condition — "Bad" routes the return to the bad-stock warehouse -->
+											<div v-if="item.selected && badStockEnabled" class="flex items-center gap-1 bg-gray-100 rounded-lg p-1" @click.stop>
+												<button
+													type="button"
+													@click="item.stock_quality = 'Good'"
+													:class="['px-3 py-1 text-xs font-semibold rounded-md transition-colors', item.stock_quality === 'Good' ? 'bg-green-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200']"
+												>{{ __('Good') }}</button>
+												<button
+													type="button"
+													@click="item.stock_quality = 'Bad'"
+													:class="['px-3 py-1 text-xs font-semibold rounded-md transition-colors', item.stock_quality === 'Bad' ? 'bg-red-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200']"
+												>{{ __('Bad') }}</button>
+											</div>
 										</div>
 
 										<!-- Mobile Layout -->
@@ -318,6 +331,19 @@
 													</p>
 													<p class="text-xs text-gray-500">@ {{ formatCurrency(item.rate) }}/{{ item.uom }}</p>
 												</div>
+											</div>
+											<!-- Good/Bad stock condition — "Bad" routes the return to the bad-stock warehouse -->
+											<div v-if="item.selected && badStockEnabled" class="flex items-center gap-1 bg-gray-100 rounded-lg p-1" @click.stop>
+												<button
+													type="button"
+													@click="item.stock_quality = 'Good'"
+													:class="['px-3 py-1 text-xs font-semibold rounded-md transition-colors', item.stock_quality === 'Good' ? 'bg-green-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200']"
+												>{{ __('Good') }}</button>
+												<button
+													type="button"
+													@click="item.stock_quality = 'Bad'"
+													:class="['px-3 py-1 text-xs font-semibold rounded-md transition-colors', item.stock_quality === 'Bad' ? 'bg-red-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200']"
+												>{{ __('Bad') }}</button>
 											</div>
 										</div>
 									</div>
@@ -575,7 +601,17 @@ const props = defineProps({
 		type: String,
 		default: "USD",
 	},
+	// Optional: bad-stock warehouse configured on the POS Profile (taraknath custom field).
+	// When empty/absent (e.g. pos_next installed without taraknath), the Good/Bad toggle
+	// is hidden and no stock-quality field is sent — nothing depends on the field existing.
+	badStockWarehouse: {
+		type: String,
+		default: "",
+	},
 })
+
+// Good/Bad stock routing is only offered when a bad-stock warehouse is configured.
+const badStockEnabled = computed(() => Boolean(props.badStockWarehouse))
 
 const emit = defineEmits(["update:modelValue", "return-created"])
 
@@ -681,6 +717,7 @@ const fetchInvoiceResource = createResource({
 				selected: false,
 				return_qty: item.qty, // This will be the remaining qty after previous returns
 				original_qty: item.original_qty || item.qty, // Track original quantity
+				stock_quality: "Good", // Good | Bad — "Bad" routes the return to the POS Profile's bad-stock warehouse (taraknath validate hook)
 			}))
 			returnItems.value.forEach(normalizeItemQty)
 
@@ -739,6 +776,10 @@ const createReturnResource = createResource({
 				conversion_factor: item.conversion_factor || 1,
 				// Link to original invoice item for proper return tracking
 				sales_invoice_item: item.name, // Reference to the original Sales Invoice Item
+				// Good/Bad stock condition — only sent when a bad-stock warehouse is configured
+				// (taraknath). Frappe ignores unknown child fields, but we gate it anyway so
+				// pos_next installed standalone never sends a field the doctype may not have.
+				...(badStockEnabled.value ? { custom_stock_quality: item.stock_quality || "Good" } : {}),
 			})),
 			payments: refundPayments.value.map(payment => ({
 				mode_of_payment: payment.mode_of_payment,
