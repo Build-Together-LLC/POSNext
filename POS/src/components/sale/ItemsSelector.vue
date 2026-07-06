@@ -383,7 +383,7 @@
 									<span class="text-gray-400">/ {{ item.uom || item.stock_uom || __('Nos', null, 'UOM') }}</span>
 								</p>
 							</div>
-							<span class="text-[9px] sm:text-[10px] text-gray-400 font-medium truncate flex-shrink-0" :title="item.item_code">
+							<span class="text-[9px] sm:text-[10px] text-black font-medium truncate flex-shrink-0" :title="item.item_code">
 								{{ item.item_code }}
 							</span>
 						</div>
