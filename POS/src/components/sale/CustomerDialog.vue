@@ -30,7 +30,7 @@
 						:value="searchTerm"
 						@input="handleSearchInput"
 						type="text"
-						:placeholder="__('Search customers by name, mobile, or email...')"
+						:placeholder="__('Search customers by name, mobile, vehicle no, or email...')"
 						class="w-full border border-gray-300 rounded-md ps-6 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
 						@keydown="handleKeydown"
 						autofocus
@@ -137,7 +137,8 @@
 									</div>
 									<div class="text-xs text-gray-600 mt-1 gap-2">
 										<span v-if="customer.mobile_no">📱 {{ customer.mobile_no }}</span>
-										<span v-if="customer.email_id">✉️ {{ customer.email_id }}</span>
+										<span v-if="customer.email_id" class="ms-2">✉️ {{ customer.email_id }}</span>
+										<span v-if="customer.custom_vehicle_no" class="ms-2">🚗 {{ customer.custom_vehicle_no }}</span>
 									</div>
 									<div v-if="customer.customer_group" class="text-xs text-gray-500 mt-1">
 										{{ customer.customer_group }}

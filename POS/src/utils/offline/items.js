@@ -160,6 +160,8 @@ export const searchCachedCustomers = async (searchTerm, limit = 20) => {
                         .or("mobile_no")
                         .startsWithIgnoreCase(term)
                         .or("email_id")
+                        .startsWithIgnoreCase(term)
+                        .or("custom_vehicle_no")
                         .startsWithIgnoreCase(term);
 
                 const results = await (limit > 0

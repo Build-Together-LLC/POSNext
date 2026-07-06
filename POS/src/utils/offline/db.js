@@ -45,7 +45,7 @@ const CURRENT_SCHEMA = {
 	items: "&item_code, item_name, item_group, *barcodes",
 
 	// Customers cache
-	customers: "&name, customer_name, mobile_no, email_id",
+	customers: "&name, customer_name, mobile_no, email_id, custom_vehicle_no",
 
 	// Price list cache
 	item_prices: "&[price_list+item_code], price_list, item_code",

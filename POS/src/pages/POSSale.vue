@@ -331,6 +331,7 @@
 			v-model="uiStore.showReturnDialog"
 			:pos-profile="shiftStore.profileName"
 			:currency="shiftStore.profileCurrency"
+			:bad-stock-warehouse="shiftStore.currentProfile?.custom_bad_stock_warehouse || ''"
 			@return-created="handleReturnCreated"
 		/>
 
