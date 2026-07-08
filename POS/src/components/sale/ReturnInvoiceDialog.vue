@@ -871,16 +871,9 @@ const returnTotal = computed(() => {
 	if (!selectedItems.value || !Array.isArray(selectedItems.value)) {
 		return 0
 	}
-	const netReturn = selectedItems.value.reduce((sum, item) => {
+	return selectedItems.value.reduce((sum, item) => {
 		return sum + item.return_qty * item.rate
 	}, 0)
-
-	const netTotal = Math.abs(originalInvoice.value?.net_total || originalInvoice.value?.total || 0)
-	const grandTotal = Math.abs(originalInvoice.value?.grand_total || 0)
-	if (netTotal > 0 && grandTotal > 0) {
-		return netReturn * (grandTotal / netTotal)
-	}
-	return netReturn
 })
 
 // For partially paid invoices, calculate the proportional refundable amount
