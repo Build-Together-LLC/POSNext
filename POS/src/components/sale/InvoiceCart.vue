@@ -215,8 +215,35 @@
 
                 <!-- Action Buttons Section -->
                 <div v-if="items.length > 0" class="px-2 py-2 border-b border-gray-200 bg-white">
-                        <div class="flex items-center justify-between mb-1.5">
-                                <h2 class="text-xs font-bold text-gray-900">{{ __('Cart Items') }}</h2>
+                        <div class="flex items-center justify-between gap-2 mb-1.5">
+                                <h2 class="text-xs font-bold text-gray-900 flex-shrink-0">{{ __('Cart Items') }}</h2>
+
+                                <!-- Search within cart: instant in-memory filter by item code / name -->
+                                <div class="relative flex-1 min-w-0 max-w-xs">
+                                        <svg class="absolute start-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/>
+                                        </svg>
+                                        <input
+                                                v-model="cartSearch"
+                                                type="text"
+                                                :placeholder="__('Search in cart by item code or name')"
+                                                :aria-label="__('Search items in cart')"
+                                                class="w-full ps-7 pe-7 py-1 text-[11px] border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 bg-white"
+                                        />
+                                        <button
+                                                v-if="cartSearch"
+                                                type="button"
+                                                @click="cartSearch = ''"
+                                                class="absolute end-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5 touch-manipulation"
+                                                :aria-label="__('Clear cart search')"
+                                                :title="__('Clear search')"
+                                        >
+                                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                                                </svg>
+                                        </button>
+                                </div>
+
                                 <button
                                         @click="$emit('clear-cart')"
                                         class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors touch-manipulation"
@@ -389,11 +416,27 @@
 			</div>
 
 			<div v-else class="flex flex-col gap-0.5 sm:gap-1">
+				<!-- No cart line matches the search query -->
+				<div
+					v-if="cartSearchQuery && cartMatchCount === 0"
+					class="flex flex-col items-center justify-center py-6 px-3 text-center"
+				>
+					<p class="text-xs font-semibold text-gray-600">{{ __('Not in cart') }}</p>
+					<p class="text-[11px] text-gray-400 mt-0.5">
+						{{ __('No added item matches "{0}"', [cartSearch.trim()]) }}
+					</p>
+				</div>
+
 				<div
 					v-for="(item, index) in items"
+					v-show="itemMatchesSearch(item)"
 					:key="index"
+					data-test="cart-line"
 					@click="openEditDialog(item)"
-					class="bg-white border border-gray-200 rounded-md p-1.5 sm:p-2 hover:border-blue-300 hover:shadow-md transition-all duration-200 active:scale-[0.99] cursor-pointer group"
+					class="border rounded-md p-1.5 sm:p-2 hover:border-blue-300 hover:shadow-md transition-all duration-200 active:scale-[0.99] cursor-pointer group"
+					:class="cartSearchQuery && itemMatchesSearch(item)
+						? 'border-blue-400 ring-1 ring-blue-300 bg-blue-50/40'
+						: 'border-gray-200 bg-white'"
 				>
 					<div class="flex gap-1.5 sm:gap-2">
 						<!-- Item Image Thumbnail -->
@@ -430,7 +473,7 @@
 							<div class="flex items-start justify-between gap-0.5 mb-0.5">
 								<div class="flex items-center gap-1.5 flex-1 min-w-0">
 									<h4 class="text-xs sm:text-sm font-extrabold text-gray-900 truncate leading-tight">
-										{{ item.item_name }}
+										<span v-if="item.item_code">{{ item.item_code }} : </span>{{ item.item_name }}
 									</h4>
 									<!-- Free Item Badge -->
 									<span
@@ -817,6 +860,9 @@ const selectedIndex = ref(-1)               // Keyboard navigation index for sea
 const availableGiftCards = ref([])          // Available gift cards for current customer
 const previousCustomer = ref(null)          // Store previous customer for restore on blur
 
+// Cart search state - filters the already-added cart lines by item code / name
+const cartSearch = ref("")                  // Current in-cart search query
+
 // Edit item dialog state
 const showEditDialog = ref(false)           // Controls edit dialog visibility
 const selectedItem = ref(null)              // Item being edited
@@ -1013,6 +1059,43 @@ const customerResults = computed(() => {
 watch(customerResults, () => {
 	selectedIndex.value = -1
 })
+
+/** Normalised "search in cart" query. Empty string means "show everything". */
+const cartSearchQuery = computed(() => cartSearch.value.trim().toLowerCase())
+
+/**
+ * Instant in-memory match test for a single cart line.
+ *
+ * Mirrors the customer search: zero-latency, no server round-trip.
+ * Matches on item_code and item_name so the operator can confirm whether a
+ * given part is already in the cart. An empty query matches every line.
+ *
+ * @param {Object} item Cart line
+ * @returns {Boolean} True when the line should stay visible
+ */
+const itemMatchesSearch = (item) => {
+	const query = cartSearchQuery.value
+	if (!query) return true
+
+	const code = (item.item_code || "").toLowerCase()
+	const name = (item.item_name || "").toLowerCase()
+
+	return code.includes(query) || name.includes(query)
+}
+
+/** Number of cart lines matching the current query — drives the "not in cart" hint. */
+const cartMatchCount = computed(() => {
+	if (!cartSearchQuery.value) return props.items.length
+	return props.items.filter(itemMatchesSearch).length
+})
+
+/** Clear the cart search whenever the cart empties, so a stale query can't hide a fresh cart. */
+watch(
+	() => props.items.length,
+	(length) => {
+		if (length === 0) cartSearch.value = ""
+	},
+)
 
 /**
  * Total quantity of all items in cart (including free items).
