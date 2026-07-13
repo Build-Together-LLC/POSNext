@@ -294,6 +294,9 @@
 			:customer="cartStore.customer"
 			:company="shiftStore.profileCompany"
 			:additional-discount="cartStore.additionalDiscount"
+			:items="cartStore.invoiceItems"
+			:tax-amount="cartStore.totalTax"
+			:discount-amount="cartStore.totalDiscount"
 			@payment-completed="handlePaymentCompleted"
 			@update-additional-discount="handleAdditionalDiscountUpdate"
 		/>

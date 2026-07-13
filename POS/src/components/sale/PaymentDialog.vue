@@ -530,8 +530,18 @@
 					<span>{{ __('Apply Credit') }}</span>
 				</button>
 
-				<!-- Secondary row: Clear and Cancel - equal width side by side -->
+				<!-- Secondary row: Print, Clear and Cancel - equal width side by side -->
 				<div class="flex items-center gap-2 mt-1">
+					<button
+						@click="printDraftInvoice"
+						class="flex-1 inline-flex items-center justify-center gap-1.5 h-11 px-3 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 rounded-lg transition-colors touch-manipulation"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+						</svg>
+						<span>{{ __('Print') }}</span>
+					</button>
+
 					<button
 						@click="clearAll"
 						:disabled="paymentEntries.length === 0"
@@ -583,6 +593,17 @@
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
 						</svg>
 						<span>{{ __('Apply Credit') }}</span>
+					</button>
+
+					<!-- Print Button -->
+					<button
+						@click="printDraftInvoice"
+						class="inline-flex items-center justify-center gap-1.5 h-9 px-3 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 rounded-lg transition-colors"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+						</svg>
+						<span>{{ __('Print') }}</span>
 					</button>
 				</div>
 
@@ -643,6 +664,7 @@ import { usePOSSettingsStore } from "@/stores/posSettings"
 import { formatCurrency as formatCurrencyUtil, getCurrencySymbol } from "@/utils/currency"
 import { getPaymentIcon } from "@/utils/payment"
 import { offlineWorker } from "@/utils/offline/workerClient"
+import { printInvoiceCustom } from "@/utils/printInvoice"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import { useToast } from "@/composables/useToast"
@@ -686,6 +708,18 @@ const props = defineProps({
 		default: "",
 	},
 	additionalDiscount: {
+		type: Number,
+		default: 0,
+	},
+	items: {
+		type: Array,
+		default: () => [],
+	},
+	taxAmount: {
+		type: Number,
+		default: 0,
+	},
+	discountAmount: {
 		type: Number,
 		default: 0,
 	},
@@ -1328,4 +1362,33 @@ watch(
 		}
 	},
 )
+
+function printDraftInvoice() {
+	try {
+		// Calculate the additional discount percentage if any
+		const additionalDiscountPercentage = props.subtotal > 0 ? (props.additionalDiscount / props.subtotal) * 100 : 0
+
+		const invoiceData = {
+			name: __('DRAFT'),
+			company: props.company,
+			items: props.items,
+			payments: [],
+			grand_total: props.grandTotal,
+			total_taxes_and_charges: props.taxAmount,
+			discount_amount: props.additionalDiscount,
+			additional_discount_percentage: additionalDiscountPercentage,
+			posting_date: new Date().toISOString(),
+			customer_name:
+				props.customer?.customer_name ||
+				props.customer?.name ||
+				props.customer,
+			status: "Draft",
+			is_draft: true,
+		}
+		printInvoiceCustom(invoiceData)
+	} catch (error) {
+		console.error("Error printing draft invoice:", error)
+		showWarning(__("Failed to print draft invoice"))
+	}
+}
 </script>
