@@ -294,6 +294,9 @@
 			:customer="cartStore.customer"
 			:company="shiftStore.profileCompany"
 			:additional-discount="cartStore.additionalDiscount"
+			:items="cartStore.invoiceItems"
+			:tax-amount="cartStore.totalTax"
+			:discount-amount="cartStore.totalDiscount"
 			@payment-completed="handlePaymentCompleted"
 			@update-additional-discount="handleAdditionalDiscountUpdate"
 		/>
@@ -1353,6 +1356,16 @@ function handleShiftClosed() {
 }
 
 function handleItemSelected(item, autoAdd = false) {
+	const qty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
+
+	// Check if item quantity in view is negative (< 0) - restrict adding to cart and show validation error
+	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no && qty < 0) {
+		showError(item.is_bundle
+			? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
+			: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
+		return
+	}
+
 	// Auto-add mode
 	if (autoAdd) {
 		try {
@@ -1371,9 +1384,7 @@ function handleItemSelected(item, autoAdd = false) {
 	// Skip validation for batch/serial items - they have their own validation in the dialog
 	// Product Bundles have calculated stock based on component availability
 	if (settingsStore.shouldEnforceStockValidation() && (item.is_stock_item || item.is_bundle) && !item.has_serial_no && !item.has_batch_no) {
-		const actualQty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
-
-		if (actualQty <= 0) {
+		if (qty <= 0) {
 			showError(item.is_bundle
 			 ? __('"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.', [item.item_name])
 			 : __('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [item.item_name]))
@@ -1435,6 +1446,11 @@ function handleCustomerSelected(selectedCustomer) {
 		if (pendingPaymentAfterCustomer.value) {
 			pendingPaymentAfterCustomer.value = false
 			uiStore.showPaymentDialog = true
+		} else if (uiStore.isDesktop) {
+			// Keep the keyboard flow going: land in item search so the user can
+			// type the next item straight away. Skipped on mobile so we don't
+			// pop the on-screen keyboard, and when payment is taking over focus.
+			itemsSelectorRef.value?.focusSearch()
 		}
 	} else {
 		cartStore.setCustomer(null)
@@ -1516,6 +1532,11 @@ async function handlePaymentCompleted(paymentData) {
 			cartStore.salesTeam = paymentData.sales_team
 		} else {
 			cartStore.salesTeam = []
+		}
+
+		// Set rounding configuration from payment dialog choice
+		if (paymentData.disable_rounded_total !== undefined) {
+			cartStore.disableRoundedTotal = paymentData.disable_rounded_total
 		}
 
 		// Delete draft if it exists (since we're submitting/saving invoice)

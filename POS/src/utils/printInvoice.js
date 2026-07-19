@@ -103,6 +103,8 @@ export function printInvoiceCustom(invoiceData) {
 					max-width: 80mm;
 					font-weight: bold;
 					color: black;
+					-webkit-print-color-adjust: exact !important;
+					print-color-adjust: exact !important;
 				}
 
 				.receipt {
@@ -263,6 +265,8 @@ export function printInvoiceCustom(invoiceData) {
 						width: 80mm;
 						padding: 5mm;
 						margin: 0;
+						-webkit-print-color-adjust: exact !important;
+						print-color-adjust: exact !important;
 					}
 
 					.no-print {
@@ -275,6 +279,15 @@ export function printInvoiceCustom(invoiceData) {
 			<div class="receipt">
 				<!-- Header -->
 				<div class="header">
+					${
+						invoiceData.is_draft
+							? `
+					<div style="color: #ef4444; font-size: 18px; font-weight: 800; margin-bottom: 8px; text-transform: uppercase; text-align: center; border: 2px solid #ef4444; padding: 4px; border-radius: 4px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">
+						${__('DRAFT')}
+					</div>
+					`
+							: ""
+					}
 					<div class="company-name">${invoiceData.company || "POS Next"}</div>
 					<div style="font-size: 12px;">${__('TAX INVOICE')}</div>
 				</div>

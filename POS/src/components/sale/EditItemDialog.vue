@@ -95,11 +95,11 @@
 								</span>
 								<input
 									v-model.number="localRate"
+									@input="handleRateChange"
 									type="number"
 									min="0"
 									step="0.01"
-									readonly
-									class="w-full h-10 border border-gray-300 rounded-lg ps-16 pe-3 text-sm font-semibold bg-gray-50 cursor-not-allowed"
+									class="w-full h-10 border border-gray-300 rounded-lg ps-16 pe-3 text-sm font-semibold focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
 								/>
 							</div>
 						</div>
@@ -293,6 +293,8 @@ const localItem = ref(null)
 const localQuantity = ref(1)
 const localUom = ref("")
 const localRate = ref(0)
+// Rate the line was opened with, so we only push a manual rate when it changed
+const originalRate = ref(0)
 const localWarehouse = ref("")
 const discountType = ref("percentage")
 const discountValue = ref(0)
@@ -328,6 +330,7 @@ watch(
 			localQuantity.value = newItem.quantity || 1
 			localUom.value = newItem.uom || newItem.stock_uom || __("Nos")
 			localRate.value = newItem.rate || 0
+			originalRate.value = newItem.rate || 0
 			localWarehouse.value =
 				newItem.warehouse || props.warehouses[0]?.name || ""
 
@@ -439,6 +442,14 @@ function handleQuantityBlur() {
 	calculateTotals()
 }
 
+function handleRateChange() {
+	// Guard against empty/negative input while the user is typing
+	if (!localRate.value || localRate.value < 0) {
+		localRate.value = 0
+	}
+	calculateTotals()
+}
+
 function handleUomChange() {
 	// When UOM changes, we need to fetch new rate from server
 	// For now, we'll just recalculate with current rate
@@ -537,13 +548,18 @@ function updateItem() {
 		...localItem.value,
 		quantity: localQuantity.value,
 		uom: localUom.value,
-		rate: localRate.value,
 		warehouse: localWarehouse.value,
 		discount_percentage:
 			discountType.value === "percentage" ? discountValue.value : 0,
 		discount_amount:
 			discountType.value === "amount" ? discountValue.value : 0,
 	}
+
+	// Only send a rate when the user actually edited it. Otherwise the stale
+	// rate spread from localItem would override the rate the store fetches
+	// from the server when the UOM changes.
+	updatedItem.rate =
+		localRate.value !== originalRate.value ? localRate.value : undefined
 
 	// Update serial numbers if item has serials
 	if (localItem.value.has_serial_no) {
