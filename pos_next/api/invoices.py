@@ -437,21 +437,23 @@ def update_invoice(data):
         # Load rounding preference from POS Settings
         # When disabled (0): ERPNext rounds to nearest whole number
         # When enabled (1): Shows exact amount without rounding
-        # ========================================================================
-        disable_rounded = 1  # Default: disable rounding for POS (show exact amounts)
-
-        if pos_profile:
-            try:
-                pos_settings_value = frappe.db.get_value(
-                    "POS Settings",
-                    {"pos_profile": pos_profile},
-                    "disable_rounded_total"
-                )
-                if pos_settings_value is not None:
-                    disable_rounded = cint(pos_settings_value)
-            except Exception as e:
-                # Log error but continue with default
-                frappe.log_error(f"Error loading rounding setting: {str(e)}", "POS Invoice Creation")
+        # Check if disable_rounded_total is explicitly passed in invoice data payload,
+        # otherwise fall back to POS Settings or default (1).
+        if "disable_rounded_total" in data:
+            disable_rounded = cint(data.get("disable_rounded_total"))
+        else:
+            disable_rounded = 1  # Default: disable rounding for POS (show exact amounts)
+            if pos_profile:
+                try:
+                    pos_settings_value = frappe.db.get_value(
+                        "POS Settings",
+                        {"pos_profile": pos_profile},
+                        "disable_rounded_total"
+                    )
+                    if pos_settings_value is not None:
+                        disable_rounded = cint(pos_settings_value)
+                except Exception as e:
+                    frappe.log_error(f"Error loading rounding setting: {str(e)}", "POS Invoice Creation")
 
         invoice_doc.disable_rounded_total = disable_rounded
 
@@ -1185,8 +1187,49 @@ def search_invoices_for_return(
 
 
 # ==========================================
-# Legacy/Helper Functions
-# ==========================================
+def _check_item_matches_rule(item_doc, rule_name):
+    try:
+        full_rule = frappe.get_cached_doc("Pricing Rule", rule_name)
+        if full_rule.disable:
+            return False
+
+        apply_on = full_rule.apply_on
+        if apply_on == "Transaction":
+            return True
+
+        item_code = item_doc.get("item_code")
+
+        if apply_on == "Item Code":
+            rule_items = [d.item_code for d in (full_rule.get("items") or []) if d.item_code]
+            return item_code in rule_items
+
+        elif apply_on == "Item Group":
+            rule_groups = [d.item_group for d in (full_rule.get("item_groups") or []) if d.item_group]
+            item_group = item_doc.get("item_group")
+            if not item_group and item_code:
+                item_group = frappe.get_cached_value("Item", item_code, "item_group")
+            if item_group and item_group in rule_groups:
+                return True
+            if item_group:
+                from erpnext.setup.doctype.item_group.item_group import get_parent_item_groups
+                parent_groups = get_parent_item_groups(item_group) or []
+                if any(g in rule_groups for g in parent_groups):
+                    return True
+
+        elif apply_on == "Brand":
+            rule_brands = [d.brand for d in (full_rule.get("brands") or []) if d.brand]
+            item_brand = item_doc.get("brand")
+            if not item_brand and item_code:
+                item_brand = frappe.get_cached_value("Item", item_code, "brand")
+            if item_brand and item_brand in rule_brands:
+                return True
+            if item_code:
+                item_sub_brand = frappe.db.get_value("Item", item_code, "custom_sub_brand")
+                if item_sub_brand and item_sub_brand in rule_brands:
+                    return True
+    except Exception:
+        pass
+    return False
 
 
 @frappe.whitelist()
@@ -1368,21 +1411,29 @@ def apply_offers(invoice_data, selected_offers=None):
                     rules = list(raw_rules)
             raw_rule_names.update(rules)
 
+        all_target_rule_names = set(raw_rule_names) | set(selected_offer_names)
+
         rule_map = {}
-        if raw_rule_names:
+        if all_target_rule_names:
             rule_records = frappe.get_all(
                 "Pricing Rule",
-                filters={"name": ["in", list(raw_rule_names)]},
+                filters={"name": ["in", list(all_target_rule_names)]},
                 fields=[
                     "name",
+                    "title",
                     "promotional_scheme",
                     "coupon_code_based",
                     "promotional_scheme_id",
                     "price_or_product_discount",
+                    "apply_on",
+                    "rate_or_discount",
+                    "discount_percentage",
+                    "discount_amount",
+                    "rate",
                 ],
             )
             for record in rule_records:
-                if record.promotional_scheme and not record.coupon_code_based:
+                if not record.coupon_code_based:
                     rule_map[record.name] = record
 
         if selected_offer_names:
@@ -1391,6 +1442,8 @@ def apply_offers(invoice_data, selected_offers=None):
                 name: details
                 for name, details in rule_map.items()
                 if name in selected_offer_names
+                or (details.get("promotional_scheme") and details.get("promotional_scheme") in selected_offer_names)
+                or (details.get("promotional_scheme_id") and details.get("promotional_scheme_id") in selected_offer_names)
             }
 
         if not rule_map:
@@ -1399,52 +1452,54 @@ def apply_offers(invoice_data, selected_offers=None):
         applied_rules = set()
         free_items = []
 
-        for result, item_index in zip(pricing_results, index_map):
-            if not result:
-                continue
+        for item_index in range(len(prepared_items)):
+            item_doc = prepared_items[item_index]
+            result = pricing_results[item_index] if item_index < len(pricing_results) else {}
 
-            if erpnext_get_applied_pricing_rules:
-                rule_names = erpnext_get_applied_pricing_rules(
-                    result.get("pricing_rules")
-                )
-            else:
-                raw_rules = result.get("pricing_rules") or []
-                if isinstance(raw_rules, str):
-                    if raw_rules.startswith("["):
-                        rule_names = json.loads(raw_rules)
-                    else:
-                        rule_names = [
-                            r.strip() for r in raw_rules.split(",") if r.strip()
-                        ]
-                elif isinstance(raw_rules, (list, tuple, set)):
-                    rule_names = list(raw_rules)
+            rule_names = []
+            if result:
+                if erpnext_get_applied_pricing_rules:
+                    rule_names = erpnext_get_applied_pricing_rules(
+                        result.get("pricing_rules")
+                    )
                 else:
-                    rule_names = []
+                    raw_rules = result.get("pricing_rules") or []
+                    if isinstance(raw_rules, str):
+                        if raw_rules.startswith("["):
+                            rule_names = json.loads(raw_rules)
+                        else:
+                            rule_names = [
+                                r.strip() for r in raw_rules.split(",") if r.strip()
+                            ]
+                    elif isinstance(raw_rules, (list, tuple, set)):
+                        rule_names = list(raw_rules)
 
             applicable_rule_names = [
                 name for name in rule_names or [] if name in rule_map
             ]
+
+            if selected_offer_names and not applicable_rule_names:
+                for sel_name in rule_map.keys():
+                    if _check_item_matches_rule(item_doc, sel_name):
+                        applicable_rule_names.append(sel_name)
 
             if not applicable_rule_names:
                 continue
 
             applied_rules.update(applicable_rule_names)
 
-            item_doc = prepared_items[item_index]
             qty = flt(item_doc.get("qty") or item_doc.get("quantity") or 0)
             price_list_rate = flt(
-                result.get("price_list_rate")
+                (result and result.get("price_list_rate"))
                 or item_doc.get("price_list_rate")
                 or item_doc.get("rate")
                 or 0
             )
 
             # Get discount from result or fetch from pricing rule
-            discount_percentage = flt(result.get("discount_percentage") or 0)
-            per_unit_discount = flt(result.get("discount_amount") or 0)
+            discount_percentage = flt((result and result.get("discount_percentage")) or 0)
+            per_unit_discount = flt((result and result.get("discount_amount")) or 0)
 
-            # If ERPNext didn't calculate discount (validate_applied_rule=1),
-            # we need to fetch and apply it manually
             if (
                 not discount_percentage
                 and not per_unit_discount
@@ -1504,7 +1559,7 @@ def apply_offers(invoice_data, selected_offers=None):
                 }
             )
 
-            for free_item in result.get("free_item_data") or []:
+            for free_item in (result and result.get("free_item_data")) or []:
                 rule_name = free_item.get("pricing_rules")
                 if not rule_name or rule_name not in rule_map:
                     continue

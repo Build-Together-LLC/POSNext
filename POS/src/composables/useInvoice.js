@@ -17,6 +17,7 @@ export function useInvoice() {
 	const couponCode = ref(null)
 	const taxRules = ref([]) // Tax rules from POS Profile
 	const taxInclusive = ref(false) // Tax inclusive setting from POS Settings
+	const disableRoundedTotal = ref(0) // 0 = rounding enabled, 1 = rounding disabled
 
 	// Performance: Incrementally maintained aggregates (updated on add/remove/change)
 	// This avoids O(n) array reductions on every reactive change
@@ -685,6 +686,7 @@ export function useInvoice() {
 			})),
 			discount_amount: additionalDiscount.value || 0,
 			coupon_code: couponCode.value,
+			disable_rounded_total: disableRoundedTotal.value !== undefined ? disableRoundedTotal.value : 0,
 			is_pos: 1,
 			update_stock: 1,
 		}
@@ -740,6 +742,7 @@ export function useInvoice() {
 				})),
 				discount_amount: additionalDiscount.value || 0,
 				coupon_code: couponCode.value,
+				disable_rounded_total: disableRoundedTotal.value !== undefined ? disableRoundedTotal.value : 0,
 				is_pos: 1,
 				update_stock: 1, // Critical: Ensures stock is updated
 			}
@@ -1001,6 +1004,7 @@ export function useInvoice() {
 		totalPaid,
 		remainingAmount,
 		canSubmit,
+		disableRoundedTotal,
 
 		// Actions
 		addItem,

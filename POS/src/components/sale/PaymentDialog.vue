@@ -10,7 +10,10 @@
 						<div>
 							<div class="text-start text-xs font-medium text-gray-600 mb-1">{{ __('Total Amount') }}</div>
 							<div class="text-start text-3xl font-bold text-gray-900">
-								{{ formatCurrency(grandTotal) }}
+								{{ formatCurrency(targetTotal) }}
+							</div>
+							<div v-if="enableRounding && roundingAdjustment !== 0" class="text-start text-xs text-gray-500 mt-0.5">
+								{{ __('Exact: {0}', [formatCurrency(grandTotal)]) }}
 							</div>
 						</div>
 						<div class="text-end">
@@ -26,7 +29,7 @@
 									{{ formatCurrency(changeAmount) }}
 								</div>
 							</div>
-							<div v-if="totalPaid >= grandTotal && changeAmount === 0" class="flex items-center text-green-600">
+							<div v-if="totalPaid >= targetTotal && changeAmount === 0" class="flex items-center text-green-600">
 								<svg class="w-5 h-5 me-1" fill="currentColor" viewBox="0 0 20 20">
 									<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
 								</svg>
@@ -40,13 +43,28 @@
 						<div
 							:class="[
 								'h-full transition-all duration-300',
-								totalPaid >= grandTotal ? 'bg-green-500' : 'bg-blue-500'
+								totalPaid >= targetTotal ? 'bg-green-500' : 'bg-blue-500'
 							]"
-							:style="{ width: `${grandTotal > 0 ? Math.min((totalPaid / grandTotal) * 100, 100) : 0}%` }"
+							:style="{ width: `${targetTotal > 0 ? Math.min((totalPaid / targetTotal) * 100, 100) : 0}%` }"
 						></div>
 					</div>
-					<div class="text-start text-xs text-gray-600 mt-1">
-						{{ __('{0} paid of {1}', [formatCurrency(totalPaid), formatCurrency(grandTotal)]) }}
+					<div class="flex items-center justify-between text-xs text-gray-600 mt-1">
+						<span>{{ __('{0} paid of {1}', [formatCurrency(totalPaid), formatCurrency(targetTotal)]) }}</span>
+					</div>
+
+					<!-- Rounded Total Checkbox Row -->
+					<div class="flex items-center justify-between mt-3 pt-2.5 border-t border-blue-200/60">
+						<label class="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-gray-800 hover:text-blue-700 transition-colors">
+							<input
+								type="checkbox"
+								v-model="enableRounding"
+								class="w-4 h-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500 cursor-pointer shadow-sm"
+							/>
+							<span>{{ __('Round Total Amount') }}</span>
+						</label>
+						<div v-if="enableRounding && roundingAdjustment !== 0" class="text-xs font-bold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-md">
+							{{ __('Round Off: {0}{1}', [roundingAdjustment > 0 ? '+' : '', formatCurrency(roundingAdjustment)]) }}
+						</div>
 					</div>
 				</div>
 
@@ -737,6 +755,7 @@ const loadingPaymentMethods = ref(false)
 const lastSelectedMethod = ref(null)
 const customAmount = ref("")
 const paymentEntries = ref([])
+const enableRounding = ref(true) // Default ON as requested
 const customerCredit = ref([])
 const customerBalance = ref({ total_outstanding: 0, total_credit: 0, net_balance: 0 })
 const loadingCredit = ref(false)
@@ -959,6 +978,20 @@ const currencySymbol = computed(() => getCurrencySymbol(props.currency))
 // Helper to round to 2 decimal places (handles floating-point precision)
 const round2 = (val) => Number(Number(val).toFixed(2))
 
+const targetTotal = computed(() => {
+	if (enableRounding.value) {
+		return round2(Math.round(props.grandTotal))
+	}
+	return round2(props.grandTotal)
+})
+
+const roundingAdjustment = computed(() => {
+	if (enableRounding.value) {
+		return round2(targetTotal.value - props.grandTotal)
+	}
+	return 0
+})
+
 const totalPaid = computed(() => {
 	const sum = paymentEntries.value.reduce(
 		(sum, entry) => sum + (entry.amount || 0),
@@ -974,12 +1007,12 @@ const totalAvailableCredit = computed(() => {
 })
 
 const remainingAmount = computed(() => {
-	const remaining = round2(props.grandTotal) - totalPaid.value
+	const remaining = targetTotal.value - totalPaid.value
 	return remaining > 0 ? round2(remaining) : 0
 })
 
 const changeAmount = computed(() => {
-	const change = totalPaid.value - round2(props.grandTotal)
+	const change = totalPaid.value - targetTotal.value
 	return change > 0 ? round2(change) : 0
 })
 
@@ -1086,9 +1119,16 @@ watch(
 	{ immediate: true } // Load immediately if posProfile is already set
 )
 
+watch(enableRounding, () => {
+	if (paymentEntries.value.length === 1) {
+		paymentEntries.value[0].amount = targetTotal.value
+	}
+})
+
 watch(show, (newVal) => {
 	if (newVal) {
 		// Reset state when dialog opens
+		enableRounding.value = true
 		paymentEntries.value = []
 		customAmount.value = ""
 		lastSelectedMethod.value = null
@@ -1202,6 +1242,7 @@ function applyCustomerCredit() {
 function addCreditAccountPayment() {
 	console.log('[PaymentDialog] Add credit account payment (Pay Later):', {
 		grandTotal: props.grandTotal,
+		targetTotal: targetTotal.value,
 		currentPaid: totalPaid.value,
 		remainingAmount: remainingAmount.value
 	})
@@ -1214,7 +1255,8 @@ function addCreditAccountPayment() {
 		is_partial_payment: false,
 		is_credit_sale: true,  // Mark as credit sale
 		paid_amount: 0,
-		outstanding_amount: props.grandTotal,
+		outstanding_amount: targetTotal.value,
+		disable_rounded_total: enableRounding.value ? 0 : 1,
 	}
 
 	console.log('[PaymentDialog] Emitting credit sale payment-completed:', paymentData)
@@ -1243,6 +1285,8 @@ function completePayment() {
 		canComplete: canComplete.value,
 		totalPaid: totalPaid.value,
 		grandTotal: props.grandTotal,
+		targetTotal: targetTotal.value,
+		enableRounding: enableRounding.value,
 		allowPartialPayment: props.allowPartialPayment,
 		paymentEntries: paymentEntries.value,
 		salesPersons: selectedSalesPersons.value
@@ -1253,7 +1297,7 @@ function completePayment() {
 		return
 	}
 
-	const isPartial = totalPaid.value < props.grandTotal
+	const isPartial = totalPaid.value < targetTotal.value
 
 	const paymentData = {
 		payments: paymentEntries.value,
@@ -1261,6 +1305,7 @@ function completePayment() {
 		is_partial_payment: isPartial,
 		paid_amount: totalPaid.value,
 		outstanding_amount: isPartial ? remainingAmount.value : 0,
+		disable_rounded_total: enableRounding.value ? 0 : 1,
 		sales_team: selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
 	}
 

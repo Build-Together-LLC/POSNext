@@ -1534,6 +1534,11 @@ async function handlePaymentCompleted(paymentData) {
 			cartStore.salesTeam = []
 		}
 
+		// Set rounding configuration from payment dialog choice
+		if (paymentData.disable_rounded_total !== undefined) {
+			cartStore.disableRoundedTotal = paymentData.disable_rounded_total
+		}
+
 		// Delete draft if it exists (since we're submitting/saving invoice)
 		const draftIdToDelete = cartStore.currentDraftId
 
