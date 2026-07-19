@@ -428,9 +428,9 @@
 				</div>
 
 				<div
-					v-for="(item, index) in items"
+					v-for="item in displayedItems"
 					v-show="itemMatchesSearch(item)"
-					:key="index"
+					:key="`${item.item_code}-${item.uom}`"
 					data-test="cart-line"
 					@click="openEditDialog(item)"
 					class="border rounded-md p-1.5 sm:p-2 hover:border-blue-300 hover:shadow-md transition-all duration-200 active:scale-[0.99] cursor-pointer group"
@@ -1096,6 +1096,14 @@ watch(
 		if (length === 0) cartSearch.value = ""
 	},
 )
+
+/**
+ * Cart lines newest-first, so the item just added is visible without scrolling.
+ * This is display-only: props.items keeps its insertion order, which is the
+ * order the lines are written to the invoice.
+ * @returns {Array} Cart items in reverse insertion order
+ */
+const displayedItems = computed(() => [...props.items].reverse())
 
 /**
  * Total quantity of all items in cart (including free items).

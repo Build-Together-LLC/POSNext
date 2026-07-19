@@ -75,29 +75,39 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const hasActualQty = item.actual_qty !== undefined || item.stock_qty !== undefined
 		const shouldValidateStock = !isNonStockItem && (item.is_stock_item || item.is_bundle || hasActualQty)
 
-		if (currentProfile && !autoAdd && settingsStore.shouldEnforceStockValidation() && shouldValidateStock && !item.has_serial_no && !item.has_batch_no) {
+		if (currentProfile && shouldValidateStock && !item.has_serial_no && !item.has_batch_no) {
 			const warehouse = item.warehouse || currentProfile.warehouse
 			const actualQty =
 				item.actual_qty !== undefined ? item.actual_qty : item.stock_qty || 0
 
 			if (warehouse && actualQty !== undefined && actualQty !== null) {
-				const stockCheck = checkStockAvailability({
-					itemCode: item.item_code,
-					qty: qty,
-					warehouse: warehouse,
-					actualQty: actualQty,
-				})
-
-				if (!stockCheck.available) {
+				const mathActualQty = Math.floor(actualQty)
+				if (mathActualQty < 0) {
 					const itemType = item.is_bundle ? "Bundle" : "Item"
-					const errorMsg = formatStockError(
-						item.item_name,
-						qty,
-						stockCheck.actualQty,
-						warehouse,
+					throw new Error(
+						`"${item.item_name}" cannot be added to cart. ${itemType} quantity is negative (${mathActualQty}).`
 					)
+				}
 
-					throw new Error(errorMsg.replace("Item", itemType))
+				if (!autoAdd && settingsStore.shouldEnforceStockValidation()) {
+					const stockCheck = checkStockAvailability({
+						itemCode: item.item_code,
+						qty: qty,
+						warehouse: warehouse,
+						actualQty: actualQty,
+					})
+
+					if (!stockCheck.available) {
+						const itemType = item.is_bundle ? "Bundle" : "Item"
+						const errorMsg = formatStockError(
+							item.item_name,
+							qty,
+							stockCheck.actualQty,
+							warehouse,
+						)
+
+						throw new Error(errorMsg.replace("Item", itemType))
+					}
 				}
 			}
 		}
@@ -648,10 +658,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (updatedDetails.quantity !== undefined) {
 				cartItem.quantity = updatedDetails.quantity
 			}
-			// Don't update rate directly - let recalculateItem compute it from price_list_rate and discount
-			// if (updatedDetails.rate !== undefined) {
-			// 	cartItem.rate = updatedDetails.rate
-			// }
 			if (updatedDetails.warehouse !== undefined) {
 				cartItem.warehouse = updatedDetails.warehouse
 			}
@@ -664,6 +670,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// Update price_list_rate if provided (for UOM changes)
 			if (updatedDetails.price_list_rate !== undefined) {
 				cartItem.price_list_rate = updatedDetails.price_list_rate
+			}
+			// A manually edited rate becomes the new base price for the line.
+			// It must be applied after price_list_rate above (the edit dialog echoes
+			// back the original price_list_rate, which would otherwise win) and it
+			// drives price_list_rate because subtotal, totals and the submit payload
+			// are all derived from price_list_rate rather than rate.
+			if (updatedDetails.rate !== undefined && updatedDetails.rate !== null) {
+				const editedRate = Number.parseFloat(updatedDetails.rate)
+				if (!Number.isNaN(editedRate) && editedRate >= 0) {
+					cartItem.rate = editedRate
+					cartItem.price_list_rate = editedRate
+				}
 			}
 			// Update serial numbers if provided
 			if (updatedDetails.serial_no !== undefined) {

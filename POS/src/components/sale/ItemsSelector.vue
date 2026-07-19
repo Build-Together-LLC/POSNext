@@ -278,14 +278,18 @@
 			>
 				<div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-1.5 sm:gap-2.5">
 					<div
-						v-for="item in paginatedItems"
+						v-for="(item, itemIndex) in paginatedItems"
 						:key="item.item_code"
+						:data-highlighted="itemIndex === highlightedIndex ? 'true' : 'false'"
 						@touchstart.passive="getOptimizedClickHandler(item).touchstart"
 						@touchmove.passive="getOptimizedClickHandler(item).touchmove"
 						@touchend.passive="getOptimizedClickHandler(item).touchend"
 						@click="getOptimizedClickHandler(item).click"
 						:class="[
-							'group relative bg-white border border-gray-200 rounded-lg p-1.5 sm:p-2.5 touch-manipulation transition-[border-color,box-shadow] duration-100 cursor-pointer hover:border-blue-400 hover:shadow-md',
+							'group relative bg-white border rounded-lg p-1.5 sm:p-2.5 touch-manipulation transition-[border-color,box-shadow] duration-100 cursor-pointer hover:border-blue-400 hover:shadow-md',
+							itemIndex === highlightedIndex
+								? 'border-blue-500 ring-2 ring-blue-500 shadow-md'
+								: 'border-gray-200',
 						]"
 					>
 						<!-- Stock Badge - Positioned at top right of card -->
@@ -375,7 +379,7 @@
 						<!-- Item Details -->
 						<div class="min-w-0 flex justify-between items-end gap-1">
 							<div class="min-w-0">
-								<h3 class="text-[10px] sm:text-xs font-semibold text-gray-900 truncate mb-0.5 leading-tight" :title="item.item_name">
+								<h3 class="text-[10px] sm:text-xs font-semibold text-gray-900 break-words mb-0.5 leading-tight" :title="item.item_name">
 									{{ item.item_name }}
 								</h3>
 								<p class="text-[9px] sm:text-[10px] text-gray-500 leading-tight">
@@ -515,13 +519,17 @@
 					</thead>
 					<tbody class="bg-white divide-y divide-gray-200">
 						<tr
-							v-for="item in paginatedItems"
+							v-for="(item, itemIndex) in paginatedItems"
 							:key="item.item_code"
+							:data-highlighted="itemIndex === highlightedIndex ? 'true' : 'false'"
 							@touchstart.passive="getOptimizedClickHandler(item).touchstart"
 							@touchmove.passive="getOptimizedClickHandler(item).touchmove"
 							@touchend.passive="getOptimizedClickHandler(item).touchend"
 							@click="getOptimizedClickHandler(item).click"
-							class="group cursor-pointer hover:bg-blue-50 hover:shadow-md transition-[background-color,box-shadow] duration-100 touch-manipulation active:bg-blue-100"
+							:class="[
+								'group cursor-pointer hover:bg-blue-50 hover:shadow-md transition-[background-color,box-shadow] duration-100 touch-manipulation active:bg-blue-100',
+								itemIndex === highlightedIndex ? 'bg-blue-100 ring-2 ring-inset ring-blue-500' : '',
+							]"
 						>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[50px] sm:w-[60px]">
 								<div class="w-8 h-8 sm:w-10 sm:h-10 bg-gray-100 rounded flex items-center justify-center overflow-hidden">
@@ -550,7 +558,7 @@
 								</div>
 							</td>
 							<td class="hidden sm:table-cell px-2 sm:px-3 py-2 whitespace-nowrap sm:max-w-[150px]">
-								<div class="text-xs sm:text-sm text-gray-500 truncate" :title="item.item_code">{{ item.item_code }}</div>
+								<div class="text-xs sm:text-sm font-bold text-gray-900 truncate" :title="item.item_code">{{ item.item_code }}</div>
 							</td>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
 								<div class="text-xs sm:text-sm font-semibold text-blue-600">{{ formatCurrency(item.rate || item.price_list_rate || 0) }}</div>
@@ -766,6 +774,8 @@ const viewMode = ref("grid")
 const lastKeyTime = ref(0)
 const barcodeBuffer = ref("")
 const searchInputRef = ref(null)
+// Index into paginatedItems for keyboard navigation; -1 means nothing highlighted
+const highlightedIndex = ref(-1)
 const scannerEnabled = ref(false)
 const autoAddEnabled = ref(false)
 const itemThreshold = ref(50) // Threshold for auto-switching to list view
@@ -899,6 +909,9 @@ watch(
 		if (signature !== lastFilterSignature.value) {
 			currentPage.value = 1
 			lastFilterSignature.value = signature
+			// Drop the keyboard highlight: the index would otherwise point at a
+			// different item once the result set changes.
+			highlightedIndex.value = -1
 		}
 
 		// Only auto-switch if user hasn't manually set a preference
@@ -999,13 +1012,84 @@ onUnmounted(() => {
 })
 
 // Handle keydown for barcode scanner detection
+function moveHighlight(delta) {
+	const count = paginatedItems.value.length
+	if (count === 0) {
+		highlightedIndex.value = -1
+		return
+	}
+
+	// From the search field (-1), ArrowDown enters the list at the top and
+	// ArrowUp wraps to the bottom.
+	let next = highlightedIndex.value + delta
+	if (highlightedIndex.value === -1) {
+		next = delta > 0 ? 0 : count - 1
+	}
+
+	// Stepping above the first item returns focus to typing rather than wrapping,
+	// so the user can keep refining the search without reaching for the mouse.
+	if (next < 0) {
+		highlightedIndex.value = -1
+		return
+	}
+
+	highlightedIndex.value = next >= count ? count - 1 : next
+	scrollHighlightedIntoView()
+}
+
+async function scrollHighlightedIntoView() {
+	await nextTick()
+	const container =
+		viewMode.value === "grid"
+			? gridScrollContainer.value
+			: listScrollContainer.value
+	const el = container?.querySelector("[data-highlighted='true']")
+	if (el) {
+		el.scrollIntoView({ block: "nearest" })
+	}
+}
+
 function handleKeyDown(event) {
 	const currentTime = Date.now()
 	const timeDiff = currentTime - lastKeyTime.value
 
+	if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+		event.preventDefault()
+		moveHighlight(event.key === "ArrowDown" ? 1 : -1)
+		return
+	}
+
+	// A search that matched nothing is a dead end: arrowing down had no list to
+	// enter, so keep Tab on the search field instead of sending focus off into
+	// the page and making the user click back. Shift+Tab still steps away, so
+	// the field is never a keyboard trap.
+	if (event.key === "Tab" && !event.shiftKey && paginatedItems.value.length === 0) {
+		event.preventDefault()
+		highlightedIndex.value = -1
+		event.target?.focus()
+		return
+	}
+
+	if (event.key === "Escape" && highlightedIndex.value !== -1) {
+		event.preventDefault()
+		highlightedIndex.value = -1
+		return
+	}
+
 	// If Enter/newline is pressed, trigger barcode search
 	if (event.key === "Enter") {
 		event.preventDefault()
+
+		// An item is highlighted, so Enter adds that item rather than running a
+		// barcode lookup. Pressing Enter again keeps the highlight, and the cart
+		// increments the quantity of the existing line.
+		if (highlightedIndex.value >= 0) {
+			const item = paginatedItems.value[highlightedIndex.value]
+			if (item) {
+				handleItemClick(item.item_code)
+			}
+			return
+		}
 
 		// Auto-add if Auto-Add mode is enabled (regardless of manual typing vs scanner)
 		if (autoAddEnabled.value) {
@@ -1100,11 +1184,19 @@ function handleItemClick(itemCode) {
 	// - Item templates (has_variants) - variants have their own stock, template shouldn't be checked
 	// Check stock for stock items AND Product Bundles (bundles now have calculated stock)
 	const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
-	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no && qty <= 0 && settingsStore.shouldEnforceStockValidation()) {
-		showError(item.is_bundle 
-			? __('"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.', [item.item_name])
-			: __('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [item.item_name]))
-		return
+	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
+		if (qty < 0) {
+			showError(item.is_bundle
+				? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
+				: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
+			return
+		}
+		if (qty <= 0 && settingsStore.shouldEnforceStockValidation()) {
+			showError(item.is_bundle 
+				? __('"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.', [item.item_name])
+				: __('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [item.item_name]))
+			return
+		}
 	}
 
 	emit("item-selected", item)
@@ -1127,6 +1219,14 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 		const item = await itemStore.searchByBarcode(barcode)
 
 		if (item) {
+			const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
+			if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no && qty < 0) {
+				showError(item.is_bundle
+					? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
+					: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
+				itemStore.clearSearch()
+				return
+			}
 			// Item found by barcode - add to cart immediately with auto-add flag
 			emit("item-selected", item, shouldAutoAdd)
 			itemStore.clearSearch()
@@ -1138,7 +1238,16 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 
 	// Fallback: If only one item matches in filtered results, auto-select it
 	if (filteredItems.value.length === 1) {
-		emit("item-selected", filteredItems.value[0], shouldAutoAdd)
+		const item = filteredItems.value[0]
+		const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
+		if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no && qty < 0) {
+			showError(item.is_bundle
+				? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
+				: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
+			itemStore.clearSearch()
+			return
+		}
+		emit("item-selected", item, shouldAutoAdd)
 		itemStore.clearSearch()
 	} else if (filteredItems.value.length === 0) {
 		showWarning(__('Item Not Found: No item found with barcode: {0}', [barcode]))
@@ -1214,10 +1323,34 @@ function showWarehouseAvailability(item) {
 }
 
 // Expose methods for parent component
+async function focusSearch() {
+	// Wait for the DOM in case the caller just closed a dialog or switched tabs
+	await nextTick()
+	const input = searchInputRef.value || document.getElementById("item-search")
+	if (!input) return
+
+	// A dialog closing right before this (frappe-ui wraps HeadlessUI) restores
+	// focus to whatever opened it once its leave transition finishes, which lands
+	// after our first focus() call. Re-assert until focus sticks for a few
+	// consecutive frames, giving up after a short window so this can never spin.
+	const deadline = 500
+	let stableFrames = 0
+	for (let elapsed = 0; elapsed < deadline; elapsed += 16) {
+		if (document.activeElement === input) {
+			if (++stableFrames >= 3) return
+		} else {
+			stableFrames = 0
+			input.focus()
+		}
+		await new Promise((resolve) => requestAnimationFrame(resolve))
+	}
+}
+
 defineExpose({
 	loadItems: () => itemStore.loadAllItems(props.posProfile),
 	loadItemGroups: () => itemStore.loadItemGroups(),
 	loadMoreItems: () => itemStore.loadMoreItems(),
+	focusSearch,
 })
 
 // Watch for view mode changes and rebind scroll listeners
