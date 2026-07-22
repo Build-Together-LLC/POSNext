@@ -30,6 +30,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 				email: (customer.email_id || "").toLowerCase(),
 				id: (customer.name || "").toLowerCase(),
 				vehicle: (customer.custom_vehicle_no || "").toLowerCase(),
+				address: (customer.address || customer.primary_address || customer.customer_address || "").toLowerCase(),
 				// Pre-compute word starts for super fast word matching
 				nameWords: (customer.customer_name || "").toLowerCase().split(" "),
 			}
@@ -47,6 +48,10 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		}
 
 		if (cached.name.includes(term)) return 180 // Name contains
+
+		// Address checks
+		if (cached.address.startsWith(term)) return 210
+		if (cached.address.includes(term)) return 140
 
 		// Phone checks (very important for POS)
 		if (cached.mobile === term) return 250

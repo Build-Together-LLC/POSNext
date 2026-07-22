@@ -214,18 +214,26 @@ async function loadDrafts() {
 
 function handlePrintDraft(draft) {
 	try {
+		const customerObj = draft.customer
+		const customerName = typeof customerObj === "object"
+			? (customerObj?.customer_name || customerObj?.name || "")
+			: (customerObj || "")
+		const addressDisplay = typeof customerObj === "object"
+			? (customerObj?.address_display || customerObj?.primary_address || customerObj?.address || "")
+			: ""
+
 		const invoiceData = {
 			name: draft.draft_id,
 			company: shiftStore.profileCompany,
-			items: draft.items,
+			items: draft.items || [],
 			payments: [],
 			grand_total: calculateTotal(draft.items),
 			posting_date: draft.created_at,
-			customer_name:
-				draft.customer?.customer_name ||
-				draft.customer?.name ||
-				draft.customer,
+			customer_name: customerName,
+			address_display: addressDisplay,
 			status: "Draft",
+			is_draft: true,
+			docstatus: 0,
 		}
 		printInvoiceCustom(invoiceData)
 	} catch (error) {

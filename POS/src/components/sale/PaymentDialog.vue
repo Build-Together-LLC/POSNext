@@ -1429,6 +1429,7 @@ function printDraftInvoice() {
 				props.customer,
 			status: "Draft",
 			is_draft: true,
+			docstatus: 0,
 		}
 		printInvoiceCustom(invoiceData)
 	} catch (error) {

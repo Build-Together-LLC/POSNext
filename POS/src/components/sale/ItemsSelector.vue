@@ -1185,16 +1185,17 @@ function handleItemClick(itemCode) {
 	// Check stock for stock items AND Product Bundles (bundles now have calculated stock)
 	const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
 	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
-		if (qty < 0) {
+		if (settingsStore.shouldEnforceStockValidation()) {
+			if (qty <= 0) {
+				showError(item.is_bundle 
+					? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+					: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+				return
+			}
+		} else if (qty < 0) {
 			showError(item.is_bundle
 				? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
 				: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
-			return
-		}
-		if (qty <= 0 && settingsStore.shouldEnforceStockValidation()) {
-			showError(item.is_bundle 
-				? __('"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.', [item.item_name])
-				: __('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [item.item_name]))
 			return
 		}
 	}
@@ -1220,12 +1221,22 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 
 		if (item) {
 			const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
-			if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no && qty < 0) {
-				showError(item.is_bundle
-					? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
-					: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
-				itemStore.clearSearch()
-				return
+			if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
+				if (settingsStore.shouldEnforceStockValidation()) {
+					if (qty <= 0) {
+						showError(item.is_bundle 
+							? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+							: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+						itemStore.clearSearch()
+						return
+					}
+				} else if (qty < 0) {
+					showError(item.is_bundle
+						? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
+						: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
+					itemStore.clearSearch()
+					return
+				}
 			}
 			// Item found by barcode - add to cart immediately with auto-add flag
 			emit("item-selected", item, shouldAutoAdd)
@@ -1240,12 +1251,22 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 	if (filteredItems.value.length === 1) {
 		const item = filteredItems.value[0]
 		const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
-		if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no && qty < 0) {
-			showError(item.is_bundle
-				? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
-				: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
-			itemStore.clearSearch()
-			return
+		if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
+			if (settingsStore.shouldEnforceStockValidation()) {
+				if (qty <= 0) {
+					showError(item.is_bundle 
+						? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+						: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+					itemStore.clearSearch()
+					return
+				}
+			} else if (qty < 0) {
+				showError(item.is_bundle
+					? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
+					: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
+				itemStore.clearSearch()
+				return
+			}
 		}
 		emit("item-selected", item, shouldAutoAdd)
 		itemStore.clearSearch()

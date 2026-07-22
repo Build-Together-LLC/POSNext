@@ -468,20 +468,34 @@
 								<div class="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
 									<div class="flex items-center justify-between text-sm">
 										<span class="text-gray-600">{{ isPartiallyPaid ? __('Refundable Amount:') : __('Total Refund:') }}</span>
-										<span class="font-bold text-gray-900">{{ formatCurrency(isPartiallyPaid ? maxRefundableAmount : returnTotal) }}</span>
+										<span class="font-bold text-gray-900">{{ formatCurrency(refundTarget) }}</span>
 									</div>
 									<div class="flex items-center justify-between text-sm mt-1">
 										<span class="text-gray-600">{{ __('Payment Total:') }}</span>
 										<span :class="[
 											'font-bold',
-											Math.abs(totalPaymentAmount - (isPartiallyPaid ? maxRefundableAmount : returnTotal)) < 0.01 ? 'text-green-600' : 'text-red-600'
+											Math.abs(totalPaymentAmount - refundTarget) < 0.01 ? 'text-green-600' : 'text-red-600'
 										]">
 											{{ formatCurrency(totalPaymentAmount) }}
 										</span>
 									</div>
-									<p v-if="Math.abs(totalPaymentAmount - (isPartiallyPaid ? maxRefundableAmount : returnTotal)) >= 0.01" class="mt-2 text-xs text-amber-600 text-start">
+									<p v-if="Math.abs(totalPaymentAmount - refundTarget) >= 0.01" class="mt-2 text-xs text-amber-600 text-start">
 										{{ isPartiallyPaid ? __('⚠️ Payment total must equal refundable amount') : __('⚠️ Payment total must equal refund amount') }}
 									</p>
+									<!-- Round Off toggle -->
+									<div class="flex items-center justify-between mt-3 pt-2.5 border-t border-gray-200">
+										<label class="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-gray-800 hover:text-blue-700 transition-colors">
+											<input
+												type="checkbox"
+												v-model="enableRounding"
+												class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shadow-sm"
+											/>
+											<span>{{ __('Round Off Refund') }}</span>
+										</label>
+										<div v-if="enableRounding && Math.abs(refundRoundingAdjustment) >= 0.01" class="text-xs font-bold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-md">
+											{{ __('Round Off: {0}{1}', [refundRoundingAdjustment > 0 ? '+' : '', formatCurrency(refundRoundingAdjustment)]) }}
+										</div>
+									</div>
 								</div>
 								</div>
 							</div>
@@ -510,6 +524,22 @@
 											<span class="font-medium text-gray-700">-{{ formatCurrency(creditAdjustmentAmount) }}</span>
 										</div>
 									</template>
+									<!-- Subtotal + tax breakdown (shown when tax applies and there is no partial split) -->
+									<template v-if="!showPartialBreakdown && Math.abs(returnTaxTotal) >= 0.01">
+										<div class="flex justify-between items-center text-sm pt-2 border-t border-red-200">
+											<span class="text-gray-600">{{ __('Subtotal:') }}</span>
+											<span class="font-medium text-gray-700">{{ formatCurrency(returnNetTotal) }}</span>
+										</div>
+										<div class="flex justify-between items-center text-sm">
+											<span class="text-gray-600">{{ __('Tax:') }}</span>
+											<span class="font-medium text-gray-700">{{ formatCurrency(returnTaxTotal) }}</span>
+										</div>
+									</template>
+									<!-- Round Off adjustment -->
+									<div v-if="enableRounding && Math.abs(refundRoundingAdjustment) >= 0.01" class="flex justify-between items-center text-sm">
+										<span class="text-gray-600">{{ __('Round Off:') }}</span>
+										<span class="font-medium text-gray-700">{{ refundRoundingAdjustment > 0 ? '+' : '' }}{{ formatCurrency(refundRoundingAdjustment) }}</span>
+									</div>
 									<!-- Final refund amount -->
 									<div class="flex justify-between items-center pt-2 border-t border-red-200">
 										<span class="text-sm sm:text-base font-semibold text-gray-700">{{ __(summaryRefundLabel) }}</span>
@@ -597,6 +627,10 @@ const { showSuccess, showError, showWarning } = useToast()
 const props = defineProps({
 	modelValue: Boolean,
 	posProfile: String,
+	// Current POS Opening Shift — stamped onto the return invoice so it is included
+	// in the Closing Shift reconciliation (returns processed during the shift must
+	// offset sales, otherwise the closing amount will not match actual cash/payments).
+	posOpeningShift: String,
 	currency: {
 		type: String,
 		default: "USD",
@@ -621,6 +655,12 @@ const returnItems = ref([])
 const returnReason = ref("")
 const paymentMethods = ref([])
 const refundPayments = ref([])
+// Round Off: when enabled the refund is rounded to the nearest whole currency unit so it
+// matches the invoice's rounded_total. ERPNext rejects a POS return whose payments exceed
+// the rounded invoice total (validate_pos_return), so a 61.36 refund against a 61.00 rounded
+// invoice fails — rounding keeps them equal. Default ON, mirroring the sale Payment dialog.
+const enableRounding = ref(true)
+const round2 = (val) => Number(Number(val || 0).toFixed(2))
 const invoiceList = ref([])
 const invoiceListFilter = ref("")
 const submitError = ref("")
@@ -760,12 +800,18 @@ const createReturnResource = createResource({
 		const invoiceData = {
 			doctype: "Sales Invoice",
 			pos_profile: props.posProfile,
+			// Attribute the return to the current shift so the Closing Shift totals
+			// account for it (reconciliation would otherwise be short by the refund).
+			posa_pos_opening_shift: props.posOpeningShift,
 			customer: originalInvoice.value.customer,
 			company: originalInvoice.value.company,
 			is_return: 1,
 			return_against: originalInvoice.value.name,
 			is_pos: 1,
 			update_stock: 1,
+			// Round Off: 0 = round the total to whole units (rounded_total applies), 1 = exact.
+			// Keeps the invoice's rounded_total equal to the rounded refund the payments carry.
+			disable_rounded_total: enableRounding.value ? 0 : 1,
 			items: selectedItems.value.map((item) => ({
 				item_code: item.item_code,
 				item_name: item.item_name,
@@ -867,7 +913,8 @@ const selectedItems = computed(() => {
 	)
 })
 
-const returnTotal = computed(() => {
+// Net (tax-exclusive) value of the selected items: sum of rate × return_qty.
+const returnNetTotal = computed(() => {
 	if (!selectedItems.value || !Array.isArray(selectedItems.value)) {
 		return 0
 	}
@@ -875,6 +922,30 @@ const returnTotal = computed(() => {
 		return sum + item.return_qty * item.rate
 	}, 0)
 })
+
+// Ratio of the original invoice's grand total (incl. tax and any additional discount)
+// to its pre-tax item total. The backend applies the POS Profile's tax template to the
+// return, so its grand_total already includes tax — this ratio lets the refund amount and
+// its payment validation match what was actually charged. When "Tax Inclusive" is disabled
+// in POS Settings, tax is added on top so grand_total > total, and this recovers the tax
+// portion that item rate × qty alone would miss. Falls back to 1 (net only) if unavailable.
+const invoiceGrossRatio = computed(() => {
+	const inv = originalInvoice.value
+	if (!inv) return 1
+	const baseTotal = Math.abs(Number(inv.total) || 0) // sum of rate × qty, pre-tax/pre-additional-discount
+	const grandTotal = Math.abs(Number(inv.grand_total) || 0)
+	if (!baseTotal || !grandTotal) return 1
+	return grandTotal / baseTotal
+})
+
+// Tax-inclusive refund value for the selected items — the amount the customer is refunded.
+// For a full return this equals the original invoice's grand total.
+const returnTotal = computed(() => returnNetTotal.value * invoiceGrossRatio.value)
+
+// Tax (and any additional-discount adjustment) portion of the refund — the gap between the
+// net line-item value and the tax-inclusive refund. Shown in the summary so the total reads
+// consistently with the per-item amounts above it.
+const returnTaxTotal = computed(() => returnTotal.value - returnNetTotal.value)
 
 // For partially paid invoices, calculate the proportional refundable amount
 const maxRefundableAmount = computed(() => {
@@ -898,10 +969,29 @@ const creditAdjustmentAmount = computed(() => {
 	return Math.max(0, returnTotal.value - maxRefundableAmount.value)
 })
 
+// Pre-rounding refund target — the full return value, or the refundable portion when the
+// original invoice was only partially paid.
+const refundBaseAmount = computed(() =>
+	isPartiallyPaid.value ? maxRefundableAmount.value : returnTotal.value
+)
+
+// The amount the customer is actually refunded and that the payment rows must sum to.
+// Rounded to whole units when Round Off is on, so it matches the invoice's rounded_total.
+const refundTarget = computed(() =>
+	enableRounding.value
+		? round2(Math.round(refundBaseAmount.value))
+		: round2(refundBaseAmount.value)
+)
+
+// Difference introduced by rounding (shown in the summary, mirrors the sale dialog).
+const refundRoundingAdjustment = computed(() =>
+	enableRounding.value ? round2(refundTarget.value - refundBaseAmount.value) : 0
+)
+
 // Summary display values - shows breakdown for partially paid, simple for others
 const showPartialBreakdown = computed(() => isPartiallyPaid.value && !isOriginalCreditSale.value)
 const summaryRefundLabel = computed(() => showPartialBreakdown.value ? 'Cash Refund:' : 'Refund Amount:')
-const summaryRefundAmount = computed(() => showPartialBreakdown.value ? maxRefundableAmount.value : returnTotal.value)
+const summaryRefundAmount = computed(() => refundTarget.value)
 
 // RTL-aware style for payment select dropdown
 const paymentSelectStyle = computed(() => ({
@@ -935,7 +1025,7 @@ const canCreateReturn = computed(() => {
 			return hasSelectedItems // Allow if no refund needed (all credit adjustment)
 		}
 		const hasValidPayments = refundPayments.value.every(p => p.mode_of_payment && p.amount >= 0)
-		const paymentsMatchRefundable = Math.abs(totalPaymentAmount.value - maxRefundableAmount.value) < 0.01
+		const paymentsMatchRefundable = Math.abs(totalPaymentAmount.value - refundTarget.value) < 0.01
 		return hasSelectedItems && hasValidPayments && paymentsMatchRefundable
 	}
 
@@ -945,7 +1035,7 @@ const canCreateReturn = computed(() => {
 	}
 	const hasValidPayments = refundPayments.value.length > 0 &&
 		refundPayments.value.every(p => p.mode_of_payment && p.amount > 0)
-	const paymentsMatch = Math.abs(totalPaymentAmount.value - returnTotal.value) < 0.01
+	const paymentsMatch = Math.abs(totalPaymentAmount.value - refundTarget.value) < 0.01
 
 	return hasSelectedItems && hasValidPayments && paymentsMatch
 })
@@ -964,8 +1054,9 @@ const filteredInvoiceList = computed(() => {
 	)
 })
 
-// Watch returnTotal to auto-populate payment amount for single payment method
-watch(returnTotal, (newTotal) => {
+// Auto-populate the single payment row with the refund target. Watching refundTarget means
+// this also re-fires when Round Off is toggled, keeping the payment in sync with the summary.
+watch(refundTarget, (target) => {
 	// Only run if return modal is visible and component is active
 	if (!returnModal.visible || !show.value) {
 		return
@@ -981,13 +1072,8 @@ watch(returnTotal, (newTotal) => {
 		Array.isArray(refundPayments.value) &&
 		refundPayments.value.length === 1 &&
 		refundPayments.value[0] &&
-		newTotal > 0) {
-		// For partially paid invoices, set the proportional refundable amount
-		if (isPartiallyPaid.value) {
-			refundPayments.value[0].amount = Number(maxRefundableAmount.value.toFixed(2))
-		} else {
-			refundPayments.value[0].amount = newTotal
-		}
+		target > 0) {
+		refundPayments.value[0].amount = target
 	}
 })
 

@@ -1,6 +1,7 @@
 import { useInvoice } from "@/composables/useInvoice"
 import { usePOSOffersStore } from "@/stores/posOffers"
 import { usePOSSettingsStore } from "@/stores/posSettings"
+import { useStockStore } from "@/stores/stock"
 import { parseError } from "@/utils/errorHandler"
 import {
 	checkStockAvailability,
@@ -44,6 +45,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	const offersStore = usePOSOffersStore()
 	const settingsStore = usePOSSettingsStore()
+	const stockStore = useStockStore()
 
 	// Additional cart state
 	const pendingItem = ref(null)
@@ -76,39 +78,23 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const hasActualQty = item.actual_qty !== undefined || item.stock_qty !== undefined
 		const shouldValidateStock = !isNonStockItem && (item.is_stock_item || item.is_bundle || hasActualQty)
 
-		if (currentProfile && shouldValidateStock && !item.has_serial_no && !item.has_batch_no) {
-			const warehouse = item.warehouse || currentProfile.warehouse
-			const actualQty =
-				item.actual_qty !== undefined ? item.actual_qty : item.stock_qty || 0
+		if (shouldValidateStock && !item.has_serial_no && !item.has_batch_no) {
+			const serverStock = stockStore.server.get(item.item_code)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
+			const reservedQty = stockStore.reserved.get(item.item_code) || 0
+			const availableQty = serverStock - reservedQty
 
-			if (warehouse && actualQty !== undefined && actualQty !== null) {
-				const mathActualQty = Math.floor(actualQty)
-				if (mathActualQty < 0) {
+			if (settingsStore.shouldEnforceStockValidation()) {
+				if (Math.floor(availableQty) <= 0) {
 					const itemType = item.is_bundle ? "Bundle" : "Item"
 					throw new Error(
-						`"${item.item_name}" cannot be added to cart. ${itemType} quantity is negative (${mathActualQty}).`
+						`"${item.item_name}" cannot be added to cart. ${itemType} quantity reaches 0.`
 					)
 				}
-
-				if (!autoAdd && settingsStore.shouldEnforceStockValidation()) {
-					const stockCheck = checkStockAvailability({
-						itemCode: item.item_code,
-						qty: qty,
-						warehouse: warehouse,
-						actualQty: actualQty,
-					})
-
-					if (!stockCheck.available) {
-						const itemType = item.is_bundle ? "Bundle" : "Item"
-						const errorMsg = formatStockError(
-							item.item_name,
-							qty,
-							stockCheck.actualQty,
-							warehouse,
-						)
-
-						throw new Error(errorMsg.replace("Item", itemType))
-					}
+				if (qty > availableQty) {
+					const itemType = item.is_bundle ? "Bundle" : "Item"
+					throw new Error(
+						`Not enough stock for "${item.item_name}". Requested ${qty}, but only ${Math.max(0, Math.floor(availableQty))} available.`
+					)
 				}
 			}
 		}

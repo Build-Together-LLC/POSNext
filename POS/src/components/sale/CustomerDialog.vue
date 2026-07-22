@@ -121,7 +121,7 @@
 						<button
 							v-for="(customer, index) in customers"
 							:key="customer.name"
-							v-memo="[customer.name, index === selectedIndex]"
+							v-memo="[customer.name, customer.address || customer.primary_address || customer.customer_address, index === selectedIndex]"
 							@click="selectCustomer(customer)"
 							:class="[
 								'w-full text-start p-3 rounded-lg border transition-all duration-75',
@@ -134,6 +134,10 @@
 								<div class="flex-1 min-w-0">
 									<div class="font-semibold text-sm text-gray-900 truncate">
 										{{ customer.customer_name }}
+									</div>
+									<div v-if="customer.address || customer.primary_address || customer.customer_address" class="text-xs text-gray-600 mt-0.5 flex items-center gap-1">
+										<span class="flex-shrink-0">📍</span>
+										<span class="truncate">{{ customer.address || customer.primary_address || customer.customer_address }}</span>
 									</div>
 									<div class="text-xs text-gray-600 mt-1 gap-2">
 										<span v-if="customer.mobile_no">📱 {{ customer.mobile_no }}</span>

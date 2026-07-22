@@ -20,8 +20,14 @@ export async function printInvoice(
 			throw new Error("Invalid invoice data")
 		}
 
+		const isDraft =
+			invoiceData.is_draft ||
+			invoiceData.docstatus === 0 ||
+			invoiceData.status === "Draft" ||
+			(invoiceData.name && (invoiceData.name.startsWith("DRAFT") || invoiceData.name === "DRAFT"))
+
 		const doctype = invoiceData.doctype || "Sales Invoice"
-		const format = printFormat || "POS Next Receipt"
+		const format = isDraft ? "POS Next Draft Receipt" : (printFormat || "POS Next Receipt")
 
 		// Build PDF print URL
 		const params = new URLSearchParams({
@@ -79,6 +85,160 @@ export async function printInvoice(
  * @param {number} invoiceData.grand_total - Invoice total amount
  */
 export function printInvoiceCustom(invoiceData) {
+	const isDraft =
+		invoiceData.is_draft ||
+		invoiceData.docstatus === 0 ||
+		invoiceData.status === "Draft" ||
+		(invoiceData.name && (invoiceData.name.startsWith("DRAFT") || invoiceData.name === "DRAFT"))
+
+	if (isDraft) {
+		const printWindow = window.open("", "_blank", "width=800,height=600")
+		if (!printWindow) {
+			log.error("Failed to open print window")
+			return false
+		}
+
+		const customerName = invoiceData.customer_name || invoiceData.customer || ""
+		const addressDisplay = invoiceData.address_display || invoiceData.customer_address || invoiceData.address || ""
+		const customerPhone = invoiceData.phone || invoiceData.contact_phone || invoiceData.mobile_no || ""
+		const customerGstin = invoiceData.tax_id || invoiceData.gstin || ""
+		const invoiceNo = invoiceData.name || "DRAFT"
+		const invoiceDate = invoiceData.posting_date
+			? (invoiceData.posting_date.length > 10 ? invoiceData.posting_date.substring(0, 10) : invoiceData.posting_date)
+			: new Date().toISOString().substring(0, 10)
+
+		const sortedItems = [...(invoiceData.items || [])].sort((a, b) =>
+			(a.item_name || "").localeCompare(b.item_name || "")
+		)
+
+		const groupedItems = {}
+		for (const item of sortedItems) {
+			const brand = item.brand || item.parent_brand || ""
+			if (!groupedItems[brand]) {
+				groupedItems[brand] = []
+			}
+			groupedItems[brand].push(item)
+		}
+
+		let serialCount = 0
+		let itemRowsHtml = ""
+
+		const brandKeys = Object.keys(groupedItems).sort()
+		for (const brand of brandKeys) {
+			const itemsInBrand = groupedItems[brand]
+			itemRowsHtml += `
+			<tr>
+				<td colspan="5" style="text-align:left; font-size:12px;">
+					<b style="padding-left:3%;">${brand}</b>
+				</td>
+			</tr>
+			`
+			for (const item of itemsInBrand) {
+				serialCount++
+				const rawQty = item.quantity !== undefined ? item.quantity : (item.qty !== undefined ? item.qty : 0)
+				const qtyDisplay = rawQty % 1 !== 0 ? rawQty : Math.floor(rawQty)
+				const itemPrice = item.price_list_rate || item.custom_mrp || item.rate || ""
+
+				itemRowsHtml += `
+				<tr>
+					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${serialCount}</td>
+					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${item.item_name || ""}</td>
+					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${item.item_code || ""}</td>
+					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${qtyDisplay}</td>
+					<td style="text-align:left; font-size:12px; border-left:none; border-bottom:none; border-top:none; word-wrap:break-word; overflow-wrap:break-word;">${itemPrice}</td>
+				</tr>
+				`
+			}
+		}
+
+		const printContent = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        .print-format td,
+        .print-format th {
+            padding: 1px !important;
+            color: black !important;
+        }
+
+        table,
+        th,
+        td {
+            margin-top: 2px;
+        }
+
+        .center-text {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div id="header-html" class="visible-pdf">
+    <p></p>
+</div>
+
+<div id="footer-html" class="visible-pdf">
+    <p class="text-center small page-number visible-pdf">
+        Page <span class="page"></span> of
+        <span class="topage"></span>
+    </p>
+</div>
+
+<div style="text-align:center; margin-bottom:5px;">
+    <b style="font-size:16px;">TAX INVOICE</b>
+</div>
+
+<table border="1" cellpadding="4" cellspacing="0" style="font-size:10px; width:100%; word-wrap:break-word; overflow-x:scroll;">
+    <tr style="border:1px solid black;">
+        <td width="65%" style="border:none; vertical-align:top;">
+            <b style="font-size:13px;">${customerName}</b>
+            <p style="font-size:11px; margin:2px 0 0 0;">
+                ${addressDisplay}
+                ${customerPhone ? `Phone: ${customerPhone}<br>` : ""}
+                ${customerGstin ? `GSTIN: ${customerGstin}` : ""}
+            </p>
+        </td>
+        <td width="35%" style="border:none; text-align:right; vertical-align:top;">
+            <b style="font-size:12px;">Invoice No: &nbsp;${invoiceNo}</b>
+            <br>
+            <b style="font-size:12px;">Date : &nbsp;${invoiceDate}</b>
+        </td>
+    </tr>
+</table>
+
+<div class="text-center" style="margin-top:5px; margin-bottom:5px; text-align: center;">
+    <h4 style="margin:0px;">DRAFT</h4>
+</div>
+
+<table border="1" cellpadding="0" cellspacing="0" style="font-size:10px; width:100%; table-layout:fixed; word-wrap:break-word; overflow-wrap:break-word;">
+    <thead>
+        <tr style="border-bottom:1px solid black;">
+            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="10%"><b>SNO.</b></th>
+            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="35%"><b>ITEM NAME</b></th>
+            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="20%"><b>CODE</b></th>
+            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="15%"><b>QTY</b></th>
+            <th style="text-align:left; font-size:12px; border-left:none; border-top:none; word-wrap:break-word; overflow-wrap:break-word;" width="20%"><b>M.R.P</b></th>
+        </tr>
+    </thead>
+    <tbody style="font-size:12px;">
+        ${itemRowsHtml}
+    </tbody>
+</table>
+
+</body>
+</html>`
+
+		printWindow.document.write(printContent)
+		printWindow.document.close()
+		setTimeout(() => {
+			printWindow.focus()
+			printWindow.print()
+		}, 250)
+		return true
+	}
+
 	// Open print window with receipt size dimensions (80mm ≈ 302px at 96 DPI)
 	const printWindow = window.open("", "_blank", "width=350,height=600")
 
@@ -279,15 +439,14 @@ export function printInvoiceCustom(invoiceData) {
 			<div class="receipt">
 				<!-- Header -->
 				<div class="header">
-					${
-						invoiceData.is_draft
-							? `
+					${invoiceData.is_draft
+			? `
 					<div style="color: #ef4444; font-size: 18px; font-weight: 800; margin-bottom: 8px; text-transform: uppercase; text-align: center; border: 2px solid #ef4444; padding: 4px; border-radius: 4px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">
 						${__('DRAFT')}
 					</div>
 					`
-							: ""
-					}
+			: ""
+		}
 					<div class="company-name">${invoiceData.company || "POS Next"}</div>
 					<div style="font-size: 12px;">${__('TAX INVOICE')}</div>
 				</div>
@@ -302,47 +461,45 @@ export function printInvoiceCustom(invoiceData) {
 						<span>${__('Date:')}</span>
 						<span>${new Date(invoiceData.posting_date || Date.now()).toLocaleString()}</span>
 					</div>
-					${
-						invoiceData.customer_name
-							? `
+					${invoiceData.customer_name
+			? `
 					<div>
 						<span>${__('Customer:')}</span>
 						<span>${invoiceData.customer_name}</span>
 					</div>
 					`
-							: ""
-					}
-					${
-						(invoiceData.status === "Partly Paid" || (invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0 && invoiceData.outstanding_amount < invoiceData.grand_total))
-							? `
+			: ""
+		}
+					${(invoiceData.status === "Partly Paid" || (invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0 && invoiceData.outstanding_amount < invoiceData.grand_total))
+			? `
 					<div class="partial-status">
 						<span>${__('Status:')}</span>
 						<span>${__('PARTIAL PAYMENT')}</span>
 					</div>
 					`
-							: ""
-					}
+			: ""
+		}
 				</div>
 
 				<!-- Items -->
 				<div class="items-table">
 					${invoiceData.items
-						.map((item) => {
-							// Determine if item has promotional pricing
-							const hasItemDiscount =
-								(item.discount_percentage &&
-									Number.parseFloat(item.discount_percentage) > 0) ||
-								(item.discount_amount &&
-									Number.parseFloat(item.discount_amount) > 0)
-							const isFree = item.is_free_item
-							const qty = item.quantity || item.qty
+			.map((item) => {
+				// Determine if item has promotional pricing
+				const hasItemDiscount =
+					(item.discount_percentage &&
+						Number.parseFloat(item.discount_percentage) > 0) ||
+					(item.discount_amount &&
+						Number.parseFloat(item.discount_amount) > 0)
+				const isFree = item.is_free_item
+				const qty = item.quantity || item.qty
 
-							// Display original list price for transparency
-							const displayRate = item.price_list_rate || item.rate
-							// Calculate subtotal before any price reductions
-							const subtotal = qty * displayRate
+				// Display original list price for transparency
+				const displayRate = item.price_list_rate || item.rate
+				// Calculate subtotal before any price reductions
+				const subtotal = qty * displayRate
 
-							return `
+				return `
 						<div class="item-row">
 							<div class="item-name">
 								${item.item_name || item.item_code} ${isFree ? __('(FREE)') : ""}
@@ -351,38 +508,35 @@ export function printInvoiceCustom(invoiceData) {
 								<span>${qty} × ${formatCurrency(displayRate)}</span>
 								<span><strong>${formatCurrency(subtotal)}</strong></span>
 							</div>
-							${
-								hasItemDiscount
-									? `
+							${hasItemDiscount
+						? `
 							<div class="item-discount">
 								<span>Discount ${item.discount_percentage ? `(${Number(item.discount_percentage).toFixed(2)}%)` : ""}</span>
 								<span>-${formatCurrency(item.discount_amount || 0)}</span>
 							</div>
 							`
-									: ""
-							}
-							${
-								item.serial_no
-									? `
+						: ""
+					}
+							${item.serial_no
+						? `
 							<div class="item-serials">
 								<div class="item-serials-label">${__('Serial No:')}</div>
 								<div class="item-serials-list">${item.serial_no.replace(/\n/g, ', ')}</div>
 							</div>
 							`
-									: ""
-							}
+						: ""
+					}
 						</div>
 						`
-						})
-						.join("")}
+			})
+			.join("")}
 				</div>
 
 				<!-- Totals -->
 				<div class="totals">
-					${
-						invoiceData.total_taxes_and_charges &&
-						invoiceData.total_taxes_and_charges > 0
-							? `
+					${invoiceData.total_taxes_and_charges &&
+			invoiceData.total_taxes_and_charges > 0
+			? `
 					<div class="total-row">
 						<span>${__('Subtotal:')}</span>
 						<span>${formatCurrency((invoiceData.grand_total || 0) - (invoiceData.total_taxes_and_charges || 0))}</span>
@@ -392,18 +546,17 @@ export function printInvoiceCustom(invoiceData) {
 						<span>${formatCurrency(invoiceData.total_taxes_and_charges)}</span>
 					</div>
 					`
-							: ""
-					}
-					${
-						invoiceData.discount_amount
-							? `
+			: ""
+		}
+					${invoiceData.discount_amount
+			? `
 					<div class="total-row" style="color: #28a745;">
 						<span>Additional Discount${invoiceData.additional_discount_percentage ? ` (${Number(invoiceData.additional_discount_percentage).toFixed(1)}%)` : ""}:</span>
 						<span>-${formatCurrency(Math.abs(invoiceData.discount_amount))}</span>
 					</div>
 					`
-							: ""
-					}
+			: ""
+		}
 					<div class="total-row grand-total">
 						<span>${__('TOTAL:')}</span>
 						<span>${formatCurrency(invoiceData.grand_total)}</span>
@@ -411,49 +564,46 @@ export function printInvoiceCustom(invoiceData) {
 				</div>
 
 				<!-- Payments -->
-				${
-					invoiceData.payments && invoiceData.payments.length > 0
-						? `
+				${invoiceData.payments && invoiceData.payments.length > 0
+			? `
 				<div class="payments">
 					<div style="font-weight: bold; margin-bottom: 5px; font-size: 12px;">Payments:</div>
 					${invoiceData.payments
-						.map(
-							(payment) => `
+				.map(
+					(payment) => `
 						<div class="payment-row">
 							<span>${payment.mode_of_payment}:</span>
 							<span>${formatCurrency(payment.amount)}</span>
 						</div>
 					`,
-						)
-						.join("")}
+				)
+				.join("")}
 					<div class="payment-row total-paid">
 						<span>${__('Total Paid:')}</span>
 						<span>${formatCurrency(invoiceData.paid_amount || 0)}</span>
 					</div>
-					${
-						invoiceData.change_amount && invoiceData.change_amount > 0
-							? `
+					${invoiceData.change_amount && invoiceData.change_amount > 0
+				? `
 					<div class="payment-row" style="font-weight: bold; margin-top: 5px;">
 						<span>${__('Change:')}</span>
 						<span>${formatCurrency(invoiceData.change_amount)}</span>
 					</div>
 					`
-							: ""
-					}
-					${
-						invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0
-							? `
+				: ""
+			}
+					${invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0
+				? `
 					<div class="outstanding-row">
 						<span>${__('BALANCE DUE:')}</span>
 						<span>${formatCurrency(invoiceData.outstanding_amount)}</span>
 					</div>
 					`
-							: ""
-					}
+				: ""
+			}
 				</div>
 				`
-						: ""
-				}
+			: ""
+		}
 
 				<!-- Footer -->
 				<div class="footer">
@@ -477,12 +627,10 @@ export function printInvoiceCustom(invoiceData) {
 	printWindow.document.write(printContent)
 	printWindow.document.close()
 
-	// Auto print after load
-	printWindow.onload = () => {
-		setTimeout(() => {
-			printWindow.print()
-		}, 250)
-	}
+	setTimeout(() => {
+		printWindow.focus()
+		printWindow.print()
+	}, 250)
 }
 
 function formatCurrency(amount) {
@@ -510,8 +658,14 @@ export async function printInvoiceByName(
 			throw new Error("Invoice not found")
 		}
 
+		const isDraft =
+			invoiceDoc.is_draft ||
+			invoiceDoc.docstatus === 0 ||
+			invoiceDoc.status === "Draft" ||
+			(invoiceDoc.name && (invoiceDoc.name.startsWith("DRAFT") || invoiceDoc.name === "DRAFT"))
+
 		// If no print format specified and invoice has a POS Profile, fetch its print settings
-		if (!printFormat && invoiceDoc.pos_profile) {
+		if (!printFormat && invoiceDoc.pos_profile && !isDraft) {
 			try {
 				const posProfileDoc = await call("frappe.client.get", {
 					doctype: "POS Profile",
@@ -526,6 +680,10 @@ export async function printInvoiceByName(
 				log.warn("Could not fetch POS Profile print settings:", error)
 				// Continue with default print format
 			}
+		}
+
+		if (isDraft) {
+			printFormat = "POS Next Draft Receipt"
 		}
 
 		// Print the invoice

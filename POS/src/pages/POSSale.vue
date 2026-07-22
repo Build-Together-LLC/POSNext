@@ -333,6 +333,7 @@
 		<ReturnInvoiceDialog
 			v-model="uiStore.showReturnDialog"
 			:pos-profile="shiftStore.profileName"
+			:pos-opening-shift="shiftStore.currentShift?.name"
 			:currency="shiftStore.profileCurrency"
 			:bad-stock-warehouse="shiftStore.currentProfile?.custom_bad_stock_warehouse || ''"
 			@return-created="handleReturnCreated"
@@ -1358,12 +1359,21 @@ function handleShiftClosed() {
 function handleItemSelected(item, autoAdd = false) {
 	const qty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
 
-	// Check if item quantity in view is negative (< 0) - restrict adding to cart and show validation error
-	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no && qty < 0) {
-		showError(item.is_bundle
-			? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
-			: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
-		return
+	// Check stock availability first (before auto-add or any dialogs)
+	// Skip validation for batch/serial items - they have their own validation in the dialog
+	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
+		if (qty < 0) {
+			showError(item.is_bundle
+				? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
+				: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
+			return
+		}
+		if (qty <= 0 && settingsStore.shouldEnforceStockValidation()) {
+			showError(item.is_bundle
+				? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+				: __('"{0}" cannot be added to cart. Quantity reaches 0.', [item.item_name]))
+			return
+		}
 	}
 
 	// Auto-add mode
@@ -1371,25 +1381,9 @@ function handleItemSelected(item, autoAdd = false) {
 		try {
 			cartStore.addItem(item, 1, true, shiftStore.currentProfile)
 		} catch (error) {
-			uiStore.showError(
-				__("Insufficient Stock"),
-				error.message,
-				__("Item: {0}", [item.item_code]),
-			)
+			showError(error.message)
 		}
 		return
-	}
-
-	// Check stock availability first (before any dialogs)
-	// Skip validation for batch/serial items - they have their own validation in the dialog
-	// Product Bundles have calculated stock based on component availability
-	if (settingsStore.shouldEnforceStockValidation() && (item.is_stock_item || item.is_bundle) && !item.has_serial_no && !item.has_batch_no) {
-		if (qty <= 0) {
-			showError(item.is_bundle
-			 ? __('"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.', [item.item_name])
-			 : __('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [item.item_name]))
-			return
-		}
 	}
 
 	// Check for variants
@@ -1417,11 +1411,7 @@ function handleItemSelected(item, autoAdd = false) {
 	try {
 		cartStore.addItem(item, 1, false, shiftStore.currentProfile)
 	} catch (error) {
-		uiStore.showError(
-			__("Insufficient Stock"),
-			error.message,
-			__("Item: {0}", [item.item_code]),
-		)
+		showError(error.message)
 	}
 }
 
