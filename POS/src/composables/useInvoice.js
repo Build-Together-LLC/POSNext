@@ -726,6 +726,12 @@ export function useInvoice() {
 			const rawPayments = toRaw(payments.value)
 			const rawSalesTeam = toRaw(salesTeam.value)
 
+			const appliedPricingRules = rawItems.map((item) =>
+				Array.isArray(item.pricing_rules)
+					? item.pricing_rules.filter(Boolean)
+					: [],
+			)
+
 			const invoiceData = {
 				doctype: "Sales Invoice",
 				pos_profile: posProfile.value,
@@ -763,6 +769,7 @@ export function useInvoice() {
 				disable_rounded_total: disableRoundedTotal.value !== undefined ? disableRoundedTotal.value : 0,
 				is_pos: 1,
 				update_stock: 1, // Critical: Ensures stock is updated
+				applied_pricing_rules: appliedPricingRules,
 			}
 
 			// Add sales_team if provided
@@ -795,6 +802,10 @@ export function useInvoice() {
 			const submitData = {
 				change_amount:
 					remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
+				// Re-sent for the submit step: the persisted draft does not carry
+				// these (they are not a Sales Invoice field), so submit_invoice
+				// needs them again to record the applied rules on the final invoice.
+				applied_pricing_rules: appliedPricingRules,
 			}
 
 			try {
