@@ -2,6 +2,9 @@ import { createResource } from "frappe-ui"
 import { computed, ref, toRaw } from "vue"
 import { isOffline } from "@/utils/offline"
 import { useSerialNumberStore } from "@/stores/serialNumber"
+import { usePOSSettingsStore } from "@/stores/posSettings"
+import { useStockStore } from "@/stores/stock"
+import { useToast } from "@/composables/useToast"
 
 export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
@@ -290,6 +293,23 @@ export function useInvoice() {
 		}
 
 		if (item) {
+			const settingsStore = usePOSSettingsStore()
+			const stockStore = useStockStore()
+			const isStockItem = item.is_stock_item !== false
+			const newQuantity = Number.parseFloat(quantity) || 1
+
+			if (isStockItem && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
+				const serverStock = stockStore.server.get(itemCode)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
+				const reservedQty = stockStore.reserved.get(itemCode) || 0
+				const availableStock = serverStock - reservedQty
+				const maxAvailable = item.quantity + availableStock
+				if (newQuantity > maxAvailable) {
+					const { showError } = useToast()
+					showError(__('Cannot update quantity for "{0}". Only {1} available in stock.', [item.item_name, Math.max(0, Math.floor(maxAvailable))]))
+					return
+				}
+			}
+
 			// Store old values before update for incremental cache adjustment
 			// Use price_list_rate for subtotal calculations (before discount)
 			const oldPriceListRate = item.price_list_rate || item.rate
@@ -297,8 +317,6 @@ export function useInvoice() {
 			const oldTax = item.tax_amount || 0
 			const oldDiscount = item.discount_amount || 0
 			const oldQuantity = item.quantity
-
-			const newQuantity = Number.parseFloat(quantity) || 1
 
 			// Handle serial number items - adjust serials when quantity changes
 			if (item.has_serial_no && item.serial_no) {

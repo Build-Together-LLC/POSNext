@@ -603,12 +603,14 @@ async function searchCachedCustomers(searchTerm = "", limit = 20) {
 				const mobile = (cust.mobile_no || "").toLowerCase()
 				const id = (cust.name || "").toLowerCase()
 				const vehicle = (cust.custom_vehicle_no || "").toLowerCase()
+				const address = (cust.address || cust.primary_address || cust.customer_address || "").toLowerCase()
 
 				return (
 					name.includes(term) ||
 					mobile.includes(term) ||
 					id.includes(term) ||
-					vehicle.includes(term)
+					vehicle.includes(term) ||
+					address.includes(term)
 				)
 			})
 			.slice(0, limit || allCustomers.length)

@@ -82,6 +82,10 @@
 							<p class="text-xs font-semibold text-gray-900 truncate">
 								{{ customer.customer_name || customer.name }}
 							</p>
+							<p v-if="customer.address || customer.primary_address || customer.customer_address" class="text-[10px] text-gray-500 truncate flex items-center gap-1 mt-0.5">
+								<span class="flex-shrink-0">📍</span>
+								<span class="truncate">{{ customer.address || customer.primary_address || customer.customer_address }}</span>
+							</p>
 							<p class="text-[10px] text-gray-500 truncate flex items-center gap-1.5 mt-0.5">
 								<span v-if="customer.mobile_no">📱 {{ customer.mobile_no }}</span>
 								<span v-if="customer.custom_vehicle_no">🚗 {{ customer.custom_vehicle_no }}</span>
@@ -176,6 +180,10 @@
 								</div>
 								<div class="flex-1 min-w-0">
 									<p class="text-[11px] font-semibold text-gray-900 truncate">{{ cust.customer_name }}</p>
+									<p v-if="cust.address || cust.primary_address || cust.customer_address" class="text-[9.5px] text-gray-500 truncate flex items-center gap-1">
+										<span class="flex-shrink-0">📍</span>
+										<span class="truncate">{{ cust.address || cust.primary_address || cust.customer_address }}</span>
+									</p>
 									<div class="flex items-center gap-1.5">
 										<span v-if="cust.mobile_no" class="text-[9px] text-gray-600">{{ cust.mobile_no }}</span>
 										<span v-if="cust.custom_vehicle_no" class="text-[9px] text-gray-600">{{ cust.custom_vehicle_no }}</span>
@@ -749,6 +757,9 @@
  */
 import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSOffersStore } from "@/stores/posOffers"
+import { usePOSSettingsStore } from "@/stores/posSettings"
+import { useStockStore } from "@/stores/stock"
+import { useToast } from "@/composables/useToast"
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { useFormatters } from "@/composables/useFormatters"
 import { isOffline } from "@/utils/offline"
@@ -765,6 +776,9 @@ import EditItemDialog from "./EditItemDialog.vue"
  */
 const cartStore = usePOSCartStore()      // Pinia store for cart state management
 const offersStore = usePOSOffersStore()  // Pinia store for offers/promotions
+const settingsStore = usePOSSettingsStore()
+const stockStore = useStockStore()
+const { showError } = useToast()
 const { formatQuantity } = useFormatters() // Quantity formatting utilities
 
 /**
@@ -1041,12 +1055,14 @@ const customerResults = computed(() => {
 			const mobile = (cust.mobile_no || "").toLowerCase()
 			const id = (cust.name || "").toLowerCase()
 			const vehicle = (cust.custom_vehicle_no || "").toLowerCase()
+			const address = (cust.address || cust.primary_address || cust.customer_address || "").toLowerCase()
 
 			return (
 				name.includes(searchValue) ||
 				mobile.includes(searchValue) ||
 				id.includes(searchValue) ||
-				vehicle.includes(searchValue)
+				vehicle.includes(searchValue) ||
+				address.includes(searchValue)
 			)
 		})
 		.slice(0, 20)
@@ -1304,7 +1320,23 @@ function getSmartStep(quantity) {
  *
  * @param {Object} item - Cart item to increment
  */
+function getItemAvailableStock(item) {
+	const serverStock = stockStore.server.get(item.item_code)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
+	const reservedQty = stockStore.reserved.get(item.item_code) || 0
+	return serverStock - reservedQty
+}
+
 function incrementQuantity(item) {
+	const isStockItem = item.is_stock_item !== false
+	if (isStockItem && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
+		const availableStock = getItemAvailableStock(item)
+		if (availableStock <= 0) {
+			showError(item.is_bundle
+				? __('"{0}" cannot be incremented. Bundle quantity reaches 0.', [item.item_name])
+				: __('"{0}" cannot be incremented. Quantity reaches 0.', [item.item_name]))
+			return
+		}
+	}
 	const step = getSmartStep(item.quantity)
 	const newQty = Math.round((item.quantity + step) * 10000) / 10000
 	emit("update-quantity", item.item_code, newQty, item.uom)
@@ -1339,6 +1371,18 @@ function updateQuantity(item, value) {
 	const qty = Number.parseFloat(value)
 	// Allow any positive number during typing (don't round yet)
 	if (!isNaN(qty) && qty > 0) {
+		const isStockItem = item.is_stock_item !== false
+		if (isStockItem && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
+			const availableStock = getItemAvailableStock(item)
+			const maxAvailable = item.quantity + (availableStock || 0)
+			if (qty > maxAvailable) {
+				showError(__('Cannot set quantity to {0} for "{1}". Only {2} available in stock.', [qty, item.item_name, Math.max(0, Math.floor(maxAvailable))]))
+				if (maxAvailable > 0) {
+					emit("update-quantity", item.item_code, Math.floor(maxAvailable), item.uom)
+				}
+				return
+			}
+		}
 		emit("update-quantity", item.item_code, qty, item.uom)
 	}
 }

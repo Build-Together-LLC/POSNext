@@ -44,6 +44,11 @@ def get_customers(search_term="", pos_profile=None, limit=20):
         if frappe.get_meta("Customer").has_field("custom_vehicle_no"):
             fields.append("custom_vehicle_no")
 
+        if frappe.get_meta("Customer").has_field("primary_address"):
+            fields.append("primary_address")
+        if frappe.get_meta("Customer").has_field("customer_primary_address"):
+            fields.append("customer_primary_address")
+
         result = frappe.get_all(
             "Customer",
             filters=filters,
@@ -51,6 +56,48 @@ def get_customers(search_term="", pos_profile=None, limit=20):
             limit=customer_limit,
             order_by="customer_name asc",
         )
+
+        # Bulk fetch addresses linked via Dynamic Link (tabAddress)
+        address_map = {}
+        try:
+            addresses = frappe.db.sql(
+                """
+                SELECT 
+                    dl.link_name as customer,
+                    addr.address_line1,
+                    addr.address_line2,
+                    addr.city,
+                    addr.state,
+                    addr.pincode,
+                    addr.country,
+                    addr.is_primary_address
+                FROM `tabDynamic Link` dl
+                JOIN `tabAddress` addr ON dl.parent = addr.name
+                WHERE dl.link_doctype = 'Customer' AND dl.parenttype = 'Address'
+                ORDER BY addr.is_primary_address DESC, addr.creation DESC
+            """,
+                as_dict=True,
+            )
+            for addr in addresses:
+                cust_name = addr.get("customer")
+                if cust_name and cust_name not in address_map:
+                    parts = []
+                    for k in ["address_line1", "address_line2", "city", "state", "pincode"]:
+                        val = addr.get(k)
+                        if val and val.strip() and val.strip().lower() != "unknown":
+                            if not parts or parts[-1].lower() != val.strip().lower():
+                                parts.append(val.strip())
+                    if parts:
+                        address_map[cust_name] = ", ".join(parts)
+        except Exception as addr_err:
+            frappe.logger().error(f"Error fetching addresses: {str(addr_err)}")
+
+        for c in result:
+            addr_str = c.get("primary_address") or address_map.get(c.name) or ""
+            c["customer_address"] = addr_str
+            c["primary_address"] = addr_str
+            c["address"] = addr_str
+
         frappe.logger().debug(f"get_customers returned {len(result)} customers")
         return result
     except Exception as e:

@@ -35,6 +35,12 @@ def get_initial_data():
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Authentication required"), frappe.AuthenticationError)
 
+	try:
+		from pos_next.install import install_fixtures
+		install_fixtures(quiet=True)
+	except Exception:
+		pass
+
 	result = {
 		"success": True,
 		"locale": get_user_language(),

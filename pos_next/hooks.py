@@ -111,7 +111,7 @@ fixtures = [
 				"name",
 				"in",
 				[
-					"POS Next Receipt"
+					"POS Next Receipt" , "POS Next Draft Receipt"
 				]
 			]
 		]
