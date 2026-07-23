@@ -312,6 +312,8 @@ def update_invoice(data):
         pos_profile = data.get("pos_profile")
         doctype = "Sales Invoice"
 
+        applied_pricing_rules = data.pop("applied_pricing_rules", None)
+
         # Ensure the document type is set
         data.setdefault("doctype", doctype)
 
@@ -505,6 +507,12 @@ def update_invoice(data):
                 # Store coupon code on invoice for tracking
                 invoice_doc.coupon_code = coupon_code
 
+        # Stash applied pricing rules so the validate hook can record them on the
+        # invoice's Pricing Rules table (ERPNext resets that table during validate
+        # when ignore_pricing_rule is set, so it must be rebuilt afterwards).
+        if applied_pricing_rules is not None:
+            invoice_doc.flags.pos_applied_pricing_rules = applied_pricing_rules
+
         # Save as draft
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
@@ -553,6 +561,15 @@ def submit_invoice(invoice=None, data=None):
             data = json.loads(data) if data and data != "{}" else {}
         if isinstance(invoice, str):
             invoice = json.loads(invoice)
+
+        # Applied pricing rule names per item (aligned to items order). Re-sent on
+        # the submit step because the persisted draft does not carry it. Recorded
+        # on the invoice's Pricing Rules table by the Sales Invoice validate hook.
+        applied_pricing_rules = data.get("applied_pricing_rules")
+        if applied_pricing_rules is None:
+            applied_pricing_rules = invoice.get("applied_pricing_rules")
+        # Not a Sales Invoice field: strip so invoice_doc.update(invoice) ignores it.
+        invoice.pop("applied_pricing_rules", None)
 
         pos_profile = invoice.get("pos_profile")
         doctype = "Sales Invoice"
@@ -636,6 +653,16 @@ def submit_invoice(invoice=None, data=None):
         # Validate stock availability only if negative stock is not allowed
         if not pos_settings_allow_negative:
             _validate_stock_on_invoice(invoice_doc)
+
+
+        invoice_doc.ignore_pricing_rule = 1
+        invoice_doc.flags.ignore_pricing_rule = True
+
+        # Record which pricing rules the cashier applied. ERPNext resets the
+        # Pricing Rules table on every validate while ignore_pricing_rule is set,
+        # so the validate hook rebuilds it from this flag on both save and submit.
+        if applied_pricing_rules is not None:
+            invoice_doc.flags.pos_applied_pricing_rules = applied_pricing_rules
 
         # Save before submit
         invoice_doc.flags.ignore_permissions = True

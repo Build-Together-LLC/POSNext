@@ -20,6 +20,59 @@ def validate(doc, method=None):
 		method: Hook method name (unused)
 	"""
 	apply_tax_inclusive(doc)
+	record_applied_pricing_rules(doc)
+
+
+def record_applied_pricing_rules(doc):
+	"""Record cashier-applied pricing rules on the invoice's Pricing Rules table.
+
+	POS applies promotional-scheme discounts manually and submits invoices with
+	ignore_pricing_rule=1 (so ERPNext never auto-applies unselected rules). A side
+	effect is that ERPNext resets the Pricing Rules child table on every validate,
+	dropping the link between the discount and the scheme that produced it.
+
+	This runs after the controller's validate (doc_events fire after the class
+	method), so it rebuilds that table from the applied rule names passed through
+	by the POS API (invoices.update_invoice / submit_invoice). The item-level
+	`pricing_rules` field is intentionally left untouched: setting it would make
+	ERPNext strip the discount via remove_pricing_rule_for_item on the next validate.
+
+	Args:
+		doc: Sales Invoice document
+	"""
+	applied = doc.flags.get("pos_applied_pricing_rules")
+	if not applied:
+		return
+
+	# Aligned to items order (same convention the POS uses everywhere).
+	doc.set("pricing_rules", [])
+	seen = set()
+	for idx, item in enumerate(doc.get("items", [])):
+		rule_names = applied[idx] if idx < len(applied) else None
+		if not rule_names:
+			continue
+
+		for rule_name in rule_names:
+			if not rule_name:
+				continue
+
+			key = (item.name, rule_name)
+			if key in seen:
+				continue
+			seen.add(key)
+
+			if not frappe.db.exists("Pricing Rule", rule_name):
+				continue
+
+			doc.append(
+				"pricing_rules",
+				{
+					"pricing_rule": rule_name,
+					"item_code": item.item_code,
+					"child_docname": item.name,
+					"rule_applied": 1,
+				},
+			)
 
 
 def apply_tax_inclusive(doc):

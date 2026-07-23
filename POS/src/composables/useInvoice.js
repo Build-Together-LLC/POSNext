@@ -726,6 +726,12 @@ export function useInvoice() {
 			const rawPayments = toRaw(payments.value)
 			const rawSalesTeam = toRaw(salesTeam.value)
 
+			const appliedPricingRules = rawItems.map((item) =>
+				Array.isArray(item.pricing_rules)
+					? item.pricing_rules.filter(Boolean)
+					: [],
+			)
+
 			const invoiceData = {
 				doctype: "Sales Invoice",
 				pos_profile: posProfile.value,
@@ -735,12 +741,7 @@ export function useInvoice() {
 					item_code: item.item_code,
 					item_name: item.item_name,
 					qty: item.quantity,
-					// IMPORTANT: Rate calculation depends on tax mode and discounts
-					// Tax-inclusive mode: Send gross amount (price after discount, before tax extraction)
-					//   - With discount: price_list_rate - discount_amount
-					//   - Without discount: price_list_rate
-					//   ERPNext will extract net amount based on included_in_print_rate flag
-					// Tax-exclusive mode: Send net amount (after discount, before tax addition)
+
 					rate: taxInclusive.value
 						? ((item.price_list_rate || item.rate) - (item.discount_amount || 0) / (item.quantity || 1))
 						: (item.quantity > 0 ? item.amount / item.quantity : item.rate),
@@ -763,6 +764,7 @@ export function useInvoice() {
 				disable_rounded_total: disableRoundedTotal.value !== undefined ? disableRoundedTotal.value : 0,
 				is_pos: 1,
 				update_stock: 1, // Critical: Ensures stock is updated
+				applied_pricing_rules: appliedPricingRules,
 			}
 
 			// Add sales_team if provided
@@ -795,6 +797,8 @@ export function useInvoice() {
 			const submitData = {
 				change_amount:
 					remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
+
+				applied_pricing_rules: appliedPricingRules,
 			}
 
 			try {
