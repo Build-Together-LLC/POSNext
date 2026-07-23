@@ -654,14 +654,7 @@ def submit_invoice(invoice=None, data=None):
         if not pos_settings_allow_negative:
             _validate_stock_on_invoice(invoice_doc)
 
-        # Disable automatic pricing rules (we handle discounts manually from POS).
-        # This must mirror update_invoice(): the draft/cart step ignores pricing
-        # rules, so the cart shows only discounts the cashier explicitly applied.
-        # Without this, ERPNext re-applies promotional schemes on save()/submit(),
-        # silently changing the total and creating a mismatch between the amount
-        # shown at checkout and the final submitted invoice.
-        # Set AFTER invoice_doc.update(invoice) above, because the frontend payload
-        # carries ignore_pricing_rule = 0 and would otherwise overwrite this.
+
         invoice_doc.ignore_pricing_rule = 1
         invoice_doc.flags.ignore_pricing_rule = True
 
