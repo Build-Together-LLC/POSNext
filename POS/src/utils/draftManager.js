@@ -20,6 +20,43 @@ function sanitizeDraftData(data) {
 	}
 }
 
+export function buildDraftId(invoiceData) {
+	const customer = invoiceData?.customer
+	const customerName =
+		(typeof customer === "object" ? customer?.customer_name || customer?.name : customer) || ""
+
+	const slug = customerName.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5) || "CUST"
+
+	const now = new Date()
+	const pad = (value) => String(value).padStart(2, "0")
+	const date = `${pad(now.getDate())}${pad(now.getMonth() + 1)}`
+	const time = `${pad(now.getHours())}${pad(now.getMinutes())}`
+
+	return `${slug}-${date}-${time}`
+}
+
+function getExistingDraftIds(database) {
+	return new Promise((resolve, reject) => {
+		const transaction = database.transaction([STORE_NAME], "readonly")
+		const request = transaction.objectStore(STORE_NAME).index("draft_id").getAllKeys()
+
+		request.onsuccess = () => resolve(new Set(request.result))
+		request.onerror = () => reject(request.error)
+	})
+}
+
+async function buildUniqueDraftId(database, invoiceData) {
+	const baseId = buildDraftId(invoiceData)
+	const existingIds = await getExistingDraftIds(database)
+
+	if (!existingIds.has(baseId)) return baseId
+
+	let suffix = 2
+	while (existingIds.has(`${baseId}-${suffix}`)) suffix++
+
+	return `${baseId}-${suffix}`
+}
+
 // Initialize IndexedDB
 async function initDB() {
 	if (db) return db
@@ -58,7 +95,7 @@ export async function saveDraft(invoiceData) {
 	const sanitizedInvoiceData = sanitizeDraftData(invoiceData) || {}
 
 	const draft = {
-		draft_id: `DRAFT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+		draft_id: await buildUniqueDraftId(database, sanitizedInvoiceData),
 		...sanitizedInvoiceData,
 		created_at: new Date().toISOString(),
 		updated_at: new Date().toISOString(),
