@@ -133,11 +133,12 @@ export function printInvoiceCustom(invoiceData) {
 		let itemRowsHtml = ""
 
 		const brandKeys = Object.keys(groupedItems).sort()
-		for (const brand of brandKeys) {
+		brandKeys.forEach((brand, brandIndex) => {
 			const itemsInBrand = groupedItems[brand]
+			const brandBorder = brandIndex > 0 ? "border-top:1px solid #ccc;" : ""
 			itemRowsHtml += `
 			<tr>
-				<td colspan="${showRack ? 6 : 5}" style="text-align:left; font-size:12px;">
+				<td colspan="${showRack ? 6 : 5}" style="text-align:left; font-size:14px; ${brandBorder}">
 					<b style="padding-left:3%;">${brand}</b>
 				</td>
 			</tr>
@@ -150,16 +151,16 @@ export function printInvoiceCustom(invoiceData) {
 
 				itemRowsHtml += `
 				<tr>
-					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${serialCount}</td>
-					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${item.item_name || ""}</td>
-					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${item.item_code || ""}</td>
-					${showRack ? `<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${item.custom_rack_identifier || ""}</td>` : ""}
-					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${qtyDisplay}</td>
-					<td style="text-align:left; font-size:12px; border-left:none; border-bottom:none; border-top:none; word-wrap:break-word; overflow-wrap:break-word;">${itemPrice}</td>
+					<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${serialCount}</td>
+					<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${item.item_name || ""}</td>
+					<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${item.item_code || ""}</td>
+					${showRack ? `<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${item.custom_rack_identifier || ""}</td>` : ""}
+					<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${qtyDisplay}</td>
+					<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${itemPrice}</td>
 				</tr>
 				`
 			}
-		}
+		})
 
 		const printContent = `<!DOCTYPE html>
 <html>
@@ -171,12 +172,25 @@ export function printInvoiceCustom(invoiceData) {
         .print-format th {
             padding: 1px !important;
             color: black !important;
+            border: none !important;
         }
 
         table,
         th,
         td {
             margin-top: 2px;
+        }
+
+        .hr-bold {
+            border: 0;
+            border-top: 2px solid black;
+            margin: 4px 0;
+        }
+
+        .hr-light {
+            border: 0;
+            border-top: 1px solid #999;
+            margin: 3px 0;
         }
 
         .center-text {
@@ -197,43 +211,49 @@ export function printInvoiceCustom(invoiceData) {
     </p>
 </div>
 
-<table border="1" cellpadding="4" cellspacing="0" style="font-size:10px; width:100%; word-wrap:break-word; overflow-x:scroll;">
-    <tr style="border:1px solid black;">
-        <td width="65%" style="border:none; vertical-align:top;">
-            <b style="font-size:13px;">${customerName}</b>
-            <p style="font-size:11px; margin:2px 0 0 0;">
+<table border="0" cellpadding="4" cellspacing="0" style="font-size:12px; width:100%; word-wrap:break-word; overflow-x:scroll;">
+    <tr>
+        <td width="65%" style="vertical-align:top;">
+            <b style="font-size:15px;">${customerName}</b>
+            <p style="font-size:13px; margin:2px 0 0 0;">
                 ${addressDisplay}
                 ${customerPhone ? `Phone: ${customerPhone}<br>` : ""}
                 ${customerGstin ? `GSTIN: ${customerGstin}` : ""}
             </p>
         </td>
-        <td width="35%" style="border:none; text-align:right; vertical-align:top;">
-            <b style="font-size:12px;">Invoice No: &nbsp;${invoiceNo}</b>
+        <td width="35%" style="text-align:right; vertical-align:top;">
+            <b style="font-size:14px;">Invoice No: &nbsp;${invoiceNo}</b>
             <br>
-            <b style="font-size:12px;">Date : &nbsp;${invoiceDate}</b>
+            <b style="font-size:14px;">Date : &nbsp;${invoiceDate}</b>
         </td>
     </tr>
 </table>
 
+<hr class="hr-bold">
+
 <div class="text-center" style="margin-top:5px; margin-bottom:5px; text-align: center;">
-    <h4 style="margin:0px;">${draftHeading}</h4>
+    <h4 style="margin:0px; font-size:16px;">${draftHeading}</h4>
 </div>
 
-<table border="1" cellpadding="0" cellspacing="0" style="font-size:10px; width:100%; table-layout:fixed; word-wrap:break-word; overflow-wrap:break-word;">
+<hr class="hr-bold">
+
+<table border="0" cellpadding="0" cellspacing="0" style="font-size:12px; width:100%; table-layout:fixed; word-wrap:break-word; overflow-wrap:break-word;">
     <thead>
-        <tr style="border-bottom:1px solid black;">
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "8%" : "10%"}"><b>SNO.</b></th>
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "32%" : "35%"}"><b>ITEM NAME</b></th>
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "18%" : "20%"}"><b>CODE</b></th>
-            ${showRack ? `<th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="14%"><b>RACK</b></th>` : ""}
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "12%" : "15%"}"><b>QTY</b></th>
-            <th style="text-align:left; font-size:12px; border-left:none; border-top:none; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "16%" : "20%"}"><b>M.R.P</b></th>
+        <tr style="border-bottom:1px solid #999;">
+            <th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "8%" : "10%"}"><b>SNO.</b></th>
+            <th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "32%" : "35%"}"><b>ITEM NAME</b></th>
+            <th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "18%" : "20%"}"><b>CODE</b></th>
+            ${showRack ? `<th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="14%"><b>RACK</b></th>` : ""}
+            <th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "12%" : "15%"}"><b>QTY</b></th>
+            <th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "16%" : "20%"}"><b>M.R.P</b></th>
         </tr>
     </thead>
-    <tbody style="font-size:12px;">
+    <tbody style="font-size:14px;">
         ${itemRowsHtml}
     </tbody>
 </table>
+
+<hr class="hr-bold">
 
 </body>
 </html>`
