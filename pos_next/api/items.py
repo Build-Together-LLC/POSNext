@@ -30,6 +30,22 @@ ITEM_RESULT_FIELDS = [
 
 ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
 
+RACK_FIELD_ALIAS = "custom_rack_identifer"
+RACK_FIELD_CANDIDATES = ("custom_rack_identifer", "custom_rack_identifier")
+
+
+def get_item_rack_field():
+	"""Return the Item rack fieldname if it exists, else None."""
+	try:
+		meta = frappe.get_meta("Item")
+		for fieldname in RACK_FIELD_CANDIDATES:
+			if meta.has_field(fieldname):
+				return fieldname
+	except Exception:
+		pass
+
+	return None
+
 
 def get_stock_availability(item_code, warehouse):
 	"""Return total available quantity for an item in the given warehouse."""
@@ -970,6 +986,8 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 		if item_group:
 			filters["item_group"] = item_group
 
+		rack_field = get_item_rack_field()
+
 		# Build search conditions with fuzzy word-order independent matching
 		if search_term and len(search_term.strip()) > 0:
 			# Split search term into words for fuzzy matching
@@ -1003,8 +1021,12 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 			"""
 			score_params = [search_term, search_term, prefix_pattern, prefix_pattern]
 
+			select_columns = ITEM_RESULT_COLUMNS
+			if rack_field:
+				select_columns += f",\n\t`{rack_field}` as `{RACK_FIELD_ALIAS}`"
+
 			query = f"""
-				SELECT {ITEM_RESULT_COLUMNS}
+				SELECT {select_columns}
 				FROM `tabItem`
 				WHERE {where_clause}
 				ORDER BY {relevance} DESC, item_name ASC
@@ -1016,24 +1038,30 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 			items = frappe.db.sql(query, tuple(params), as_dict=1)
 		else:
 			# No search term - return all items with base filters
+			list_fields = [
+				"name as item_code",
+				"item_name",
+				"description",
+				"stock_uom",
+				"image",
+				"is_stock_item",
+				"has_batch_no",
+				"has_serial_no",
+				"item_group",
+				"brand",
+				"has_variants",
+				"custom_company",
+				"disabled",
+			]
+			if rack_field:
+				list_fields.append(
+					rack_field if rack_field == RACK_FIELD_ALIAS else f"{rack_field} as {RACK_FIELD_ALIAS}"
+				)
+
 			items = frappe.get_list(
 				"Item",
 				filters=filters,
-				fields=[
-					"name as item_code",
-					"item_name",
-					"description",
-					"stock_uom",
-					"image",
-					"is_stock_item",
-					"has_batch_no",
-					"has_serial_no",
-					"item_group",
-					"brand",
-					"has_variants",
-					"custom_company",
-					"disabled",
-				],
+				fields=list_fields,
 				start=start,
 				page_length=limit,
 				order_by="item_name asc",

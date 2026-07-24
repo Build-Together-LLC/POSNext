@@ -512,6 +512,7 @@
 							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[50px] sm:w-[60px]">{{ __('Image') }}</th>
 							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 max-w-[120px] sm:max-w-[180px] md:max-w-[200px]">{{ __('Name') }}</th>
 							<th scope="col" class="hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 sm:max-w-[150px]">{{ __('Code') }}</th>
+							<th v-if="showRackColumn" scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[90px]">{{ __('Rack') }}</th>
 							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]">{{ __('Rate') }}</th>
 							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]">{{ __('Qty') }}</th>
 							<th scope="col" class="hidden md:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 md:w-[80px]">{{ __('UOM') }}</th>
@@ -560,6 +561,21 @@
 							<td class="hidden sm:table-cell px-2 sm:px-3 py-2 whitespace-nowrap sm:max-w-[150px]">
 								<div class="text-xs sm:text-sm font-bold text-gray-900 truncate" :title="item.item_code">{{ item.item_code }}</div>
 							</td>
+							<td v-if="showRackColumn" class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[90px]">
+								<span
+									v-if="item.custom_rack_identifer"
+									:class="[
+										'inline-block px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-md shadow-sm max-w-full truncate',
+										'text-[10px] sm:text-sm font-bold',
+										getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).color,
+										getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).textColor
+									]"
+									:title="item.custom_rack_identifer"
+								>
+									{{ item.custom_rack_identifer }}
+								</span>
+								<span v-else class="text-xs sm:text-sm text-gray-400">—</span>
+							</td>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
 								<div class="text-xs sm:text-sm font-semibold text-blue-600">{{ formatCurrency(item.rate || item.price_list_rate || 0) }}</div>
 							</td>
@@ -592,7 +608,7 @@
 						</tr>
 						<!-- Loading More Indicator Row -->
 						<tr v-if="loadingMore">
-							<td colspan="6" class="px-2 sm:px-3 py-4 text-center bg-white">
+							<td :colspan="listColumnCount" class="px-2 sm:px-3 py-4 text-center bg-white">
 								<div class="flex justify-center items-center">
 									<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
 									<p class="ms-2 text-xs text-gray-500">{{ __('Loading more items...') }}</p>
@@ -602,14 +618,14 @@
 
 						<!-- End of Results Indicator Row - Only show on last page or when all items fit in one page -->
 						<tr v-else-if="!hasMore && filteredItems.length > 0 && !searchTerm && (currentPage === totalPages || totalPages === 1)">
-							<td colspan="6" class="px-2 sm:px-3 py-3 text-center bg-white">
+							<td :colspan="listColumnCount" class="px-2 sm:px-3 py-3 text-center bg-white">
 								<p class="text-xs text-gray-400">{{ __('All items loaded') }}</p>
 							</td>
 						</tr>
 
 						<!-- Search Results Count Row -->
 						<tr v-else-if="searchTerm && filteredItems.length > 0">
-							<td colspan="6" class="px-2 sm:px-3 py-3 text-center bg-white">
+							<td :colspan="listColumnCount" class="px-2 sm:px-3 py-3 text-center bg-white">
 								<p class="text-xs text-gray-500">{{ __('{0} items found', [filteredItems.length]) }}</p>
 							</td>
 						</tr>
@@ -814,6 +830,13 @@ const totalPages = computed(() => {
 	if (!filteredItems.value) return 0
 	return Math.ceil(filteredItems.value.length / itemsPerPage.value)
 })
+
+// Rack column renders only when the Item doctype exposes the rack field
+const showRackColumn = computed(() =>
+	paginatedItems.value.some((item) => item?.custom_rack_identifer !== undefined)
+)
+
+const listColumnCount = computed(() => (showRackColumn.value ? 7 : 6))
 
 const SEARCH_PLACEHOLDERS = Object.freeze({
 	auto: __("Auto-Add ON - Type or scan barcode"),
