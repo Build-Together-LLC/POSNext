@@ -6,6 +6,8 @@ import json
 import time
 from pathlib import Path
 
+import frappe
+
 from pos_next import __version__ as app_version
 
 _BASE_DIR = Path(__file__).resolve().parent
@@ -83,3 +85,27 @@ def get_app_version() -> str:
 		str: Application version
 	"""
 	return app_version
+
+
+def get_item_racks(items) -> dict:
+	"""Map item_code -> rack identifier for print formats. Empty when the field is absent."""
+	from pos_next.api.items import get_item_rack_field
+
+	try:
+		rack_field = get_item_rack_field()
+		if not rack_field:
+			return {}
+
+		codes = {row if isinstance(row, str) else row.get("item_code") for row in items or []}
+		codes.discard(None)
+		if not codes:
+			return {}
+
+		rows = frappe.get_all(
+			"Item",
+			filters={"name": ("in", list(codes))},
+			fields=["name", f"{rack_field} as rack"],
+		)
+		return {row.name: row.rack for row in rows if row.rack}
+	except Exception:
+		return {}

@@ -107,6 +107,13 @@ export function printInvoiceCustom(invoiceData) {
 			? (invoiceData.posting_date.length > 10 ? invoiceData.posting_date.substring(0, 10) : invoiceData.posting_date)
 			: new Date().toISOString().substring(0, 10)
 
+		const savedAt = new Date(invoiceData.posting_date || Date.now())
+		const stamp = Number.isNaN(savedAt.getTime()) ? new Date() : savedAt
+		const pad = (value) => String(value).padStart(2, "0")
+		const draftHeading = ["DRAFT", customerName, `${pad(stamp.getDate())}-${pad(stamp.getMonth() + 1)}-${stamp.getFullYear()} ${pad(stamp.getHours())}:${pad(stamp.getMinutes())}:${pad(stamp.getSeconds())}`]
+			.filter(Boolean)
+			.join(" - ")
+
 		const sortedItems = [...(invoiceData.items || [])].sort((a, b) =>
 			(a.item_name || "").localeCompare(b.item_name || "")
 		)
@@ -120,7 +127,8 @@ export function printInvoiceCustom(invoiceData) {
 			groupedItems[brand].push(item)
 		}
 
-		
+		const showRack = sortedItems.some((item) => item.custom_rack_identifier)
+
 		let serialCount = 0
 		let itemRowsHtml = ""
 
@@ -129,7 +137,7 @@ export function printInvoiceCustom(invoiceData) {
 			const itemsInBrand = groupedItems[brand]
 			itemRowsHtml += `
 			<tr>
-				<td colspan="5" style="text-align:left; font-size:12px;">
+				<td colspan="${showRack ? 6 : 5}" style="text-align:left; font-size:12px;">
 					<b style="padding-left:3%;">${brand}</b>
 				</td>
 			</tr>
@@ -145,6 +153,7 @@ export function printInvoiceCustom(invoiceData) {
 					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${serialCount}</td>
 					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${item.item_name || ""}</td>
 					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${item.item_code || ""}</td>
+					${showRack ? `<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${item.custom_rack_identifier || ""}</td>` : ""}
 					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${qtyDisplay}</td>
 					<td style="text-align:left; font-size:12px; border-left:none; border-bottom:none; border-top:none; word-wrap:break-word; overflow-wrap:break-word;">${itemPrice}</td>
 				</tr>
@@ -156,6 +165,7 @@ export function printInvoiceCustom(invoiceData) {
 <html>
 <head>
     <meta charset="UTF-8">
+    <title>${invoiceNo}</title>
     <style>
         .print-format td,
         .print-format th {
@@ -187,10 +197,6 @@ export function printInvoiceCustom(invoiceData) {
     </p>
 </div>
 
-<div style="text-align:center; margin-bottom:5px;">
-    <b style="font-size:16px;">TAX INVOICE</b>
-</div>
-
 <table border="1" cellpadding="4" cellspacing="0" style="font-size:10px; width:100%; word-wrap:break-word; overflow-x:scroll;">
     <tr style="border:1px solid black;">
         <td width="65%" style="border:none; vertical-align:top;">
@@ -210,17 +216,18 @@ export function printInvoiceCustom(invoiceData) {
 </table>
 
 <div class="text-center" style="margin-top:5px; margin-bottom:5px; text-align: center;">
-    <h4 style="margin:0px;">DRAFT</h4>
+    <h4 style="margin:0px;">${draftHeading}</h4>
 </div>
 
 <table border="1" cellpadding="0" cellspacing="0" style="font-size:10px; width:100%; table-layout:fixed; word-wrap:break-word; overflow-wrap:break-word;">
     <thead>
         <tr style="border-bottom:1px solid black;">
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="10%"><b>SNO.</b></th>
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="35%"><b>ITEM NAME</b></th>
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="20%"><b>CODE</b></th>
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="15%"><b>QTY</b></th>
-            <th style="text-align:left; font-size:12px; border-left:none; border-top:none; word-wrap:break-word; overflow-wrap:break-word;" width="20%"><b>M.R.P</b></th>
+            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "8%" : "10%"}"><b>SNO.</b></th>
+            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "32%" : "35%"}"><b>ITEM NAME</b></th>
+            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "18%" : "20%"}"><b>CODE</b></th>
+            ${showRack ? `<th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="14%"><b>RACK</b></th>` : ""}
+            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "12%" : "15%"}"><b>QTY</b></th>
+            <th style="text-align:left; font-size:12px; border-left:none; border-top:none; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "16%" : "20%"}"><b>M.R.P</b></th>
         </tr>
     </thead>
     <tbody style="font-size:12px;">

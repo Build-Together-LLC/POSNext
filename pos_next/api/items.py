@@ -30,8 +30,8 @@ ITEM_RESULT_FIELDS = [
 
 ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
 
-RACK_FIELD_ALIAS = "custom_rack_identifer"
-RACK_FIELD_CANDIDATES = ("custom_rack_identifer", "custom_rack_identifier")
+RACK_FIELD_ALIAS = "custom_rack_identifier"
+RACK_FIELD_CANDIDATES = ("custom_rack_identifier", "custom_rack_identifer")
 
 
 def get_item_rack_field():

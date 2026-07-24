@@ -683,6 +683,7 @@ import { formatCurrency as formatCurrencyUtil, getCurrencySymbol } from "@/utils
 import { getPaymentIcon } from "@/utils/payment"
 import { offlineWorker } from "@/utils/offline/workerClient"
 import { printInvoiceCustom } from "@/utils/printInvoice"
+import { buildDraftId } from "@/utils/draftManager"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import { useToast } from "@/composables/useToast"
@@ -1414,7 +1415,7 @@ function printDraftInvoice() {
 		const additionalDiscountPercentage = props.subtotal > 0 ? (props.additionalDiscount / props.subtotal) * 100 : 0
 
 		const invoiceData = {
-			name: __('DRAFT'),
+			name: buildDraftId({ customer: props.customer }),
 			company: props.company,
 			items: props.items,
 			payments: [],

@@ -563,16 +563,16 @@
 							</td>
 							<td v-if="showRackColumn" class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[90px]">
 								<span
-									v-if="item.custom_rack_identifer"
+									v-if="item.custom_rack_identifier"
 									:class="[
 										'inline-block px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-md shadow-sm max-w-full truncate',
 										'text-[10px] sm:text-sm font-bold',
 										getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).color,
 										getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).textColor
 									]"
-									:title="item.custom_rack_identifer"
+									:title="item.custom_rack_identifier"
 								>
-									{{ item.custom_rack_identifer }}
+									{{ item.custom_rack_identifier }}
 								</span>
 								<span v-else class="text-xs sm:text-sm text-gray-400">—</span>
 							</td>
@@ -831,9 +831,8 @@ const totalPages = computed(() => {
 	return Math.ceil(filteredItems.value.length / itemsPerPage.value)
 })
 
-// Rack column renders only when the Item doctype exposes the rack field
 const showRackColumn = computed(() =>
-	paginatedItems.value.some((item) => item?.custom_rack_identifer !== undefined)
+	paginatedItems.value.some((item) => item?.custom_rack_identifier !== undefined)
 )
 
 const listColumnCount = computed(() => (showRackColumn.value ? 7 : 6))
