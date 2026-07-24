@@ -1214,6 +1214,48 @@ def search_invoices_for_return(
 
 
 # ==========================================
+def _brand_has_pricing_rule(brand):
+    """Return True if any enabled selling Pricing Rule targets this brand."""
+    if not brand:
+        return False
+    return bool(
+        frappe.db.sql(
+            """
+            SELECT 1
+            FROM `tabPricing Rule Brand` prb
+            INNER JOIN `tabPricing Rule` pr ON pr.name = prb.parent
+            WHERE prb.brand = %s AND pr.disable = 0 AND pr.selling = 1
+            LIMIT 1
+            """,
+            (brand,),
+        )
+    )
+
+
+def _get_item_offer_brand(item_code, parent_brand=None):
+    """Return the brand to use when matching Brand pricing rules / offers.
+
+    Priority mirrors taraknath/overrides/pricing_rule.py: use the item's
+    custom_sub_brand when it has one AND a pricing rule targets that sub-brand;
+    otherwise fall back to the item's brand. So a sub-brand only "wins" when it
+    actually has an offer - if it has none, brand offers still apply.
+    """
+    parent = parent_brand
+    if parent is None and item_code:
+        parent = frappe.get_cached_value("Item", item_code, "brand")
+
+    sub_brand = (
+        frappe.db.get_value("Item", item_code, "custom_sub_brand")
+        if item_code
+        else None
+    )
+
+    if sub_brand and _brand_has_pricing_rule(sub_brand):
+        return sub_brand
+
+    return parent
+
+
 def _check_item_matches_rule(item_doc, rule_name):
     try:
         full_rule = frappe.get_cached_doc("Pricing Rule", rule_name)
@@ -1245,15 +1287,9 @@ def _check_item_matches_rule(item_doc, rule_name):
 
         elif apply_on == "Brand":
             rule_brands = [d.brand for d in (full_rule.get("brands") or []) if d.brand]
-            item_brand = item_doc.get("brand")
-            if not item_brand and item_code:
-                item_brand = frappe.get_cached_value("Item", item_code, "brand")
-            if item_brand and item_brand in rule_brands:
-                return True
-            if item_code:
-                item_sub_brand = frappe.db.get_value("Item", item_code, "custom_sub_brand")
-                if item_sub_brand and item_sub_brand in rule_brands:
-                    return True
+            # Guard: match on custom_sub_brand when present, else the item's brand.
+            match_brand = _get_item_offer_brand(item_code, item_doc.get("brand"))
+            return bool(match_brand and match_brand in rule_brands)
     except Exception:
         pass
     return False
@@ -1334,6 +1370,9 @@ def apply_offers(invoice_data, selected_offers=None):
                         "item_group": (
                             cached.item_group if cached else item.get("item_group")
                         ),
+                        # Pass the item's brand as-is. taraknath's _get_pricing_rules
+                        # override resolves Brand rules against custom_sub_brand first
+                        # and falls back to the brand when the sub-brand has no rule.
                         "brand": (cached.brand if cached else item.get("brand")),
                         "qty": qty,
                         "stock_qty": qty * conversion_factor,

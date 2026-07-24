@@ -215,9 +215,11 @@ export function useInvoice() {
 				batch_no: item.batch_no,
 				serial_no: item.serial_no,
 				item_uoms: item.item_uoms || [], // Available UOMs for this item
-				// Add item_group and brand for offer eligibility checking
+				// Add item_group, brand and sub-brand for offer eligibility checking.
+				// custom_sub_brand takes priority over brand (see posOffers effective brand).
 				item_group: item.item_group,
 				brand: item.brand,
+				custom_sub_brand: item.custom_sub_brand,
 				custom_rack_identifier: item.custom_rack_identifier,
 			}
 			invoiceItems.value.push(newItem)
