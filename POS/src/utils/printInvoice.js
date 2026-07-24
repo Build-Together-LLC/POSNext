@@ -120,6 +120,7 @@ export function printInvoiceCustom(invoiceData) {
 			groupedItems[brand].push(item)
 		}
 
+		
 		let serialCount = 0
 		let itemRowsHtml = ""
 
