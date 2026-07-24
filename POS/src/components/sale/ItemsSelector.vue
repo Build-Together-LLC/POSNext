@@ -1192,7 +1192,7 @@ function handleItemClick(itemCode) {
 					: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
 				return
 			}
-		} else if (qty < 0) {
+		} else if (qty <= 0) {
 			showError(item.is_bundle
 				? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
 				: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
@@ -1230,7 +1230,7 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 						itemStore.clearSearch()
 						return
 					}
-				} else if (qty < 0) {
+				} else if (qty <= 0) {
 					showError(item.is_bundle
 						? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
 						: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
@@ -1260,7 +1260,7 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 					itemStore.clearSearch()
 					return
 				}
-			} else if (qty < 0) {
+			} else if (qty <= 0) {
 				showError(item.is_bundle
 					? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
 					: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))

@@ -1362,7 +1362,7 @@ function handleItemSelected(item, autoAdd = false) {
 	// Check stock availability first (before auto-add or any dialogs)
 	// Skip validation for batch/serial items - they have their own validation in the dialog
 	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
-		if (qty < 0) {
+		if (qty <= 0) {
 			showError(item.is_bundle
 				? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
 				: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
