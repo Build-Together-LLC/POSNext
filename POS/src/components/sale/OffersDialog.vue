@@ -17,6 +17,19 @@
 					<p class="mt-3 text-sm text-gray-500">{{ __('Applying offer...') }}</p>
 				</div>
 
+				<!-- No Customer Selected - offers are customer specific -->
+				<div v-else-if="!customer" class="py-12 text-center">
+					<div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-blue-50">
+						<svg class="h-8 w-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+						</svg>
+					</div>
+					<h3 class="mt-4 text-sm font-medium text-gray-900">{{ __('Select a customer first') }}</h3>
+					<p class="mt-2 text-xs text-gray-500">
+						{{ __('Offers depend on the customer group, so choose a customer to see the offers that apply.') }}
+					</p>
+				</div>
+
 				<!-- Empty State -->
 				<div v-else-if="eligibleOffers.length === 0" class="py-12 text-center">
 					<div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-gray-100">
@@ -243,6 +256,12 @@ const eligibleOffers = computed(() => offersStore.allEligibleOffersSorted)
 
 // Loading state - check if offers are being loaded
 const loading = computed(() => {
+	// With no customer selected, offers are intentionally not fetched. Show the
+	// "select a customer" state instead of a spinner that would never resolve.
+	if (!props.customer) {
+		return false
+	}
+
 	return !offersStore.hasFetched && eligibleOffers.value.length === 0
 })
 

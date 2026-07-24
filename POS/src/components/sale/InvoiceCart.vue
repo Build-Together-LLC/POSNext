@@ -962,6 +962,7 @@ const offersResource = createResource({
 	makeParams() {
 		return {
 			pos_profile: props.posProfile,
+			customer: props.customer?.name || props.customer || "",
 		}
 	},
 	auto: false, // Don't auto-load - check offline status first
@@ -974,10 +975,28 @@ const offersResource = createResource({
 	},
 })
 
-// Load offers only when online (offers not cached for offline use)
-if (!isOffline()) {
-	offersResource.reload()
+/**
+ * Offers are customer-specific: a Pricing Rule can be restricted via
+ * "Applicable For" (Customer / Customer Group / Territory). Until a customer is
+ * selected we cannot know which offers apply, so nothing is shown. Offers are
+ * (re)fetched whenever the selected customer changes so only the rules valid for
+ * that customer's group/territory are listed.
+ */
+function refreshOffers() {
+	const customer = props.customer?.name || props.customer
+
+	// Always drop the previous customer's offers first. Otherwise, while the new
+	// customer's offers are still loading, offers targeted at the previous
+	// customer group would remain eligible and could be auto-applied.
+	offersStore.clearOffers()
+
+	if (customer && props.posProfile && !isOffline()) {
+		offersResource.reload()
+	}
 }
+
+// Load offers only when online (offers not cached for offline use)
+refreshOffers()
 
 /**
  * Gift Cards Resource
@@ -1016,6 +1035,10 @@ watch(
 		} else {
 			availableGiftCards.value = []
 		}
+
+		// Offers depend on the customer's group/territory - refresh them so only
+		// the pricing rules applicable to this customer are shown.
+		refreshOffers()
 	},
 )
 
