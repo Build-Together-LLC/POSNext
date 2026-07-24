@@ -23,6 +23,7 @@ ITEM_RESULT_FIELDS = [
 	"has_serial_no",
 	"item_group",
 	"brand",
+	"custom_sub_brand",
 	"has_variants",
 	"custom_company",
 	"disabled",
@@ -276,10 +277,15 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	res["batch_no_data"] = batch_no_data
 	res["serial_no_data"] = serial_no_data
 
-	# Add item_group and brand for offer eligibility checking
-	item_group, brand = frappe.db.get_value("Item", item_code, ["item_group", "brand"])
+	# Add item_group, brand and sub-brand for offer eligibility checking.
+	# custom_sub_brand takes priority over brand when matching Brand pricing rules
+	# (mirrors taraknath/overrides/pricing_rule.py and _get_item_offer_brand).
+	item_group, brand, custom_sub_brand = frappe.db.get_value(
+		"Item", item_code, ["item_group", "brand", "custom_sub_brand"]
+	)
 	res["item_group"] = item_group
 	res["brand"] = brand
+	res["custom_sub_brand"] = custom_sub_brand
 
 	# Add UOMs data
 	uoms = frappe.get_all(

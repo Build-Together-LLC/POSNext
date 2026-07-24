@@ -7,6 +7,7 @@ const defaultSnapshot = () => ({
 	itemCodes: [],
 	itemGroups: [],
 	brands: [],
+	itemBrandPairs: [],
 })
 
 function getDiscountSortValue(offer) {
@@ -35,6 +36,9 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			? snapshot.itemGroups
 			: []
 		const brands = Array.isArray(snapshot.brands) ? snapshot.brands : []
+		const itemBrandPairs = Array.isArray(snapshot.itemBrandPairs)
+			? snapshot.itemBrandPairs
+			: []
 
 		cartSnapshot.value = {
 			subtotal,
@@ -42,6 +46,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			itemCodes,
 			itemGroups,
 			brands,
+			itemBrandPairs,
 		}
 	}
 
@@ -64,6 +69,45 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	}
 
 	/**
+	 * Set of brands targeted by any available Brand offer. Used to decide whether
+	 * an item's sub-brand actually has an offer.
+	 */
+	const offerBrandSet = computed(() => {
+		const set = new Set()
+		for (const offer of availableOffers.value) {
+			if (offer?.apply_on === "Brand") {
+				for (const brand of offer.eligible_brands || []) {
+					if (brand) set.add(brand)
+				}
+			}
+		}
+		return set
+	})
+
+	/**
+	 * Effective brands of the cart for offer matching. Per item, the sub-brand is
+	 * used when it has an offer (present in offerBrandSet); otherwise the item's
+	 * brand is used. This mirrors taraknath/overrides/pricing_rule.py: sub-brand
+	 * takes priority, but falls back to brand when the sub-brand has no rule.
+	 */
+	const effectiveCartBrands = computed(() => {
+		const pairs = cartSnapshot.value.itemBrandPairs || []
+		const brands = new Set()
+		for (const pair of pairs) {
+			const useSub = pair.subBrand && offerBrandSet.value.has(pair.subBrand)
+			const brand = useSub ? pair.subBrand : pair.brand
+			if (brand) brands.add(brand)
+		}
+		// Fallback for older cart snapshots that only carried `brands`.
+		if (!pairs.length) {
+			for (const brand of cartSnapshot.value.brands || []) {
+				if (brand) brands.add(brand)
+			}
+		}
+		return brands
+	})
+
+	/**
 	 * Checks if an offer is eligible based on current cart state
 	 * @param {Object} offer - The offer to check
 	 * @returns {Object} {eligible: boolean, reason: string|null}
@@ -73,7 +117,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		const itemCount = cartSnapshot.value.itemCount || 0
 		const cartItemCodes = cartSnapshot.value.itemCodes || []
 		const cartItemGroups = cartSnapshot.value.itemGroups || []
-		const cartBrands = cartSnapshot.value.brands || []
+		const cartBrands = effectiveCartBrands.value
 
 		// Check if cart is empty
 		if (itemCount === 0) {
@@ -145,11 +189,11 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 				}
 			}
 		} else if (offer?.apply_on === "Brand") {
-			// Check if cart contains items from any of the eligible brands
+			// Check if cart contains items from any of the eligible (effective) brands
 			const eligibleBrands = offer.eligible_brands || []
 			if (eligibleBrands.length > 0) {
 				const hasEligibleBrand = eligibleBrands.some((brand) =>
-					cartBrands.includes(brand),
+					cartBrands.has(brand),
 				)
 				if (!hasEligibleBrand) {
 					return {
