@@ -143,6 +143,7 @@ def get_pos_settings(pos_profile):
 			{"pos_profile": pos_profile, "enabled": 1},
 			[
 				"name",
+				"enabled",
 				"tax_inclusive",
 				"allow_user_to_edit_additional_discount",
 				"allow_user_to_edit_item_discount",
@@ -173,6 +174,8 @@ def get_pos_settings(pos_profile):
 def get_default_pos_settings():
 	"""Return default POS Settings"""
 	return {
+		# No enabled POS Settings row for this profile: settings-gated validations stay off.
+		"enabled": 0,
 		"tax_inclusive": 0,
 		"allow_user_to_edit_additional_discount": 0,
 		"allow_user_to_edit_item_discount": 1,
