@@ -78,6 +78,11 @@ class Offer:
 	eligible_items: List[str]
 	eligible_item_groups: List[str]
 	eligible_brands: List[str]
+	# Customer targeting (Pricing Rule "Applicable For")
+	applicable_for: Optional[str] = None
+	customer: Optional[str] = None
+	customer_group: Optional[str] = None
+	territory: Optional[str] = None
 
 	def to_dict(self) -> Dict:
 		"""Convert to dictionary for API response"""
@@ -215,6 +220,86 @@ class SlabFetcher:
 
 
 # ============================================================================
+# Customer Targeting Helpers
+# ============================================================================
+
+
+def _get_tree_lineage(doctype: str, value: Optional[str]) -> List[str]:
+	"""Return the ancestor-or-self chain (plus root) for a nested-set record.
+
+	Mirrors ERPNext's pricing rule tree matching (``_get_tree_conditions`` in
+	erpnext/accounts/doctype/pricing_rule/utils.py): a rule set on a parent group
+	also applies to customers belonging to its child groups.
+
+	Args:
+		doctype: Nested-set doctype ("Customer Group" or "Territory")
+		value: The customer's group/territory
+
+	Returns:
+		List of names the rule may be set to and still match this customer.
+	"""
+	if not value:
+		return []
+
+	row = frappe.db.get_value(doctype, value, ["lft", "rgt"])
+	if not row:
+		return []
+
+	lft, rgt = row
+	if lft is None or rgt is None:
+		return []
+
+	names = (
+		frappe.db.sql_list(
+			f"select name from `tab{doctype}` where lft <= %s and rgt >= %s",
+			(lft, rgt),
+		)
+		or []
+	)
+
+	# ERPNext also treats the tree root as matching everything.
+	parent_field = f"parent_{frappe.scrub(doctype)}"
+	root = frappe.db.get_list(
+		doctype,
+		{"is_group": 1, parent_field: ("is", "not set")},
+		"name",
+		as_list=1,
+		ignore_permissions=True,
+	)
+	if root and root[0][0]:
+		names.append(root[0][0])
+
+	return names
+
+
+def _offer_matches_customer(
+	offer: Offer,
+	customer: str,
+	customer_groups: List[str],
+	territories: List[str],
+) -> bool:
+	"""Whether a Pricing Rule's "Applicable For" targeting matches this customer.
+
+	A blank target means "applies to everyone". Otherwise the rule only matches
+	when it targets this customer, one of their customer group's ancestors, or
+	one of their territory's ancestors.
+	"""
+	rule_customer = (offer.customer or "").strip()
+	if rule_customer and rule_customer != customer:
+		return False
+
+	rule_group = (offer.customer_group or "").strip()
+	if rule_group and rule_group not in customer_groups:
+		return False
+
+	rule_territory = (offer.territory or "").strip()
+	if rule_territory and rule_territory not in territories:
+		return False
+
+	return True
+
+
+# ============================================================================
 # Offer Builders
 # ============================================================================
 
@@ -273,7 +358,11 @@ class OfferBuilder:
 			promotional_scheme_id=rule.get("promotional_scheme_id"),
 			eligible_items=eligible_items,
 			eligible_item_groups=eligible_item_groups,
-			eligible_brands=eligible_brands
+			eligible_brands=eligible_brands,
+			applicable_for=rule.get("applicable_for"),
+			customer=rule.get("customer"),
+			customer_group=rule.get("customer_group"),
+			territory=rule.get("territory")
 		)
 
 	@staticmethod
@@ -321,7 +410,11 @@ class OfferBuilder:
 			promotional_scheme_id=None,
 			eligible_items=eligible_items,
 			eligible_item_groups=eligible_item_groups,
-			eligible_brands=eligible_brands
+			eligible_brands=eligible_brands,
+			applicable_for=rule.get("applicable_for"),
+			customer=rule.get("customer"),
+			customer_group=rule.get("customer_group"),
+			territory=rule.get("territory")
 		)
 
 
@@ -330,19 +423,45 @@ class OfferBuilder:
 # ============================================================================
 
 @frappe.whitelist()
-def get_offers(pos_profile: str) -> List[Dict]:
+def get_offers(pos_profile: str, customer: str = None) -> List[Dict]:
 	"""
-	Fetch all auto-applicable offers for the POS profile
+	Fetch offers applicable to the given customer for the POS profile.
+
+	Pricing Rules can be restricted via "Applicable For" (Customer / Customer
+	Group / Territory). Until a customer is selected we cannot know which offers
+	apply, so an empty list is returned rather than showing offers that may not
+	be valid for the customer who is eventually chosen.
 
 	Args:
 		pos_profile: POS Profile name
+		customer: Selected Customer. Required - no customer means no offers.
 
 	Returns:
-		List of offer dictionaries
+		List of offer dictionaries applicable to this customer
 	"""
 	try:
+		if not customer:
+			# No customer selected yet - offers are customer-specific.
+			return []
+
 		profile = frappe.get_doc("POS Profile", pos_profile)
 		date = nowdate()
+
+		# Resolve the customer's group/territory lineage once, so a rule set on a
+		# parent group still matches a customer in one of its child groups.
+		customer_details = (
+			frappe.db.get_value(
+				"Customer",
+				customer,
+				["customer_group", "territory"],
+				as_dict=True,
+			)
+			or {}
+		)
+		customer_groups = _get_tree_lineage(
+			"Customer Group", customer_details.get("customer_group")
+		)
+		territories = _get_tree_lineage("Territory", customer_details.get("territory"))
 
 		offers = []
 
@@ -353,6 +472,13 @@ def get_offers(pos_profile: str) -> List[Dict]:
 		# Get standalone pricing rule offers
 		standalone_offers = _get_standalone_pricing_rule_offers(profile.company, date)
 		offers.extend(standalone_offers)
+
+		# Keep only offers whose "Applicable For" targeting matches this customer
+		offers = [
+			offer
+			for offer in offers
+			if _offer_matches_customer(offer, customer, customer_groups, territories)
+		]
 
 		return [offer.to_dict() for offer in offers]
 
@@ -369,7 +495,8 @@ def _get_promotional_scheme_offers(company: str, date: str) -> List[Offer]:
 		SELECT
 			name, title, apply_on, selling, promotional_scheme,
 			promotional_scheme_id, coupon_code_based,
-			price_or_product_discount, priority, valid_from, valid_upto
+			price_or_product_discount, priority, valid_from, valid_upto,
+			applicable_for, customer, customer_group, territory
 		FROM `tabPricing Rule`
 		WHERE
 			disable = 0
@@ -423,7 +550,8 @@ def _get_standalone_pricing_rule_offers(company: str, date: str) -> List[Offer]:
 			coupon_code_based, price_or_product_discount,
 			rate_or_discount, rate, discount_amount, discount_percentage,
 			min_qty, max_qty, min_amt, max_amt,
-			priority, valid_from, valid_upto
+			priority, valid_from, valid_upto,
+			applicable_for, customer, customer_group, territory
 		FROM `tabPricing Rule`
 		WHERE
 			disable = 0

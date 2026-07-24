@@ -1457,11 +1457,51 @@ def apply_offers(invoice_data, selected_offers=None):
                     "discount_percentage",
                     "discount_amount",
                     "rate",
+                    "applicable_for",
+                    "customer",
+                    "customer_group",
+                    "territory",
                 ],
             )
+
+            # A Pricing Rule can be restricted via "Applicable For"
+            # (Customer / Customer Group / Territory). Drop rules that do not
+            # target this customer, otherwise the selected-offer fallback below
+            # (_check_item_matches_rule) - which only matches on item/brand -
+            # could apply another customer group's discount.
+            allowed_customer_groups = []
+            allowed_territories = []
+            if customer:
+                from pos_next.api.offers import (
+                    _get_tree_lineage,
+                    _offer_matches_customer,
+                )
+
+                customer_details = (
+                    frappe.db.get_value(
+                        "Customer",
+                        customer,
+                        ["customer_group", "territory"],
+                        as_dict=True,
+                    )
+                    or {}
+                )
+                allowed_customer_groups = _get_tree_lineage(
+                    "Customer Group",
+                    customer_group or customer_details.get("customer_group"),
+                )
+                allowed_territories = _get_tree_lineage(
+                    "Territory", territory or customer_details.get("territory")
+                )
+
             for record in rule_records:
-                if not record.coupon_code_based:
-                    rule_map[record.name] = record
+                if record.coupon_code_based:
+                    continue
+                if customer and not _offer_matches_customer(
+                    record, customer, allowed_customer_groups, allowed_territories
+                ):
+                    continue
+                rule_map[record.name] = record
 
         if selected_offer_names:
             # Restrict available rules to the ones explicitly selected from the UI.
