@@ -665,6 +665,52 @@ function formatCurrency(amount) {
 	return Number.parseFloat(amount || 0).toFixed(2)
 }
 
+function isDraftInvoice(invoiceDoc) {
+	return Boolean(
+		invoiceDoc.is_draft ||
+		invoiceDoc.docstatus === 0 ||
+		invoiceDoc.status === "Draft" ||
+		(invoiceDoc.name && (invoiceDoc.name.startsWith("DRAFT") || invoiceDoc.name === "DRAFT")),
+	)
+}
+
+/**
+ * Resolve the print format and letterhead for an invoice.
+ * Drafts use the draft receipt; submitted invoices use the POS Profile's print format.
+ */
+export async function resolvePrintFormat(invoiceDoc, printFormat = null, letterhead = null) {
+	if (isDraftInvoice(invoiceDoc)) {
+		return { printFormat: "POS Next Draft Receipt", letterhead }
+	}
+
+	if (!printFormat && invoiceDoc.pos_profile) {
+		try {
+			const posProfileDoc = await call("frappe.client.get", {
+				doctype: "POS Profile",
+				name: invoiceDoc.pos_profile,
+			})
+
+			if (posProfileDoc) {
+				printFormat = posProfileDoc.print_format
+				letterhead = letterhead || posProfileDoc.letter_head
+			}
+		} catch (error) {
+			log.warn("Could not fetch POS Profile print settings:", error)
+		}
+	}
+
+	return { printFormat, letterhead }
+}
+
+/**
+ * Print an invoice document, resolving the POS Profile print format when none is given.
+ * @param {Object} invoiceDoc - Full invoice document (with items)
+ */
+export async function printInvoiceWithProfileFormat(invoiceDoc, printFormat = null, letterhead = null) {
+	const resolved = await resolvePrintFormat(invoiceDoc, printFormat, letterhead)
+	return await printInvoice(invoiceDoc, resolved.printFormat, resolved.letterhead)
+}
+
 /**
  * Print invoice by name, fetching print format from POS Profile
  * @param {string} invoiceName - The name of the invoice to print
@@ -686,36 +732,7 @@ export async function printInvoiceByName(
 			throw new Error("Invoice not found")
 		}
 
-		const isDraft =
-			invoiceDoc.is_draft ||
-			invoiceDoc.docstatus === 0 ||
-			invoiceDoc.status === "Draft" ||
-			(invoiceDoc.name && (invoiceDoc.name.startsWith("DRAFT") || invoiceDoc.name === "DRAFT"))
-
-		// If no print format specified and invoice has a POS Profile, fetch its print settings
-		if (!printFormat && invoiceDoc.pos_profile && !isDraft) {
-			try {
-				const posProfileDoc = await call("frappe.client.get", {
-					doctype: "POS Profile",
-					name: invoiceDoc.pos_profile,
-				})
-
-				if (posProfileDoc) {
-					printFormat = posProfileDoc.print_format
-					letterhead = letterhead || posProfileDoc.letter_head
-				}
-			} catch (error) {
-				log.warn("Could not fetch POS Profile print settings:", error)
-				// Continue with default print format
-			}
-		}
-
-		if (isDraft) {
-			printFormat = "POS Next Draft Receipt"
-		}
-
-		// Print the invoice
-		return await printInvoice(invoiceDoc, printFormat, letterhead)
+		return await printInvoiceWithProfileFormat(invoiceDoc, printFormat, letterhead)
 	} catch (error) {
 		log.error("Error fetching invoice for print:", error)
 		throw error
