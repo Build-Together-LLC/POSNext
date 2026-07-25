@@ -41,8 +41,7 @@ const CURRENT_SCHEMA = {
 	// Invoice queue for offline submissions
 	invoice_queue: "++id, timestamp, synced",
 
-	// Items cache with searchable fields
-	items: "&item_code, item_name, item_group, *barcodes",
+	items: "&item_code, item_name, item_group, brand, custom_sub_brand, *barcodes",
 
 	// Customers cache
 	customers: "&name, customer_name, mobile_no, email_id, custom_vehicle_no",

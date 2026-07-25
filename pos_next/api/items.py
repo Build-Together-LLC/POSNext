@@ -1043,6 +1043,10 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 			params.extend([limit, start])
 			items = frappe.db.sql(query, tuple(params), as_dict=1)
 		else:
+			items = frappe.get_list(
+				"Item",
+				filters=filters,
+				fields=ITEM_RESULT_FIELDS,
 			# No search term - return all items with base filters
 			list_fields = [
 				"name as item_code",
