@@ -1043,26 +1043,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 			params.extend([limit, start])
 			items = frappe.db.sql(query, tuple(params), as_dict=1)
 		else:
-			items = frappe.get_list(
-				"Item",
-				filters=filters,
-				fields=ITEM_RESULT_FIELDS,
-			# No search term - return all items with base filters
-			list_fields = [
-				"name as item_code",
-				"item_name",
-				"description",
-				"stock_uom",
-				"image",
-				"is_stock_item",
-				"has_batch_no",
-				"has_serial_no",
-				"item_group",
-				"brand",
-				"has_variants",
-				"custom_company",
-				"disabled",
-			]
+			list_fields = list(ITEM_RESULT_FIELDS)
 			if rack_field:
 				list_fields.append(
 					rack_field if rack_field == RACK_FIELD_ALIAS else f"{rack_field} as {RACK_FIELD_ALIAS}"
