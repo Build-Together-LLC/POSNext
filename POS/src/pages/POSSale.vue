@@ -711,7 +711,7 @@ import { session } from "@/data/session"
 import { useUserData } from "@/data/user"
 import { parseError } from "@/utils/errorHandler"
 import { offlineWorker } from "@/utils/offline/workerClient"
-import { printInvoice, printInvoiceByName } from "@/utils/printInvoice"
+import { printInvoiceByName, printInvoiceWithProfileFormat } from "@/utils/printInvoice"
 import { Button, Dialog, createResource } from "frappe-ui"
 import { call } from "@/utils/apiWrapper"
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
@@ -2164,12 +2164,10 @@ function handleViewInvoice(invoice) {
 // Centralized print handler - uses printInvoice.js utilities
 async function handlePrintInvoice(invoiceData) {
 	try {
-		// If invoiceData is a full document with items, use printInvoice directly
+		// Both paths resolve the POS Profile print format for submitted invoices
 		if (invoiceData.items && Array.isArray(invoiceData.items)) {
-			await printInvoice(invoiceData)
+			await printInvoiceWithProfileFormat(invoiceData)
 		} else {
-			// If it's just an invoice object with name, fetch and print
-			// printInvoiceByName will automatically fetch the print format from the invoice's POS Profile
 			await printInvoiceByName(invoiceData.name)
 		}
 	} catch (error) {

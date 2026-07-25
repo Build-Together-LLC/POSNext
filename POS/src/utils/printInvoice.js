@@ -107,6 +107,13 @@ export function printInvoiceCustom(invoiceData) {
 			? (invoiceData.posting_date.length > 10 ? invoiceData.posting_date.substring(0, 10) : invoiceData.posting_date)
 			: new Date().toISOString().substring(0, 10)
 
+		const savedAt = new Date(invoiceData.posting_date || Date.now())
+		const stamp = Number.isNaN(savedAt.getTime()) ? new Date() : savedAt
+		const pad = (value) => String(value).padStart(2, "0")
+		const draftHeading = ["DRAFT", customerName, `${pad(stamp.getDate())}-${pad(stamp.getMonth() + 1)}-${stamp.getFullYear()} ${pad(stamp.getHours())}:${pad(stamp.getMinutes())}:${pad(stamp.getSeconds())}`]
+			.filter(Boolean)
+			.join(" - ")
+
 		const sortedItems = [...(invoiceData.items || [])].sort((a, b) =>
 			(a.item_name || "").localeCompare(b.item_name || "")
 		)
@@ -120,16 +127,18 @@ export function printInvoiceCustom(invoiceData) {
 			groupedItems[brand].push(item)
 		}
 
-		
+		const showRack = sortedItems.some((item) => item.custom_rack_identifier)
+
 		let serialCount = 0
 		let itemRowsHtml = ""
 
 		const brandKeys = Object.keys(groupedItems).sort()
-		for (const brand of brandKeys) {
+		brandKeys.forEach((brand, brandIndex) => {
 			const itemsInBrand = groupedItems[brand]
+			const brandBorder = brandIndex > 0 ? "border-top:1px solid #ccc;" : ""
 			itemRowsHtml += `
 			<tr>
-				<td colspan="5" style="text-align:left; font-size:12px;">
+				<td colspan="${showRack ? 6 : 5}" style="text-align:left; font-size:14px; ${brandBorder}">
 					<b style="padding-left:3%;">${brand}</b>
 				</td>
 			</tr>
@@ -142,31 +151,46 @@ export function printInvoiceCustom(invoiceData) {
 
 				itemRowsHtml += `
 				<tr>
-					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${serialCount}</td>
-					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${item.item_name || ""}</td>
-					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${item.item_code || ""}</td>
-					<td style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;">${qtyDisplay}</td>
-					<td style="text-align:left; font-size:12px; border-left:none; border-bottom:none; border-top:none; word-wrap:break-word; overflow-wrap:break-word;">${itemPrice}</td>
+					<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${serialCount}</td>
+					<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${item.item_name || ""}</td>
+					<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${item.item_code || ""}</td>
+					${showRack ? `<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${item.custom_rack_identifier || ""}</td>` : ""}
+					<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${qtyDisplay}</td>
+					<td style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;">${itemPrice}</td>
 				</tr>
 				`
 			}
-		}
+		})
 
 		const printContent = `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
+    <title>${invoiceNo}</title>
     <style>
         .print-format td,
         .print-format th {
             padding: 1px !important;
             color: black !important;
+            border: none !important;
         }
 
         table,
         th,
         td {
             margin-top: 2px;
+        }
+
+        .hr-bold {
+            border: 0;
+            border-top: 2px solid black;
+            margin: 4px 0;
+        }
+
+        .hr-light {
+            border: 0;
+            border-top: 1px solid #999;
+            margin: 3px 0;
         }
 
         .center-text {
@@ -187,46 +211,49 @@ export function printInvoiceCustom(invoiceData) {
     </p>
 </div>
 
-<div style="text-align:center; margin-bottom:5px;">
-    <b style="font-size:16px;">TAX INVOICE</b>
-</div>
-
-<table border="1" cellpadding="4" cellspacing="0" style="font-size:10px; width:100%; word-wrap:break-word; overflow-x:scroll;">
-    <tr style="border:1px solid black;">
-        <td width="65%" style="border:none; vertical-align:top;">
-            <b style="font-size:13px;">${customerName}</b>
-            <p style="font-size:11px; margin:2px 0 0 0;">
+<table border="0" cellpadding="4" cellspacing="0" style="font-size:12px; width:100%; word-wrap:break-word; overflow-x:scroll;">
+    <tr>
+        <td width="65%" style="vertical-align:top;">
+            <b style="font-size:15px;">${customerName}</b>
+            <p style="font-size:13px; margin:2px 0 0 0;">
                 ${addressDisplay}
                 ${customerPhone ? `Phone: ${customerPhone}<br>` : ""}
                 ${customerGstin ? `GSTIN: ${customerGstin}` : ""}
             </p>
         </td>
-        <td width="35%" style="border:none; text-align:right; vertical-align:top;">
-            <b style="font-size:12px;">Invoice No: &nbsp;${invoiceNo}</b>
+        <td width="35%" style="text-align:right; vertical-align:top;">
+            <b style="font-size:14px;">Invoice No: &nbsp;${invoiceNo}</b>
             <br>
-            <b style="font-size:12px;">Date : &nbsp;${invoiceDate}</b>
+            <b style="font-size:14px;">Date : &nbsp;${invoiceDate}</b>
         </td>
     </tr>
 </table>
 
+<hr class="hr-bold">
+
 <div class="text-center" style="margin-top:5px; margin-bottom:5px; text-align: center;">
-    <h4 style="margin:0px;">DRAFT</h4>
+    <h4 style="margin:0px; font-size:16px;">${draftHeading}</h4>
 </div>
 
-<table border="1" cellpadding="0" cellspacing="0" style="font-size:10px; width:100%; table-layout:fixed; word-wrap:break-word; overflow-wrap:break-word;">
+<hr class="hr-bold">
+
+<table border="0" cellpadding="0" cellspacing="0" style="font-size:12px; width:100%; table-layout:fixed; word-wrap:break-word; overflow-wrap:break-word;">
     <thead>
-        <tr style="border-bottom:1px solid black;">
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="10%"><b>SNO.</b></th>
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="35%"><b>ITEM NAME</b></th>
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="20%"><b>CODE</b></th>
-            <th style="text-align:left; font-size:12px; border:none; word-wrap:break-word; overflow-wrap:break-word;" width="15%"><b>QTY</b></th>
-            <th style="text-align:left; font-size:12px; border-left:none; border-top:none; word-wrap:break-word; overflow-wrap:break-word;" width="20%"><b>M.R.P</b></th>
+        <tr style="border-bottom:1px solid #999;">
+            <th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "8%" : "10%"}"><b>SNO.</b></th>
+            <th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "32%" : "35%"}"><b>ITEM NAME</b></th>
+            <th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "18%" : "20%"}"><b>CODE</b></th>
+            ${showRack ? `<th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="14%"><b>RACK</b></th>` : ""}
+            <th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "12%" : "15%"}"><b>QTY</b></th>
+            <th style="text-align:left; font-size:14px; word-wrap:break-word; overflow-wrap:break-word;" width="${showRack ? "16%" : "20%"}"><b>M.R.P</b></th>
         </tr>
     </thead>
-    <tbody style="font-size:12px;">
+    <tbody style="font-size:14px;">
         ${itemRowsHtml}
     </tbody>
 </table>
+
+<hr class="hr-bold">
 
 </body>
 </html>`
@@ -638,6 +665,52 @@ function formatCurrency(amount) {
 	return Number.parseFloat(amount || 0).toFixed(2)
 }
 
+function isDraftInvoice(invoiceDoc) {
+	return Boolean(
+		invoiceDoc.is_draft ||
+		invoiceDoc.docstatus === 0 ||
+		invoiceDoc.status === "Draft" ||
+		(invoiceDoc.name && (invoiceDoc.name.startsWith("DRAFT") || invoiceDoc.name === "DRAFT")),
+	)
+}
+
+/**
+ * Resolve the print format and letterhead for an invoice.
+ * Drafts use the draft receipt; submitted invoices use the POS Profile's print format.
+ */
+export async function resolvePrintFormat(invoiceDoc, printFormat = null, letterhead = null) {
+	if (isDraftInvoice(invoiceDoc)) {
+		return { printFormat: "POS Next Draft Receipt", letterhead }
+	}
+
+	if (!printFormat && invoiceDoc.pos_profile) {
+		try {
+			const posProfileDoc = await call("frappe.client.get", {
+				doctype: "POS Profile",
+				name: invoiceDoc.pos_profile,
+			})
+
+			if (posProfileDoc) {
+				printFormat = posProfileDoc.print_format
+				letterhead = letterhead || posProfileDoc.letter_head
+			}
+		} catch (error) {
+			log.warn("Could not fetch POS Profile print settings:", error)
+		}
+	}
+
+	return { printFormat, letterhead }
+}
+
+/**
+ * Print an invoice document, resolving the POS Profile print format when none is given.
+ * @param {Object} invoiceDoc - Full invoice document (with items)
+ */
+export async function printInvoiceWithProfileFormat(invoiceDoc, printFormat = null, letterhead = null) {
+	const resolved = await resolvePrintFormat(invoiceDoc, printFormat, letterhead)
+	return await printInvoice(invoiceDoc, resolved.printFormat, resolved.letterhead)
+}
+
 /**
  * Print invoice by name, fetching print format from POS Profile
  * @param {string} invoiceName - The name of the invoice to print
@@ -659,36 +732,7 @@ export async function printInvoiceByName(
 			throw new Error("Invoice not found")
 		}
 
-		const isDraft =
-			invoiceDoc.is_draft ||
-			invoiceDoc.docstatus === 0 ||
-			invoiceDoc.status === "Draft" ||
-			(invoiceDoc.name && (invoiceDoc.name.startsWith("DRAFT") || invoiceDoc.name === "DRAFT"))
-
-		// If no print format specified and invoice has a POS Profile, fetch its print settings
-		if (!printFormat && invoiceDoc.pos_profile && !isDraft) {
-			try {
-				const posProfileDoc = await call("frappe.client.get", {
-					doctype: "POS Profile",
-					name: invoiceDoc.pos_profile,
-				})
-
-				if (posProfileDoc) {
-					printFormat = posProfileDoc.print_format
-					letterhead = letterhead || posProfileDoc.letter_head
-				}
-			} catch (error) {
-				log.warn("Could not fetch POS Profile print settings:", error)
-				// Continue with default print format
-			}
-		}
-
-		if (isDraft) {
-			printFormat = "POS Next Draft Receipt"
-		}
-
-		// Print the invoice
-		return await printInvoice(invoiceDoc, printFormat, letterhead)
+		return await printInvoiceWithProfileFormat(invoiceDoc, printFormat, letterhead)
 	} catch (error) {
 		log.error("Error fetching invoice for print:", error)
 		throw error

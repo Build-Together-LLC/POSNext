@@ -220,6 +220,7 @@ export function useInvoice() {
 				item_group: item.item_group,
 				brand: item.brand,
 				custom_sub_brand: item.custom_sub_brand,
+				custom_rack_identifier: item.custom_rack_identifier,
 			}
 			invoiceItems.value.push(newItem)
 			// Recalculate the newly added item to apply taxes
@@ -743,12 +744,7 @@ export function useInvoice() {
 					item_code: item.item_code,
 					item_name: item.item_name,
 					qty: item.quantity,
-					// IMPORTANT: Rate calculation depends on tax mode and discounts
-					// Tax-inclusive mode: Send gross amount (price after discount, before tax extraction)
-					//   - With discount: price_list_rate - discount_amount
-					//   - Without discount: price_list_rate
-					//   ERPNext will extract net amount based on included_in_print_rate flag
-					// Tax-exclusive mode: Send net amount (after discount, before tax addition)
+
 					rate: taxInclusive.value
 						? ((item.price_list_rate || item.rate) - (item.discount_amount || 0) / (item.quantity || 1))
 						: (item.quantity > 0 ? item.amount / item.quantity : item.rate),
@@ -804,9 +800,7 @@ export function useInvoice() {
 			const submitData = {
 				change_amount:
 					remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
-				// Re-sent for the submit step: the persisted draft does not carry
-				// these (they are not a Sales Invoice field), so submit_invoice
-				// needs them again to record the applied rules on the final invoice.
+
 				applied_pricing_rules: appliedPricingRules,
 			}
 
