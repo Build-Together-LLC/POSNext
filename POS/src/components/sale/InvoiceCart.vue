@@ -995,8 +995,24 @@ function refreshOffers() {
 	}
 }
 
-// Load offers only when online (offers not cached for offline use)
-refreshOffers()
+// Fetch offers whenever the POS profile OR customer becomes available / changes.
+// Using an immediate watcher (instead of a one-shot call during setup) avoids a
+// mount-time race: if posProfile/customer isn't ready on first render, the fetch
+// used to be skipped with nothing to retrigger it, so offers only appeared after
+// a full page reload / cache clear. The watcher re-runs as soon as a prop lands.
+watch(
+	() => [props.posProfile, props.customer?.name || props.customer],
+	() => refreshOffers(),
+	{ immediate: true },
+)
+
+// Re-fetch when connectivity is restored - a transient offline state at load
+// would otherwise skip the fetch with no retry.
+function handleBackOnline() {
+	refreshOffers()
+}
+onMounted(() => window.addEventListener("online", handleBackOnline))
+onBeforeUnmount(() => window.removeEventListener("online", handleBackOnline))
 
 /**
  * Gift Cards Resource
@@ -1035,10 +1051,8 @@ watch(
 		} else {
 			availableGiftCards.value = []
 		}
-
-		// Offers depend on the customer's group/territory - refresh them so only
-		// the pricing rules applicable to this customer are shown.
-		refreshOffers()
+		// Offer (re)fetching on customer change is handled by the combined
+		// posProfile/customer watcher above.
 	},
 )
 
