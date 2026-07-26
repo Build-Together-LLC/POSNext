@@ -388,6 +388,28 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
+	/**
+	 * Clears per-item pricing-rule discounts (discount_percentage / discount_amount
+	 * / pricing_rules) and recalculates. Manual offer removal must call this — the
+	 * offers list and global discount are not the only place a discount lives; the
+	 * pricing rule sets it on each line, and clearing the offer alone leaves that
+	 * line discount visible (the reported "offer removed but still applied" bug).
+	 */
+	function resetPricingRuleDiscounts() {
+		let changed = false
+		invoiceItems.value.forEach((item) => {
+			if (item.pricing_rules && item.pricing_rules.length > 0) {
+				item.discount_percentage = 0
+				item.discount_amount = 0
+				item.pricing_rules = []
+				recalculateItem(item)
+				changed = true
+			}
+		})
+		if (changed) rebuildIncrementalCache()
+		return changed
+	}
+
 	async function removeOffer(
 		offer,
 		currentProfile = null,
@@ -401,6 +423,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			suppressOfferReapply.value = true
 			appliedOffers.value = []
 			processFreeItems([]) // Remove all free items
+			resetPricingRuleDiscounts() // also clear per-item pricing-rule discounts
 			removeDiscount()
 			showSuccess(__("Offer has been removed from cart"))
 			offersDialogRef?.resetApplyingState()
@@ -416,6 +439,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			suppressOfferReapply.value = true
 			appliedOffers.value = []
 			processFreeItems([]) // Remove all free items
+			resetPricingRuleDiscounts() // also clear per-item pricing-rule discounts
 			removeDiscount()
 			showSuccess(__("Offer has been removed from cart"))
 			offersDialogRef?.resetApplyingState()
@@ -423,6 +447,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 
 		try {
+			// Clear all pricing-rule discounts first so the removed offer's line is
+			// reset; applyServerDiscounts then re-applies only the remaining offers.
+			resetPricingRuleDiscounts()
+
 			const invoiceData = buildInvoiceDataForOffers(currentProfile)
 
 			const response = await applyOffersResource.submit({
@@ -515,15 +543,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					processFreeItems([])
 
 					// Reset all item rates to original (remove discounts)
-					invoiceItems.value.forEach(item => {
-						if (item.pricing_rules && item.pricing_rules.length > 0) {
-							item.discount_percentage = 0
-							item.discount_amount = 0
-							item.pricing_rules = []
-							recalculateItem(item)
-						}
-					})
-					rebuildIncrementalCache()
+					resetPricingRuleDiscounts()
 				} else {
 					// Reapply only valid offers
 					const invoiceData = buildInvoiceDataForOffers(currentProfile)
@@ -566,6 +586,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			brand: item.brand,
 			subBrand: item.custom_sub_brand,
 		}))
+		// Per-line detail so an offer's qty/amount thresholds can be scoped to just
+		// the items it targets (1-to-1), rather than the whole cart.
+		const lines = items.map(item => ({
+			itemCode: item.item_code,
+			itemGroup: item.item_group,
+			brand: item.brand,
+			subBrand: item.custom_sub_brand,
+			qty: item.quantity || 0,
+			amount: (item.quantity || 0) * (item.rate ?? item.price_list_rate ?? 0),
+		}))
 
 		return {
 			subtotal: subtotal.value,
@@ -574,6 +604,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			itemGroups: [...new Set(itemGroups)],
 			brands: [...new Set(brands)],
 			itemBrandPairs,
+			lines,
 		}
 	}
 
@@ -704,6 +735,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	let cachedItemGroups = []
 	let cachedBrands = []
 	let cachedItemBrandPairs = []
+	let cachedLines = []
 
 	function syncOfferSnapshot() {
 		// Only sync if values are initialized
@@ -739,6 +771,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				return sum + (item.quantity || 0)
 			}, 0)
 
+			// Per-line detail is recomputed every sync (not cached on the item-code
+			// hash) because qty/amount change even when the set of items does not.
+			cachedLines = invoiceItems.value.map((item) => ({
+				itemCode: item.item_code,
+				itemGroup: item.item_group,
+				brand: item.brand,
+				subBrand: item.custom_sub_brand,
+				qty: item.quantity || 0,
+				amount: (item.quantity || 0) * (item.rate ?? item.price_list_rate ?? 0),
+			}))
+
 			offersStore.updateCartSnapshot({
 				subtotal: subtotal.value,
 				itemCount: totalQty, // Total quantity, not number of line items
@@ -746,6 +789,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				itemGroups: cachedItemGroups,
 				brands: cachedBrands,
 				itemBrandPairs: cachedItemBrandPairs,
+				lines: cachedLines,
 			})
 		}
 	}
