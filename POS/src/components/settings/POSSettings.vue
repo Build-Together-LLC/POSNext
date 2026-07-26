@@ -321,6 +321,11 @@
 												:label="__('Disable Rounded Total')"
 												:description="__('Show exact totals without rounding')"
 											/>
+											<CheckboxField
+												v-model="settings.auto_apply_offers"
+												:label="__('Auto Apply Offers')"
+												:description="__('Automatically apply eligible promotional offers as soon as an item is added to the cart')"
+											/>
 										</div>
 									</div>
 
@@ -434,6 +439,7 @@ const settings = ref({
 	silent_print: 0,
 	allow_negative_stock: 0,
 	tax_inclusive: 0,
+	auto_apply_offers: 0,
 })
 
 // Stock Sync Settings (localStorage persisted)
