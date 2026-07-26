@@ -769,6 +769,59 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
+def render_draft_receipt(invoice_data):
+	"""Render the draft receipt print format from cart data without saving an invoice.
+
+	Builds a transient Sales Invoice so taxes/GST/totals are computed by ERPNext,
+	then renders the "POS Next Draft Receipt" print format against it.
+	"""
+	data = json.loads(invoice_data) if isinstance(invoice_data, str) else invoice_data
+
+	si = frappe.new_doc("Sales Invoice")
+	si.is_pos = 1
+
+	pos_profile = data.get("pos_profile")
+	pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile) if pos_profile else None
+	if pos_profile_doc:
+		si.pos_profile = pos_profile
+		si.company = data.get("company") or pos_profile_doc.company
+		si.selling_price_list = pos_profile_doc.selling_price_list
+		si.currency = pos_profile_doc.currency
+	elif data.get("company"):
+		si.company = data.get("company")
+
+	customer = data.get("customer")
+	si.customer = customer if (customer and frappe.db.exists("Customer", customer)) else (
+		pos_profile_doc.customer if pos_profile_doc else None
+	)
+
+	warehouse = pos_profile_doc.warehouse if pos_profile_doc else None
+	for row in data.get("items") or []:
+		si.append("items", {
+			"item_code": row.get("item_code"),
+			"qty": flt(row.get("qty") or row.get("quantity") or 0),
+			"rate": flt(row.get("rate")),
+			"price_list_rate": flt(row.get("price_list_rate") or row.get("rate")),
+			"uom": row.get("uom"),
+			"warehouse": row.get("warehouse") or warehouse,
+			"discount_amount": flt(row.get("discount_amount") or 0),
+			"discount_percentage": flt(row.get("discount_percentage") or 0),
+		})
+
+	si.set_missing_values()
+	si.calculate_taxes_and_totals()
+	try:
+		si.set_total_in_words()
+	except Exception:
+		pass
+
+	if data.get("name"):
+		si.name = data.get("name")
+
+	return frappe.get_print(doc=si, print_format="POS Next Draft Receipt", no_letterhead=1)
+
+
+@frappe.whitelist()
 def get_invoices(pos_profile, limit=100):
 	"""
 	Get list of invoices for a POS Profile.

@@ -682,7 +682,7 @@ import { usePOSSettingsStore } from "@/stores/posSettings"
 import { formatCurrency as formatCurrencyUtil, getCurrencySymbol } from "@/utils/currency"
 import { getPaymentIcon } from "@/utils/payment"
 import { offlineWorker } from "@/utils/offline/workerClient"
-import { printInvoiceCustom } from "@/utils/printInvoice"
+import { printDraftReceipt } from "@/utils/printInvoice"
 import { buildDraftId } from "@/utils/draftManager"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
@@ -1417,6 +1417,8 @@ function printDraftInvoice() {
 		const invoiceData = {
 			name: buildDraftId({ customer: props.customer }),
 			company: props.company,
+			pos_profile: props.posProfile,
+			customer: props.customer,
 			items: props.items,
 			payments: [],
 			grand_total: props.grandTotal,
@@ -1432,7 +1434,7 @@ function printDraftInvoice() {
 			is_draft: true,
 			docstatus: 0,
 		}
-		printInvoiceCustom(invoiceData)
+		printDraftReceipt(invoiceData)
 	} catch (error) {
 		console.error("Error printing draft invoice:", error)
 		showWarning(__("Failed to print draft invoice"))
