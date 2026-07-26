@@ -54,6 +54,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const appliedCoupon = ref(null)
 	const selectionMode = ref("uom") // 'uom' or 'variant'
 	const suppressOfferReapply = ref(false)
+	const autoApplyInProgress = ref(false)
+	const dismissedOfferCodes = ref(new Set())
 	const currentDraftId = ref(null)
 
 	// Toast composable
@@ -108,6 +110,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		customer.value = null
 		appliedOffers.value = []
 		appliedCoupon.value = null
+		dismissedOfferCodes.value = new Set()
 		currentDraftId.value = null
 	}
 
@@ -308,6 +311,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return false
 		}
 
+		dismissedOfferCodes.value.delete(offerCode)
+
 		try {
 			const invoiceData = buildInvoiceDataForOffers(currentProfile)
 			const offerNames = [...new Set([...existingCodes, offerCode])]
@@ -388,6 +393,63 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
+	async function autoApplyEligibleOffers(currentProfile) {
+		if (!posProfile.value || invoiceItems.value.length === 0) return
+
+		const existingCodes = getAppliedOfferCodes()
+		const eligible = offersStore.autoEligibleOffers
+		const newOffers = eligible.filter(
+			(offer) =>
+				!existingCodes.includes(offer.name) &&
+				!dismissedOfferCodes.value.has(offer.name),
+		)
+		if (newOffers.length === 0) return
+
+		const selectedCodes = [...new Set([...existingCodes, ...newOffers.map((o) => o.name)])]
+
+		try {
+			const invoiceData = buildInvoiceDataForOffers(currentProfile)
+			const response = await applyOffersResource.submit({
+				invoice_data: invoiceData,
+				selected_offers: selectedCodes,
+			})
+
+			const { items: responseItems, freeItems, appliedRules } =
+				parseOfferResponse(response, existingCodes)
+
+			suppressOfferReapply.value = true
+			applyServerDiscounts(responseItems)
+			processFreeItems(freeItems)
+			filterActiveOffers(appliedRules)
+
+			for (const offer of newOffers) {
+				if (!appliedRules.includes(offer.name)) continue
+
+				const offerRuleCodes = appliedRules.filter((ruleName) => ruleName === offer.name)
+				const updatedEntries = appliedOffers.value.filter(
+					(entry) => entry.code !== offer.name,
+				)
+				updatedEntries.push({
+					name: offer.title || offer.name,
+					code: offer.name,
+					offer,
+					source: "auto",
+					applied: true,
+					rules: offerRuleCodes.length ? offerRuleCodes : [offer.name],
+					min_qty: offer.min_qty,
+					max_qty: offer.max_qty,
+					min_amt: offer.min_amt,
+					max_amt: offer.max_amt,
+				})
+				appliedOffers.value = updatedEntries
+
+				showSuccess(__('{0} applied successfully', [(offer.title || offer.name)]))
+			}
+		} catch (error) {
+			console.error("Error auto-applying offers:", error)
+		}
+	}
+
 	/**
 	 * Clears per-item pricing-rule discounts (discount_percentage / discount_amount
 	 * / pricing_rules) and recalculates. Manual offer removal must call this — the
@@ -420,6 +482,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		if (!offerCode) {
 			// Remove all offers
+			for (const entry of appliedOffers.value) {
+				if (entry.code) dismissedOfferCodes.value.add(entry.code)
+			}
 			suppressOfferReapply.value = true
 			appliedOffers.value = []
 			processFreeItems([]) // Remove all free items
@@ -429,6 +494,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			offersDialogRef?.resetApplyingState()
 			return true
 		}
+
+		dismissedOfferCodes.value.add(offerCode)
 
 		const remainingOffers = appliedOffers.value.filter(
 			(entry) => entry.code !== offerCode,
@@ -805,12 +872,49 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// Defer to next tick to prevent blocking UI
 			await nextTick()
 
-			// Update offer snapshot for eligibility checking
 			syncOfferSnapshot()
 
-			// Validate applied offers - remove any that no longer meet requirements
-			if (appliedOffers.value.length > 0 && posProfile.value) {
-				// Get current profile from posProfile
+			if (!posProfile.value) return
+
+			const currentProfile = {
+				customer: customer.value?.name || customer.value,
+				company: posProfile.value.company,
+				selling_price_list: posProfile.value.selling_price_list,
+				currency: posProfile.value.currency,
+			}
+
+			if (appliedOffers.value.length > 0) {
+				await reapplyOffer(currentProfile)
+			}
+
+			if (settingsStore.autoApplyOffers && !autoApplyInProgress.value) {
+				autoApplyInProgress.value = true
+				try {
+					await autoApplyEligibleOffers(currentProfile)
+				} finally {
+					autoApplyInProgress.value = false
+				}
+			}
+		},
+		{ immediate: true, flush: "post" },
+	)
+
+	watch(
+		() => customer.value?.name || customer.value,
+		() => {
+			dismissedOfferCodes.value = new Set()
+		},
+	)
+
+	watch(
+		() => offersStore.availableOffers,
+		async () => {
+			if (!settingsStore.autoApplyOffers) return
+			if (!posProfile.value || invoiceItems.value.length === 0) return
+			if (autoApplyInProgress.value) return
+
+			autoApplyInProgress.value = true
+			try {
 				const currentProfile = {
 					customer: customer.value?.name || customer.value,
 					company: posProfile.value.company,
@@ -818,11 +922,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					currency: posProfile.value.currency,
 				}
 
-				// Validate and auto-remove invalid offers
-				await reapplyOffer(currentProfile)
+				suppressOfferReapply.value = true
+				appliedOffers.value = []
+				resetPricingRuleDiscounts()
+				processFreeItems([])
+
+				await autoApplyEligibleOffers(currentProfile)
+			} finally {
+				autoApplyInProgress.value = false
 			}
 		},
-		{ immediate: true, flush: "post" },
 	)
 
 	return {

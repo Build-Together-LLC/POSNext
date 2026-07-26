@@ -41,6 +41,7 @@
   "allow_customer_purchase_order",
   "allow_duplicate_customer_names",
   "fetch_coupon",
+  "auto_apply_offers",
   "section_break_printing",
   "allow_print_last_invoice",
   "silent_print",
@@ -308,6 +309,13 @@
    "fieldtype": "Check",
    "label": "Auto Fetch Coupon Gifts",
    "description": "Automatically apply eligible coupons"
+  },
+  {
+   "default": "0",
+   "fieldname": "auto_apply_offers",
+   "fieldtype": "Check",
+   "label": "Auto Apply Offers",
+   "description": "Automatically apply eligible promotional offers as soon as an item is added to the cart"
   },
   {
    "collapsible": 1,
