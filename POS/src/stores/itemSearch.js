@@ -37,7 +37,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 	// Lazy loading state - dynamically adjusted based on device performance
 	const currentOffset = ref(0)
-	const itemsPerPage = computed(() => performanceConfig.get("itemsPerPage")) // Reactive: auto-adjusted 20/50/100 based on device
+	const itemsPerPage = computed(() => performanceConfig.get("itemsPerPage")) // Reactive: 1000 items per page
 	const hasMore = ref(true)
 	const totalItemsLoaded = ref(0)
 
@@ -59,6 +59,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	// Search debounce timer
 	let searchDebounceTimer = null
 	let backgroundSyncInterval = null
+	let backgroundSyncInFlight = false
+	let backgroundSyncGeneration = 0
 
 	// Real-time POS Profile update handler
 	let posProfileUpdateCleanup = null
@@ -541,7 +543,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	 * - Client-side filtering handles tab switching (instant)
 	 *
 	 * WITHOUT FILTERS (Default "All Items" view):
-	 * - Fetches first batch only (e.g., 20-50 items)
+	 * - Fetches first batch only (itemsPerPage, 1000 items)
 	 * - Enables infinite scroll for loading more
 	 * - Background sync loads remaining items over time
 	 * - Suitable for large catalogs (1000+ items)
@@ -762,7 +764,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			} else {
 				log.debug(`Fetching ${itemsPerPage.value} items (no filters)`)
 
-				// Fetch first batch (e.g., 20-50 items) for fast initial render
+				// Fetch first batch (itemsPerPage, 1000 items) for fast initial render
 				const response = await call("pos_next.api.items.get_items", {
 					pos_profile: profile,
 					search_term: "",
@@ -794,10 +796,9 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 				// Start background sync to cache remaining items over time
 				// This improves offline experience without blocking initial load
-				// Only start if cache is new or has few items
-				if (!stats.cacheReady || stats.items < 50) {
-					startBackgroundCacheSync(profile, [])
-				}
+				// Always start: the cache was just cleared above, so it only holds this
+				// first page - the pre-fetch `stats` describe the discarded cache
+				startBackgroundCacheSync(profile, [])
 			}
 		} catch (error) {
 			log.error("Error loading items", error)
@@ -882,7 +883,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	 * ❌ Disabled: POS Profile filters (all filtered items already loaded)
 	 *
 	 * Loading Strategy:
-	 * - Batch Size: itemsPerPage (20-100, device-dependent)
+	 * - Batch Size: itemsPerPage (1000 items)
 	 * - Trigger: User scrolls near bottom of list
 	 * - Behavior: Append to existing allItems array
 	 * - Cache: Each batch cached for offline support
@@ -954,8 +955,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 		try {
 			// Fetch next batch from server
-			// start: currentOffset (e.g., 50 after first batch)
-			// limit: itemsPerPage (e.g., 50 items per batch)
+			// start: currentOffset (e.g., 1000 after first batch)
+			// limit: itemsPerPage (1000 items per batch)
 			const response = await call("pos_next.api.items.get_items", {
 				pos_profile: posProfile.value,
 				search_term: "",
@@ -997,12 +998,13 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 	/**
 	 * Background sync with filter awareness
+	 
 	 * @param {string} profile - POS Profile name
 	 * @param {Array} itemGroups - Item group filters (empty = no filters)
 	 */
 	async function startBackgroundCacheSync(profile, itemGroups = []) {
 		// Prevent multiple sync intervals
-		if (backgroundSyncInterval) {
+		if (backgroundSyncInterval || backgroundSyncInFlight) {
 			return
 		}
 
@@ -1014,80 +1016,126 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			return
 		}
 
-		/**
-		 * PERFORMANCE OPTIMIZATIONS (unfiltered catalogs only):
-		 *
-		 * 1. Sync Interval: 15 seconds between batches
-		 * 2. Stats Polling: Every 3 batches instead of every batch
-		 * 3. Threshold: Only sync if cache has < 50 items
-		 *
-		 * Impact: 87.5% reduction in API call frequency, 90% reduction in CPU usage
-		 */
-
 		log.info("Starting background cache sync (no filters)")
 		cacheSyncing.value = true
 
+		// Invalidate any batch left in flight by a previous run
+		const generation = ++backgroundSyncGeneration
+
 		// Start from current offset to avoid re-fetching already loaded items
 		let offset = currentOffset.value || 0
-		const batchSize = performanceConfig.get("backgroundSyncBatchSize") // Auto-adjusted: 100/200/300 based on device
-		const statsUpdateFrequency = performanceConfig.get("statsUpdateFrequency") // Auto-adjusted: 5/3/2 based on device
+		const maxBatchSize = performanceConfig.get("backgroundSyncBatchSize") // 1000 items per batch
+		const minBatchSize = performanceConfig.get("backgroundSyncMinBatchSize") || 100
+		const syncInterval = performanceConfig.get("backgroundSyncInterval") // 5s between batches
+		const statsUpdateFrequency = performanceConfig.get("statsUpdateFrequency")
+		let batchSize = maxBatchSize
 		let batchCount = 0
+
+		// Sync finished (or was cancelled) - refresh stats and tear down the interval
+		const finishSync = async (message) => {
+			log.success(message)
+			const finalStats = await offlineWorker.getCacheStats()
+			cacheStats.value = finalStats
+			cacheReady.value = finalStats.cacheReady
+			if (backgroundSyncInterval) {
+				clearInterval(backgroundSyncInterval)
+				backgroundSyncInterval = null
+			}
+			cacheSyncing.value = false
+		}
+
+		/**
+		 * Resize the next batch so one batch fits inside one interval.
+		 * @param {number} duration - Time the last batch took (fetch + cache), in ms
+		 * @param {boolean} failed - Whether the last batch errored out
+		 */
+		const adaptBatchSize = (duration, failed) => {
+			// Too slow (or failed) for the 5s window - halve it, down to the floor
+			if ((failed || duration > syncInterval) && batchSize > minBatchSize) {
+				const reduced = Math.max(minBatchSize, Math.floor(batchSize / 2))
+				log.info(
+					`Background sync: batch of ${batchSize} took ${Math.round(duration)}ms - reducing to ${reduced} items`,
+					{ reason: failed ? "request failed" : "slower than interval", syncInterval },
+				)
+				batchSize = reduced
+				return
+			}
+
+			// Comfortably inside the window - step back up towards the max
+			if (!failed && duration < syncInterval / 2 && batchSize < maxBatchSize) {
+				const increased = Math.min(maxBatchSize, batchSize * 2)
+				log.debug(`Background sync: batch fast (${Math.round(duration)}ms) - raising to ${increased} items`)
+				batchSize = increased
+			}
+		}
 
 		// Function to fetch one batch
 		const fetchBatch = async () => {
+			// Previous batch still running - skip this tick rather than double-fetch
+			if (backgroundSyncInFlight) {
+				log.debug("Background sync: previous batch still running, skipping tick")
+				return
+			}
+
+			backgroundSyncInFlight = true
+			const requestedSize = batchSize
+			const startedAt = performance.now()
+
 			try {
-				log.debug(`Background sync: fetching batch at offset ${offset}`)
+				log.debug(`Background sync: fetching ${requestedSize} items at offset ${offset}`)
 				const response = await call("pos_next.api.items.get_items", {
 					pos_profile: profile,
 					search_term: "",
 					item_group: null, // No filters for background sync
 					start: offset,
-					limit: batchSize,
+					limit: requestedSize,
 				})
 				const list = response?.message || response || []
 
-				if (list.length > 0) {
-					// Cache the batch
-					await offlineWorker.cacheItems(list)
-					offset += list.length
-					batchCount++
+				// Sync was stopped/restarted while this batch was in flight - drop it
+				if (generation !== backgroundSyncGeneration) {
+					return
+				}
 
-					// Only update stats periodically to reduce IndexedDB queries
-					const shouldUpdateStats = batchCount % statsUpdateFrequency === 0 || list.length < batchSize
+				if (list.length === 0) {
+					await finishSync("Background sync complete - no more items")
+					return
+				}
 
-					if (shouldUpdateStats) {
-						const stats = await offlineWorker.getCacheStats()
-						cacheStats.value = stats
-						cacheReady.value = stats.cacheReady
-						log.debug(`Background sync: cached ${offset} total items`)
-					} else {
-						log.debug(`Background sync: cached ${list.length} items, offset: ${offset}`)
-					}
+				// Cache the batch
+				await offlineWorker.cacheItems(list)
+				offset += list.length
+				batchCount++
 
-					// Stop if we got less than requested (reached end)
-					if (list.length < batchSize) {
-						log.success("Background sync complete - all items cached")
-						// Update stats one final time when sync completes
-						const finalStats = await offlineWorker.getCacheStats()
-						cacheStats.value = finalStats
-						cacheReady.value = finalStats.cacheReady
-						clearInterval(backgroundSyncInterval)
-						backgroundSyncInterval = null
-						cacheSyncing.value = false
-					}
+				// Batch cost includes the IndexedDB write - that time competes with the interval too
+				const duration = performance.now() - startedAt
+
+				// Stop if we got less than requested (reached end)
+				if (list.length < requestedSize) {
+					await finishSync("Background sync complete - all items cached")
+					return
+				}
+
+				adaptBatchSize(duration, false)
+
+				// Only update stats periodically to reduce IndexedDB queries
+				if (batchCount % statsUpdateFrequency === 0) {
+					const stats = await offlineWorker.getCacheStats()
+					cacheStats.value = stats
+					cacheReady.value = stats.cacheReady
+					log.debug(`Background sync: cached ${offset} total items in ${Math.round(duration)}ms`)
 				} else {
-					log.success("Background sync complete - no more items")
-					// Update stats when sync completes with no items
-					const finalStats = await offlineWorker.getCacheStats()
-					cacheStats.value = finalStats
-					cacheReady.value = finalStats.cacheReady
-					clearInterval(backgroundSyncInterval)
-					backgroundSyncInterval = null
-					cacheSyncing.value = false
+					log.debug(`Background sync: cached ${list.length} items, offset: ${offset}`)
 				}
 			} catch (error) {
 				log.error("Background sync error", error)
-				// Don't stop on error, will retry on next interval
+				// Shrink the batch and retry on the next tick - a timeout usually means
+				// the batch was too big for this connection
+				if (generation === backgroundSyncGeneration) {
+					adaptBatchSize(performance.now() - startedAt, true)
+				}
+			} finally {
+				backgroundSyncInFlight = false
 			}
 		}
 
@@ -1096,18 +1144,20 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 		// Only set up interval if sync should continue (first batch didn't complete sync)
 		// If cacheSyncing is still true, it means there's more data to fetch
-		// Interval auto-adjusted: 20s/15s/10s based on device (low/medium/high)
-		if (cacheSyncing.value && !backgroundSyncInterval) {
-			const syncInterval = performanceConfig.get("backgroundSyncInterval")
+		if (cacheSyncing.value && !backgroundSyncInterval && generation === backgroundSyncGeneration) {
 			backgroundSyncInterval = setInterval(fetchBatch, syncInterval)
-			log.info(`Background sync interval set to ${syncInterval}ms based on device performance`)
+			log.info(`Background sync scheduled every ${syncInterval}ms (up to ${maxBatchSize} items per batch)`)
 		}
 	}
 
 	function stopBackgroundCacheSync() {
-		if (backgroundSyncInterval) {
-			clearInterval(backgroundSyncInterval)
-			backgroundSyncInterval = null
+		if (backgroundSyncInterval || cacheSyncing.value) {
+			// Bump the generation so any batch still in flight discards its result
+			backgroundSyncGeneration++
+			if (backgroundSyncInterval) {
+				clearInterval(backgroundSyncInterval)
+				backgroundSyncInterval = null
+			}
 			cacheSyncing.value = false
 			log.info("Background cache sync stopped")
 		}
