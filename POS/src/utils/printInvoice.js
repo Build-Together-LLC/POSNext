@@ -26,11 +26,17 @@ export async function printDraftReceipt(invoiceData) {
 
 	try {
 		const customer = invoiceData.customer?.name || invoiceData.customer
+		const customerName =
+			invoiceData.customer_name ||
+			invoiceData.customer?.customer_name ||
+			(typeof customer === "string" ? customer : "") ||
+			""
 		const payload = {
 			name: invoiceData.name,
 			company: invoiceData.company,
 			pos_profile: invoiceData.pos_profile,
 			customer: typeof customer === "string" ? customer : "",
+			customer_name: customerName,
 			items: (invoiceData.items || []).map((item) => ({
 				item_code: item.item_code,
 				qty: item.quantity ?? item.qty ?? 0,

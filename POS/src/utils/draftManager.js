@@ -20,19 +20,20 @@ function sanitizeDraftData(data) {
 	}
 }
 
-export function buildDraftId(invoiceData) {
-	const customer = invoiceData?.customer
-	const customerName =
-		(typeof customer === "object" ? customer?.customer_name || customer?.name : customer) || ""
-
-	const slug = customerName.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5) || "CUST"
-
+export function buildDraftId() {
+	// Pick number format: DDMMYYHHMMSS
+	//   DD = day, MM = month, YY = year (2-digit), HH = hour (24h), MM = minute, SS = second
+	// e.g. 26 Jul 2026 12:08:45 -> 260726120845
 	const now = new Date()
 	const pad = (value) => String(value).padStart(2, "0")
-	const date = `${pad(now.getDate())}${pad(now.getMonth() + 1)}`
-	const time = `${pad(now.getHours())}${pad(now.getMinutes())}`
+	const dd = pad(now.getDate())
+	const mm = pad(now.getMonth() + 1)
+	const yy = pad(now.getFullYear() % 100)
+	const hh = pad(now.getHours())
+	const min = pad(now.getMinutes())
+	const ss = pad(now.getSeconds())
 
-	return `${slug}-${date}-${time}`
+	return `${dd}${mm}${yy}${hh}${min}${ss}`
 }
 
 function getExistingDraftIds(database) {
@@ -45,16 +46,18 @@ function getExistingDraftIds(database) {
 	})
 }
 
-async function buildUniqueDraftId(database, invoiceData) {
-	const baseId = buildDraftId(invoiceData)
+async function buildUniqueDraftId(database) {
+	const baseId = buildDraftId()
 	const existingIds = await getExistingDraftIds(database)
 
 	if (!existingIds.has(baseId)) return baseId
 
-	let suffix = 2
-	while (existingIds.has(`${baseId}-${suffix}`)) suffix++
+	// Same-second collision: the 2nd save gets "1" appended, the 3rd "2", etc.
+	// e.g. 260726120845, then 2607261208451, then 2607261208452, ...
+	let suffix = 1
+	while (existingIds.has(`${baseId}${suffix}`)) suffix++
 
-	return `${baseId}-${suffix}`
+	return `${baseId}${suffix}`
 }
 
 // Initialize IndexedDB
@@ -95,7 +98,7 @@ export async function saveDraft(invoiceData) {
 	const sanitizedInvoiceData = sanitizeDraftData(invoiceData) || {}
 
 	const draft = {
-		draft_id: await buildUniqueDraftId(database, sanitizedInvoiceData),
+		draft_id: await buildUniqueDraftId(database),
 		...sanitizedInvoiceData,
 		created_at: new Date().toISOString(),
 		updated_at: new Date().toISOString(),

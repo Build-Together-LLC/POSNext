@@ -815,6 +815,11 @@ def render_draft_receipt(invoice_data):
 	except Exception:
 		pass
 
+	# Show the real customer on the pick list even when no Customer record was
+	# resolved (walk-in / unsaved draft), so the print never renders "None".
+	if not si.customer_name and data.get("customer_name"):
+		si.customer_name = data.get("customer_name")
+
 	if data.get("name"):
 		si.name = data.get("name")
 
