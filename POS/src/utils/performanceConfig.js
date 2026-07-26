@@ -79,10 +79,11 @@ function getPerformanceConfig(tier) {
 			searchBatchSize: 100, // Smaller batches
 
 			// Item loading
-			itemsPerPage: 20,
-			backgroundSyncBatchSize: 100, // Smaller sync batches
-			backgroundSyncInterval: 20000, // Slower sync (20s)
-			statsUpdateFrequency: 5, // Update stats every 5 batches
+			itemsPerPage: 1000, // Load 1000 items per page
+			backgroundSyncBatchSize: 1000, // 1000 items per batch
+			backgroundSyncMinBatchSize: 100, // Adaptive floor when batches run slow
+			backgroundSyncInterval: 5000, // Sync every 5s
+			statsUpdateFrequency: 1, // Update stats every batch (progress visible)
 
 			// Realtime stock updates
 			stockBatchDelay: 800, // Longer delay to batch more updates
@@ -102,10 +103,11 @@ function getPerformanceConfig(tier) {
 			searchBatchSize: 200,
 
 			// Item loading
-			itemsPerPage: 50,
-			backgroundSyncBatchSize: 200, // Standard batch size
-			backgroundSyncInterval: 15000, // Standard sync (15s)
-			statsUpdateFrequency: 3, // Update stats every 3 batches
+			itemsPerPage: 1000, // Load 1000 items per page
+			backgroundSyncBatchSize: 1000, // 1000 items per batch
+			backgroundSyncMinBatchSize: 100, // Adaptive floor when batches run slow
+			backgroundSyncInterval: 5000, // Sync every 5s
+			statsUpdateFrequency: 1, // Update stats every batch (progress visible)
 
 			// Realtime stock updates
 			stockBatchDelay: 500, // Standard delay
@@ -125,10 +127,11 @@ function getPerformanceConfig(tier) {
 			searchBatchSize: 300, // Larger batches
 
 			// Item loading
-			itemsPerPage: 100,
-			backgroundSyncBatchSize: 300, // Larger sync batches
-			backgroundSyncInterval: 10000, // Faster sync (10s)
-			statsUpdateFrequency: 2, // Update stats every 2 batches
+			itemsPerPage: 1000, // Load 1000 items per page
+			backgroundSyncBatchSize: 1000, // 1000 items per batch
+			backgroundSyncMinBatchSize: 100, // Adaptive floor when batches run slow
+			backgroundSyncInterval: 5000, // Sync every 5s
+			statsUpdateFrequency: 1, // Update stats every batch (progress visible)
 
 			// Realtime stock updates
 			stockBatchDelay: 300, // Shorter delay
