@@ -160,7 +160,7 @@
 <script setup>
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { clearAllDrafts, deleteDraft, getAllDrafts } from "@/utils/draftManager"
-import { printInvoiceCustom } from "@/utils/printInvoice"
+import { printDraftReceipt } from "@/utils/printInvoice"
 import { useToast } from "@/composables/useToast"
 import { usePOSShiftStore } from "@/stores/posShift"
 import { Button, Dialog } from "frappe-ui"
@@ -225,6 +225,8 @@ function handlePrintDraft(draft) {
 		const invoiceData = {
 			name: draft.draft_id,
 			company: shiftStore.profileCompany,
+			pos_profile: draft.pos_profile || shiftStore.profileName,
+			customer: customerObj,
 			items: draft.items || [],
 			payments: [],
 			grand_total: calculateTotal(draft.items),
@@ -235,7 +237,7 @@ function handlePrintDraft(draft) {
 			is_draft: true,
 			docstatus: 0,
 		}
-		printInvoiceCustom(invoiceData)
+		printDraftReceipt(invoiceData)
 	} catch (error) {
 		console.error("Error printing draft:", error)
 		showError(__("Failed to print draft"))

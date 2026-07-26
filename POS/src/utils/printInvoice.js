@@ -1,7 +1,79 @@
 import { call } from "@/utils/apiWrapper"
 import { logger } from "@/utils/logger"
+import { isOffline } from "@/utils/offline"
 
 const log = logger.create('PrintInvoice')
+
+/**
+ * Print a draft receipt using the server-rendered "POS Next Draft Receipt" format.
+ * Renders a transient Sales Invoice so GST/taxes/totals are real. Falls back to the
+ * client-side receipt when offline or on error.
+ * @param {Object} invoiceData - Draft data (customer, company, pos_profile, items)
+ */
+export async function printDraftReceipt(invoiceData) {
+	if (isOffline()) {
+		return printInvoiceCustom(invoiceData)
+	}
+
+	const printWindow = window.open("", "_blank", "width=800,height=600")
+	if (!printWindow) {
+		log.error("Failed to open print window")
+		return false
+	}
+	printWindow.document.write(
+		"<html><body style='font-family:sans-serif;padding:24px;color:#555'>Preparing draft…</body></html>",
+	)
+
+	try {
+		const customer = invoiceData.customer?.name || invoiceData.customer
+		const customerName =
+			invoiceData.customer_name ||
+			invoiceData.customer?.customer_name ||
+			(typeof customer === "string" ? customer : "") ||
+			""
+		const payload = {
+			name: invoiceData.name,
+			company: invoiceData.company,
+			pos_profile: invoiceData.pos_profile,
+			customer: typeof customer === "string" ? customer : "",
+			customer_name: customerName,
+			items: (invoiceData.items || []).map((item) => ({
+				item_code: item.item_code,
+				qty: item.quantity ?? item.qty ?? 0,
+				rate: item.rate,
+				price_list_rate: item.price_list_rate ?? item.rate,
+				uom: item.uom,
+				warehouse: item.warehouse,
+				discount_amount: item.discount_amount || 0,
+				discount_percentage: item.discount_percentage || 0,
+			})),
+		}
+
+		let html = await call("pos_next.api.invoices.render_draft_receipt", {
+			invoice_data: JSON.stringify(payload),
+		})
+
+		// get_print returns relative /assets CSS links; add <base> so they resolve
+		// in this blank window and the print stylesheet loads (matches /printview).
+		const baseTag = `<base href="${window.location.origin}/">`
+		html = html.includes("<head>") ? html.replace("<head>", `<head>${baseTag}`) : baseTag + html
+
+		printWindow.document.open()
+		printWindow.document.write(html)
+		printWindow.document.close()
+		printWindow.document.title = invoiceData.name || "DRAFT"
+
+		setTimeout(() => {
+			printWindow.focus()
+			printWindow.print()
+		}, 300)
+		return true
+	} catch (error) {
+		log.warn("Server draft render failed, using client fallback:", error)
+		printWindow.close()
+		return printInvoiceCustom(invoiceData)
+	}
+}
 
 /**
  * Print invoice using Frappe's print format system
