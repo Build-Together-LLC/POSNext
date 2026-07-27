@@ -3,8 +3,21 @@ POS Next Customer API
 Handles customer search, creation, and management for POS operations
 """
 
+import re
+
 import frappe
 from frappe import _
+
+
+def _clean_address(text):
+    if not text:
+        return ""
+    text = re.sub(r"(?i)<br\s*/?>", ", ", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"(?i)phone\s*:.*", "", text)
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"(\s*,\s*)+", ", ", text)
+    return text.strip(" ,")
 
 
 @frappe.whitelist()
@@ -93,7 +106,7 @@ def get_customers(search_term="", pos_profile=None, limit=20):
             frappe.logger().error(f"Error fetching addresses: {str(addr_err)}")
 
         for c in result:
-            addr_str = c.get("primary_address") or address_map.get(c.name) or ""
+            addr_str = address_map.get(c.name) or _clean_address(c.get("primary_address")) or ""
             c["customer_address"] = addr_str
             c["primary_address"] = addr_str
             c["address"] = addr_str
