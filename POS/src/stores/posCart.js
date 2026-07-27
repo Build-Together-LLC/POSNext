@@ -571,6 +571,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return
 		}
 
+		
+		if (offersStore.availableOffers.length === 0) {
+			return
+		}
+
 		try {
 			// Build current cart snapshot for validation
 			const cartSnapshot = buildCartSnapshot()
