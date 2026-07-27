@@ -1078,6 +1078,52 @@ const appliedOfferCount = computed(() => (props.appliedOffers || []).length)
  *
  * @returns {Array} Filtered customer objects matching search query
  */
+const customerSearchIndex = new Map()
+
+watch(allCustomers, () => customerSearchIndex.clear())
+
+function getCustomerIndex(cust) {
+	let idx = customerSearchIndex.get(cust)
+	if (!idx) {
+		const name = (cust.customer_name || "").toLowerCase()
+		idx = {
+			name,
+			mobile: (cust.mobile_no || "").toLowerCase(),
+			id: (cust.name || "").toLowerCase(),
+			vehicle: (cust.custom_vehicle_no || "").toLowerCase(),
+			address: (cust.address || cust.primary_address || cust.customer_address || "").toLowerCase(),
+			nameWords: name.split(" "),
+		}
+		customerSearchIndex.set(cust, idx)
+	}
+	return idx
+}
+
+function scoreCustomer(idx, term) {
+	const { name, mobile, id, vehicle, address, nameWords } = idx
+
+	if (name === term) return 100
+	if (name.startsWith(term)) return 90
+	if (mobile === term) return 88
+	if (vehicle === term) return 86
+	if (mobile.startsWith(term)) return 82
+	if (vehicle.startsWith(term)) return 80
+
+	for (const word of nameWords) {
+		if (word.startsWith(term)) return 78
+	}
+
+	if (name.includes(term)) return 60
+	if (mobile.includes(term)) return 55
+	if (vehicle.includes(term)) return 52
+	if (id.startsWith(term)) return 45
+	if (id.includes(term)) return 30
+	if (address.startsWith(term)) return 25
+	if (address.includes(term)) return 15
+
+	return 0
+}
+
 const customerResults = computed(() => {
 	const searchValue = customerSearch.value.trim().toLowerCase()
 
@@ -1085,24 +1131,14 @@ const customerResults = computed(() => {
 		return []
 	}
 
-	// Instant in-memory filter
-	return allCustomers.value
-		.filter((cust) => {
-			const name = (cust.customer_name || "").toLowerCase()
-			const mobile = (cust.mobile_no || "").toLowerCase()
-			const id = (cust.name || "").toLowerCase()
-			const vehicle = (cust.custom_vehicle_no || "").toLowerCase()
-			const address = (cust.address || cust.primary_address || cust.customer_address || "").toLowerCase()
+	const matches = []
+	for (const cust of allCustomers.value) {
+		const score = scoreCustomer(getCustomerIndex(cust), searchValue)
+		if (score > 0) matches.push({ cust, score })
+	}
 
-			return (
-				name.includes(searchValue) ||
-				mobile.includes(searchValue) ||
-				id.includes(searchValue) ||
-				vehicle.includes(searchValue) ||
-				address.includes(searchValue)
-			)
-		})
-		.slice(0, 20)
+	matches.sort((a, b) => b.score - a.score)
+	return matches.slice(0, 20).map((entry) => entry.cust)
 })
 
 /**
