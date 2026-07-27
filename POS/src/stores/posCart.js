@@ -184,6 +184,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		let hasDiscounts = false
 
 		invoiceItems.value.forEach((item, index) => {
+			if (item.manual_discount) {
+				recalculateItem(item)
+				return
+			}
+
 			const serverItem = serverItems[index] || {}
 			const serverDiscountPercentage =
 				Number.parseFloat(serverItem.discount_percentage) || 0
@@ -758,11 +763,23 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (updatedDetails.warehouse !== undefined) {
 				cartItem.warehouse = updatedDetails.warehouse
 			}
+			const curPct = Number.parseFloat(cartItem.discount_percentage) || 0
+			const curAmt = Number.parseFloat(cartItem.discount_amount) || 0
+			const discountChanged =
+				(updatedDetails.discount_percentage !== undefined &&
+					Math.abs((Number.parseFloat(updatedDetails.discount_percentage) || 0) - curPct) > 0.001) ||
+				(updatedDetails.discount_amount !== undefined &&
+					Math.abs((Number.parseFloat(updatedDetails.discount_amount) || 0) - curAmt) > 0.001)
+
 			if (updatedDetails.discount_percentage !== undefined) {
 				cartItem.discount_percentage = updatedDetails.discount_percentage
 			}
 			if (updatedDetails.discount_amount !== undefined) {
 				cartItem.discount_amount = updatedDetails.discount_amount
+			}
+			if (discountChanged) {
+				cartItem.manual_discount = true
+				cartItem.pricing_rules = []
 			}
 			// Update price_list_rate if provided (for UOM changes)
 			if (updatedDetails.price_list_rate !== undefined) {
