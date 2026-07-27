@@ -1759,17 +1759,17 @@ async function handleLoadDraft(draft) {
 		cartStore.setCustomer(draftData.customer)
 		cartStore.currentDraftId = draft.draft_id // Set current draft ID
 
-		// Rebuild incremental cache to recalculate totals
+		// Rebuild incremental cache to recalculate totals (with the saved discounts)
 		cartStore.rebuildIncrementalCache()
 
-		// Restore applied offers if they were saved
+
 		if (draftData.applied_offers && draftData.applied_offers.length > 0) {
+			cartStore.suppressOfferReapply = true
 			cartStore.appliedOffers = draftData.applied_offers
-			// Trigger offer reapplication to ensure they apply to all items
-			await cartStore.reapplyOffer(shiftStore.currentProfile)
 		}
 
-		// Initialize cart hash for the loaded cart so watchers work correctly
+		// Initialize cart hash for the loaded cart so the change watchers don't
+		// re-fire (and re-validate) for this programmatic load.
 		previousCartHash = computeCartHash()
 
 		uiStore.showDraftDialog = false
