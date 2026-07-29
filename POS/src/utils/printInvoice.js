@@ -82,7 +82,8 @@ export async function printDraftReceipt(invoiceData) {
  * @param {Object} invoiceData - The invoice document data
  * @param {string} printFormat - The print format name (optional)
  * @param {string} letterhead - The letterhead name (optional)
- * @note Use "POS Next Receipt" format for thermal printer (80mm) or configure via POS Profile
+ * @note Callers should resolve the POS Profile's print format first (see resolvePrintFormat).
+ *       "POS Next Receipt" is only the last-resort fallback when the profile has none.
  */
 export async function printInvoice(invoiceData, printFormat = null, letterhead = null) {
 	try {
@@ -806,6 +807,33 @@ function isDraftInvoice(invoiceDoc) {
 }
 
 /**
+ * Resolve the POS Profile name for an invoice.
+ * Invoice-list rows (Invoice Management / History) may not carry pos_profile,
+ * so fall back to reading it off the stored invoice.
+ */
+async function resolvePosProfileName(invoiceDoc) {
+	if (invoiceDoc.pos_profile) {
+		return invoiceDoc.pos_profile;
+	}
+
+	if (!invoiceDoc.name) {
+		return null;
+	}
+
+	try {
+		const result = await call("frappe.client.get_value", {
+			doctype: "Sales Invoice",
+			filters: { name: invoiceDoc.name },
+			fieldname: "pos_profile",
+		});
+		return result?.pos_profile || null;
+	} catch (error) {
+		log.warn("Could not resolve POS Profile for invoice:", error);
+		return null;
+	}
+}
+
+/**
  * Resolve the print format and letterhead for an invoice.
  * Drafts use the draft receipt; submitted invoices use the POS Profile's print format.
  */
@@ -814,23 +842,30 @@ export async function resolvePrintFormat(invoiceDoc, printFormat = null, letterh
 		return { printFormat: "POS Next Draft Receipt", letterhead };
 	}
 
-	if (!printFormat && invoiceDoc.pos_profile) {
-		try {
-			const posProfileDoc = await call("frappe.client.get", {
-				doctype: "POS Profile",
-				name: invoiceDoc.pos_profile,
-			});
+	let resolvedFormat = printFormat;
+	let resolvedLetterhead = letterhead;
 
-			if (posProfileDoc) {
-				printFormat = posProfileDoc.print_format;
-				letterhead = letterhead || posProfileDoc.letter_head;
+	if (!resolvedFormat) {
+		const posProfileName = await resolvePosProfileName(invoiceDoc);
+
+		if (posProfileName) {
+			try {
+				const posProfileDoc = await call("frappe.client.get", {
+					doctype: "POS Profile",
+					name: posProfileName,
+				});
+
+				if (posProfileDoc) {
+					resolvedFormat = posProfileDoc.print_format;
+					resolvedLetterhead = resolvedLetterhead || posProfileDoc.letter_head;
+				}
+			} catch (error) {
+				log.warn("Could not fetch POS Profile print settings:", error);
 			}
-		} catch (error) {
-			log.warn("Could not fetch POS Profile print settings:", error);
 		}
 	}
 
-	return { printFormat, letterhead };
+	return { printFormat: resolvedFormat, letterhead: resolvedLetterhead };
 }
 
 /**

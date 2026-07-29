@@ -864,7 +864,8 @@ def get_invoices(pos_profile, limit=100):
 			status,
 			docstatus,
 			is_return,
-			return_against
+			return_against,
+			pos_profile
 		FROM
 			`tabSales Invoice`
 		WHERE
