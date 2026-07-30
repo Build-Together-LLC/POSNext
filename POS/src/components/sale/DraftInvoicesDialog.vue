@@ -6,6 +6,15 @@
 	>
 		<template #body-content>
 			<div class="flex flex-col gap-3">
+				<!-- Search/Filter Input -->
+				<Input
+					v-if="drafts.length > 0"
+					v-model="draftListFilter"
+					type="text"
+					:placeholder="__('Search by draft ID or customer name...')"
+					class="w-full"
+				/>
+
 				<!-- Empty State -->
 				<div v-if="drafts.length === 0" class="text-center py-8">
 					<div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -17,10 +26,16 @@
 					<p class="text-xs text-gray-500 mt-1">{{ __('Save invoices as drafts to continue later') }}</p>
 				</div>
 
+				<!-- No Search Results -->
+				<div v-else-if="filteredDrafts.length === 0" class="text-center py-8">
+					<p class="text-sm font-medium text-gray-900">{{ __('No matching drafts') }}</p>
+					<p class="text-xs text-gray-500 mt-1">{{ __('Try a different draft ID or customer name') }}</p>
+				</div>
+
 				<!-- Drafts List -->
 				<div v-else class="flex flex-col gap-2 max-h-96 overflow-y-auto">
 					<div
-						v-for="draft in drafts"
+						v-for="draft in filteredDrafts"
 						:key="draft.draft_id"
 						class="bg-white border border-gray-200 rounded-lg p-3 hover:border-blue-400 transition-all cursor-pointer"
 						@click="$emit('load-draft', draft)"
@@ -163,8 +178,8 @@ import { clearAllDrafts, deleteDraft, getAllDrafts } from "@/utils/draftManager"
 import { printDraftReceipt } from "@/utils/printInvoice"
 import { useToast } from "@/composables/useToast"
 import { usePOSShiftStore } from "@/stores/posShift"
-import { Button, Dialog } from "frappe-ui"
-import { onMounted, ref, watch } from "vue"
+import { Button, Dialog, Input } from "frappe-ui"
+import { computed, onMounted, ref, watch } from "vue"
 
 const { showSuccess, showError } = useToast()
 const shiftStore = usePOSShiftStore()
@@ -181,15 +196,39 @@ const emit = defineEmits(["update:modelValue", "load-draft", "drafts-updated"])
 
 const show = ref(props.modelValue)
 const drafts = ref([])
+const draftListFilter = ref("")
 const showDeleteDialog = ref(false)
 const showClearAllDialog = ref(false)
 const draftToDelete = ref(null)
+
+// Customer is stored either as a doc-like object or a plain name string.
+function draftCustomerName(draft) {
+	const customer = draft.customer
+	if (!customer) return ""
+	if (typeof customer === "string") return customer
+	return customer.customer_name || customer.name || ""
+}
+
+const filteredDrafts = computed(() => {
+	if (!drafts.value || !Array.isArray(drafts.value)) {
+		return []
+	}
+	if (!draftListFilter.value) return drafts.value
+
+	const filter = draftListFilter.value.toLowerCase()
+	return drafts.value.filter(
+		(draft) =>
+			draft.draft_id?.toLowerCase().includes(filter) ||
+			draftCustomerName(draft).toLowerCase().includes(filter),
+	)
+})
 
 watch(
 	() => props.modelValue,
 	(val) => {
 		show.value = val
 		if (val) {
+			draftListFilter.value = ""
 			loadDrafts()
 		}
 	},
