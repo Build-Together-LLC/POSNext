@@ -16,7 +16,7 @@
 						<Input
 							v-model="invoiceListFilter"
 							type="text"
-							:placeholder="__('Search by invoice number or customer name...')"
+							:placeholder="__('Search by invoice number, customer or item...')"
 							class="flex-1"
 						/>
 						<Button
@@ -1049,8 +1049,9 @@ const filteredInvoiceList = computed(() => {
 	const filter = invoiceListFilter.value.toLowerCase()
 	return invoiceList.value.filter(
 		(invoice) =>
-			invoice.name.toLowerCase().includes(filter) ||
-			invoice.customer_name.toLowerCase().includes(filter),
+			invoice.name?.toLowerCase().includes(filter) ||
+			invoice.customer_name?.toLowerCase().includes(filter) ||
+			invoice.items_search?.toLowerCase().includes(filter),
 	)
 })
 

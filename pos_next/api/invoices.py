@@ -918,7 +918,8 @@ def get_invoices(pos_profile, limit=100):
 			status,
 			docstatus,
 			is_return,
-			return_against
+			return_against,
+			pos_profile
 		FROM
 			`tabSales Invoice`
 		WHERE
@@ -1517,7 +1518,8 @@ def get_returnable_invoices(limit=50):
             si.grand_total,
             si.status,
             COALESCE(SUM(CASE WHEN ret_item.qty IS NOT NULL THEN ABS(ret_item.qty) ELSE 0 END), 0) as total_returned_qty,
-            COALESCE(SUM(CASE WHEN si_item.qty IS NOT NULL THEN si_item.qty ELSE 0 END), 0) as total_original_qty
+            COALESCE(SUM(CASE WHEN si_item.qty IS NOT NULL THEN si_item.qty ELSE 0 END), 0) as total_original_qty,
+            GROUP_CONCAT(DISTINCT CONCAT_WS(' ', si_item.item_code, si_item.item_name) SEPARATOR ' ') as items_search
         FROM `tabSales Invoice` si
         LEFT JOIN `tabSales Invoice Item` si_item ON si_item.parent = si.name
         LEFT JOIN `tabSales Invoice` ret_si ON ret_si.return_against = si.name
