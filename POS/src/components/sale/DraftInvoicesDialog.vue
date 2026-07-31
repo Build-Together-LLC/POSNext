@@ -65,7 +65,7 @@
 								{{ __('{0} item(s)', [draft.items?.length || 0]) }}
 							</span>
 							<span class="font-bold text-blue-600">
-								{{ formatCurrency(calculateTotal(draft.items)) }}
+								{{ formatCurrency(draftTotal(draft)) }}
 							</span>
 						</div>
 
@@ -159,15 +159,18 @@
 
 <script setup>
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
-import { clearAllDrafts, deleteDraft, getAllDrafts } from "@/utils/draftManager"
 import { printDraftReceipt } from "@/utils/printInvoice"
 import { useToast } from "@/composables/useToast"
+import { usePOSDraftsStore } from "@/stores/posDrafts"
 import { usePOSShiftStore } from "@/stores/posShift"
 import { Button, Dialog } from "frappe-ui"
-import { onMounted, ref, watch } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 
-const { showSuccess, showError } = useToast()
+const { showError } = useToast()
 const shiftStore = usePOSShiftStore()
+// Reading through the store keeps this dialog agnostic of where drafts live -
+// IndexedDB or server-side Sales Invoice drafts. It lists both.
+const draftsStore = usePOSDraftsStore()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -180,7 +183,7 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue", "load-draft", "drafts-updated"])
 
 const show = ref(props.modelValue)
-const drafts = ref([])
+const drafts = computed(() => draftsStore.drafts)
 const showDeleteDialog = ref(false)
 const showClearAllDialog = ref(false)
 const draftToDelete = ref(null)
@@ -205,16 +208,20 @@ onMounted(() => {
 
 async function loadDrafts() {
 	try {
-		drafts.value = await getAllDrafts()
+		await draftsStore.loadDrafts()
 	} catch (error) {
 		console.error("Error loading drafts:", error)
 		showError(__("Failed to load draft invoices"))
 	}
 }
 
-function handlePrintDraft(draft) {
+async function handlePrintDraft(draft) {
 	try {
-		const customerObj = draft.customer
+		// Server drafts are listed as summaries - fetch the full cart so the
+		// receipt prints real rates, discounts and UOMs.
+		const source = (await draftsStore.hydrateDraft(draft)) || draft
+
+		const customerObj = source.customer
 		const customerName = typeof customerObj === "object"
 			? (customerObj?.customer_name || customerObj?.name || "")
 			: (customerObj || "")
@@ -225,12 +232,12 @@ function handlePrintDraft(draft) {
 		const invoiceData = {
 			name: draft.draft_id,
 			company: shiftStore.profileCompany,
-			pos_profile: draft.pos_profile || shiftStore.profileName,
+			pos_profile: source.pos_profile || shiftStore.profileName,
 			customer: customerObj,
-			items: draft.items || [],
+			items: source.items || [],
 			payments: [],
-			grand_total: calculateTotal(draft.items),
-			posting_date: draft.created_at,
+			grand_total: calculateTotal(source.items),
+			posting_date: source.created_at || draft.created_at,
 			customer_name: customerName,
 			address_display: addressDisplay,
 			status: "Draft",
@@ -250,36 +257,22 @@ function handleDeleteDraft(draftId) {
 }
 
 async function confirmDeleteDraft() {
-	try {
-		await deleteDraft(draftToDelete.value)
-		await loadDrafts()
-		showDeleteDialog.value = false
-		draftToDelete.value = null
+	// The store owns the toast and the list refresh, and routes the delete to
+	// whichever backend this draft lives in.
+	await draftsStore.deleteDraft(draftToDelete.value)
+	showDeleteDialog.value = false
+	draftToDelete.value = null
 
-		// Notify parent to update count
-		emit("drafts-updated")
-
-		showSuccess(__("Draft invoice deleted"))
-	} catch (error) {
-		console.error("Error deleting draft:", error)
-		showError(__("Failed to delete draft"))
-	}
+	// Notify parent to update count
+	emit("drafts-updated")
 }
 
 async function confirmClearAll() {
-	try {
-		await clearAllDrafts()
-		await loadDrafts()
-		showClearAllDialog.value = false
+	await draftsStore.deleteAllDrafts()
+	showClearAllDialog.value = false
 
-		// Notify parent to update count
-		emit("drafts-updated")
-
-		showSuccess(__("All draft invoices deleted"))
-	} catch (error) {
-		console.error("Error clearing drafts:", error)
-		showError(__("Failed to clear drafts"))
-	}
+	// Notify parent to update count
+	emit("drafts-updated")
 }
 
 function formatDateTime(dateStr) {
@@ -303,5 +296,12 @@ function calculateTotal(items) {
 		const rate = item.rate || 0
 		return sum + qty * rate
 	}, 0)
+}
+
+/** Server drafts carry the invoice total; cached drafts are summed line by line. */
+function draftTotal(draft) {
+	return draft?.grand_total != null
+		? draft.grand_total
+		: calculateTotal(draft?.items)
 }
 </script>
