@@ -32,6 +32,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allow_return_without_invoice: 0,
 		allow_free_batch_return: 0,
 		allow_print_draft_invoices: 0,
+		allow_server_side_draft_invoice: 0,
 		// Pricing & Display
 		decimal_precision: "2",
 		// Customer Settings
@@ -128,6 +129,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const allowPrintDraftInvoices = computed(() =>
 		Boolean(settings.value.allow_print_draft_invoices),
 	)
+	// When on, a newly held invoice is written as a Sales Invoice draft on the
+	// server instead of the browser's IndexedDB cache.
+	const allowServerSideDraftInvoice = computed(() =>
+		Boolean(settings.value.allow_server_side_draft_invoice),
+	)
 
 	// Computed - Pricing & Display
 	const decimalPrecision = computed(
@@ -198,6 +204,15 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	// Resource
 	const settingsResource = createResource({
 		url: "pos_next.pos_next.doctype.pos_settings.pos_settings.get_pos_settings",
+		// Always send the active profile. Without this, reloadSettings() fires
+		// with no pos_profile whenever the initial load came from the bootstrap
+		// preload (which never submits this resource), the API returns null and
+		// the refresh is silently dropped - leaving the store on stale values.
+		makeParams(params) {
+			return {
+				pos_profile: params?.pos_profile || settings.value.pos_profile,
+			}
+		},
 		onSuccess(data) {
 			console.log('[POSSettings Store] Loaded settings:', data)
 			if (data) {
@@ -275,6 +290,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_return_without_invoice: 0,
 			allow_free_batch_return: 0,
 			allow_print_draft_invoices: 0,
+			allow_server_side_draft_invoice: 0,
 			decimal_precision: "2",
 			allow_customer_purchase_order: 0,
 			allow_duplicate_customer_names: 0,
@@ -339,11 +355,18 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		isLoading.value = true
 
 		try {
-			await settingsResource.reload()
+			// submit() rather than reload(): reload() replays the previous params,
+			// and there may not have been a previous call when the initial load
+			// came from the bootstrap preload.
+			await settingsResource.submit({
+				pos_profile: settings.value.pos_profile,
+			})
 			return true
 		} catch (error) {
 			console.error("Error reloading POS Settings:", error)
 			return false
+		} finally {
+			isLoading.value = false
 		}
 	}
 
@@ -380,6 +403,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allowReturnWithoutInvoice,
 		allowFreeBatchReturn,
 		allowPrintDraftInvoices,
+		allowServerSideDraftInvoice,
 
 		// Computed - Pricing & Display
 		decimalPrecision,

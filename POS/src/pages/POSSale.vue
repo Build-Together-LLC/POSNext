@@ -1529,7 +1529,9 @@ async function handlePaymentCompleted(paymentData) {
 			cartStore.disableRoundedTotal = paymentData.disable_rounded_total
 		}
 
-		// Delete draft if it exists (since we're submitting/saving invoice)
+		// Held draft this sale came from, if any. The store decides what to clean
+		// up: a server-side draft IS the invoice being submitted, so it is never
+		// deleted - submitting simply moves it out of draft state.
 		const draftIdToDelete = cartStore.currentDraftId
 
 		if (offlineStore.isOffline) {
@@ -1552,10 +1554,8 @@ async function handlePaymentCompleted(paymentData) {
 			// Reset cart hash after successful payment
 			previousCartHash = ""
 
-			// Delete draft after successful save
-			if (draftIdToDelete) {
-				draftsStore.deleteDraft(draftIdToDelete)
-			}
+			// Clear the held draft this sale came from
+			draftsStore.discardDraftAfterOfflineSave(draftIdToDelete)
 
 			showSuccess(__("Invoice saved offline. Will sync when online"))
 		} else {
@@ -1574,10 +1574,8 @@ async function handlePaymentCompleted(paymentData) {
 				// Reset cart hash after successful payment
 				previousCartHash = ""
 
-				// Delete draft after successful submission
-				if (draftIdToDelete) {
-					draftsStore.deleteDraft(draftIdToDelete)
-				}
+				// Clear the held draft this sale came from
+				draftsStore.discardDraftAfterSubmit(draftIdToDelete)
 
 				// Refresh stock - Direct API (50-200ms), no Socket.IO lag!
 				await stockStore.refresh(soldItemCodes, shiftStore.profileWarehouse)
@@ -1758,6 +1756,12 @@ async function handleLoadDraft(draft) {
 		cartStore.invoiceItems = draftData.items
 		cartStore.setCustomer(draftData.customer)
 		cartStore.currentDraftId = draft.draft_id // Set current draft ID
+		// Bind the cart to the held Sales Invoice (server draft, or a cached draft
+		// resumed from one) so checkout updates and submits that same document
+		// with the values on screen at that time.
+		cartStore.heldInvoiceName = draftData.invoice_name || null
+		cartStore.additionalDiscount = draftData.additional_discount || 0
+		cartStore.couponCode = draftData.coupon_code || null
 
 		// Rebuild incremental cache to recalculate totals (with the saved discounts)
 		cartStore.rebuildIncrementalCache()
