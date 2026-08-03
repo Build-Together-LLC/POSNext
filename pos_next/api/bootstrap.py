@@ -158,8 +158,7 @@ def get_pos_settings(pos_profile):
 				"allow_negative_stock",
 				"enable_sales_persons",
 				"silent_print",
-				"auto_apply_offers",
-				"allow_server_side_draft_invoice"
+				"auto_apply_offers"
 			],
 			as_dict=True
 		)
@@ -192,8 +191,7 @@ def get_default_pos_settings():
 		"allow_negative_stock": 0,
 		"enable_sales_persons": "Disabled",
 		"silent_print": 0,
-		"auto_apply_offers": 0,
-		"allow_server_side_draft_invoice": 0
+		"auto_apply_offers": 0
 	}
 
 

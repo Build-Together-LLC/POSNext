@@ -434,7 +434,7 @@
 
 										<div class="flex items-center justify-between text-xs">
 											<span class="text-gray-600">{{ __('{0} item(s)', [draft.items?.length || 0]) }}</span>
-											<span class="font-bold text-purple-600">{{ formatCurrency(draftTotal(draft)) }}</span>
+											<span class="font-bold text-purple-600">{{ formatCurrency(calculateDraftTotal(draft.items)) }}</span>
 										</div>
 
 										<!-- Items Preview -->
@@ -895,13 +895,6 @@ function calculateDraftTotal(items) {
 		(sum, item) => sum + (item.quantity || item.qty || 0) * (item.rate || 0),
 		0,
 	)
-}
-
-/** Server drafts carry the invoice total; cached drafts are summed line by line. */
-function draftTotal(draft) {
-	return draft?.grand_total != null
-		? draft.grand_total
-		: calculateDraftTotal(draft?.items)
 }
 
 // Lifecycle
