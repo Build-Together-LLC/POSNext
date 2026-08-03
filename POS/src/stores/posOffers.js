@@ -125,8 +125,13 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	 * effective brand), not against the whole cart. `Transaction` offers span the
 	 * whole cart by definition.
 	 */
+
+	const indexedLines = computed(() =>
+		(cartSnapshot.value.lines || []).map((line, index) => ({ ...line, index })),
+	)
+
 	function getOfferScope(offer) {
-		const lines = cartSnapshot.value.lines || []
+		const lines = indexedLines.value
 		const applyOn = offer?.apply_on
 		let matched
 
@@ -288,6 +293,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		setAvailableOffers,
 		clearOffers,
 		checkOfferEligibility,
+		getOfferScope,
 		getUnlockAmount,
 	}
 })
