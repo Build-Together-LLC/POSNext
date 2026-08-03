@@ -80,7 +80,7 @@
 								{{ __('{0} item(s)', [draft.items?.length || 0]) }}
 							</span>
 							<span class="font-bold text-blue-600">
-								{{ formatCurrency(draftTotal(draft)) }}
+								{{ formatCurrency(calculateTotal(draft.items)) }}
 							</span>
 						</div>
 
@@ -174,18 +174,15 @@
 
 <script setup>
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { clearAllDrafts, deleteDraft, getAllDrafts } from "@/utils/draftManager"
 import { printDraftReceipt } from "@/utils/printInvoice"
 import { useToast } from "@/composables/useToast"
-import { usePOSDraftsStore } from "@/stores/posDrafts"
 import { usePOSShiftStore } from "@/stores/posShift"
 import { Button, Dialog, Input } from "frappe-ui"
 import { computed, onMounted, ref, watch } from "vue"
 
-const { showError } = useToast()
+const { showSuccess, showError } = useToast()
 const shiftStore = usePOSShiftStore()
-// Reading through the store keeps this dialog agnostic of where drafts live -
-// IndexedDB or server-side Sales Invoice drafts. It lists both.
-const draftsStore = usePOSDraftsStore()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -247,20 +244,16 @@ onMounted(() => {
 
 async function loadDrafts() {
 	try {
-		await draftsStore.loadDrafts()
+		drafts.value = await getAllDrafts()
 	} catch (error) {
 		console.error("Error loading drafts:", error)
 		showError(__("Failed to load draft invoices"))
 	}
 }
 
-async function handlePrintDraft(draft) {
+function handlePrintDraft(draft) {
 	try {
-		// Server drafts are listed as summaries - fetch the full cart so the
-		// receipt prints real rates, discounts and UOMs.
-		const source = (await draftsStore.hydrateDraft(draft)) || draft
-
-		const customerObj = source.customer
+		const customerObj = draft.customer
 		const customerName = typeof customerObj === "object"
 			? (customerObj?.customer_name || customerObj?.name || "")
 			: (customerObj || "")
@@ -271,12 +264,12 @@ async function handlePrintDraft(draft) {
 		const invoiceData = {
 			name: draft.draft_id,
 			company: shiftStore.profileCompany,
-			pos_profile: source.pos_profile || shiftStore.profileName,
+			pos_profile: draft.pos_profile || shiftStore.profileName,
 			customer: customerObj,
-			items: source.items || [],
+			items: draft.items || [],
 			payments: [],
-			grand_total: calculateTotal(source.items),
-			posting_date: source.created_at || draft.created_at,
+			grand_total: calculateTotal(draft.items),
+			posting_date: draft.created_at,
 			customer_name: customerName,
 			address_display: addressDisplay,
 			status: "Draft",
@@ -296,22 +289,36 @@ function handleDeleteDraft(draftId) {
 }
 
 async function confirmDeleteDraft() {
-	// The store owns the toast and the list refresh, and routes the delete to
-	// whichever backend this draft lives in.
-	await draftsStore.deleteDraft(draftToDelete.value)
-	showDeleteDialog.value = false
-	draftToDelete.value = null
+	try {
+		await deleteDraft(draftToDelete.value)
+		await loadDrafts()
+		showDeleteDialog.value = false
+		draftToDelete.value = null
 
-	// Notify parent to update count
-	emit("drafts-updated")
+		// Notify parent to update count
+		emit("drafts-updated")
+
+		showSuccess(__("Draft invoice deleted"))
+	} catch (error) {
+		console.error("Error deleting draft:", error)
+		showError(__("Failed to delete draft"))
+	}
 }
 
 async function confirmClearAll() {
-	await draftsStore.deleteAllDrafts()
-	showClearAllDialog.value = false
+	try {
+		await clearAllDrafts()
+		await loadDrafts()
+		showClearAllDialog.value = false
 
-	// Notify parent to update count
-	emit("drafts-updated")
+		// Notify parent to update count
+		emit("drafts-updated")
+
+		showSuccess(__("All draft invoices deleted"))
+	} catch (error) {
+		console.error("Error clearing drafts:", error)
+		showError(__("Failed to clear drafts"))
+	}
 }
 
 function formatDateTime(dateStr) {
@@ -335,12 +342,5 @@ function calculateTotal(items) {
 		const rate = item.rate || 0
 		return sum + qty * rate
 	}, 0)
-}
-
-/** Server drafts carry the invoice total; cached drafts are summed line by line. */
-function draftTotal(draft) {
-	return draft?.grand_total != null
-		? draft.grand_total
-		: calculateTotal(draft?.items)
 }
 </script>

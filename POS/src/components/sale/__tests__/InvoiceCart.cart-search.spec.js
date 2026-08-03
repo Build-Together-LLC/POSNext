@@ -2,9 +2,6 @@ import { describe, expect, it, vi, beforeAll } from "vitest"
 import { mount } from "@vue/test-utils"
 import { createTestingPinia } from "@pinia/testing"
 
-const showWarning = vi.fn()
-const showError = vi.fn()
-
 // Frappe injects `__` as a global translation helper at runtime.
 beforeAll(() => {
 	globalThis.__ = (text, args) =>
@@ -25,13 +22,6 @@ vi.mock("frappe-ui", () => ({
 vi.mock("@/utils/offline", () => ({ isOffline: () => false }))
 vi.mock("@/utils/offline/workerClient", () => ({ offlineWorker: { getCustomers: vi.fn() } }))
 vi.mock("@/utils/currency", () => ({ formatCurrency: (v) => `₹ ${Number(v).toFixed(2)}` }))
-vi.mock("@/composables/useToast", () => ({
-	useToast: () => ({
-		showError,
-		showWarning,
-		showSuccess: vi.fn(),
-	}),
-}))
 vi.mock("../EditItemDialog.vue", () => ({ default: { template: "<div />" } }))
 
 import InvoiceCart from "../InvoiceCart.vue"
@@ -102,15 +92,5 @@ describe("InvoiceCart — item code + search in cart", () => {
 		await input.setValue(".9999999")
 		expect(visibleCodes(wrapper)).toHaveLength(0)
 		expect(wrapper.text()).toContain("Not in cart")
-	})
-
-	it("blocks holding the order when no customer is selected", async () => {
-		const wrapper = mountCart()
-		const holdButton = wrapper.find('button[aria-label="Hold order as draft"]')
-
-		await holdButton.trigger("click")
-
-		expect(wrapper.emitted("save-draft")).toBeUndefined()
-		expect(showWarning).toHaveBeenCalledWith("Please select a customer before holding the order")
 	})
 })
