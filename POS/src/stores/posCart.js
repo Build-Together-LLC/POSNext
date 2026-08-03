@@ -9,7 +9,7 @@ import {
 } from "@/utils/stockValidator"
 import { useToast } from "@/composables/useToast"
 import { defineStore } from "pinia"
-import { computed, nextTick, ref, toRaw, watch } from "vue"
+import { computed, ref, toRaw, watch } from "vue"
 
 export const usePOSCartStore = defineStore("posCart", () => {
 	// Use the existing invoice composable for core functionality
@@ -55,6 +55,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const selectionMode = ref("uom") // 'uom' or 'variant'
 	const suppressOfferReapply = ref(false)
 	const autoApplyInProgress = ref(false)
+	// A cart change arrived mid-request; drained instead of dropped (see runAutoApply)
+	const autoApplyPending = ref(false)
 	const dismissedOfferCodes = ref(new Set())
 	const currentDraftId = ref(null)
 
@@ -112,6 +114,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		appliedCoupon.value = null
 		dismissedOfferCodes.value = new Set()
 		currentDraftId.value = null
+		lastPricedCartSignature = ""
 	}
 
 	function setCustomer(selectedCustomer) {
@@ -398,6 +401,120 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
+	/**
+	 * Identity of the cart as far as offer pricing is concerned. Used to tell a
+	 * real cart change (needs re-pricing) from a re-entry that would only repeat
+	 * the same request.
+	 */
+	function getCartSignature() {
+		return invoiceItems.value
+			.map(
+				(item) =>
+					`${item.item_code}:${item.uom || item.stock_uom}:${item.quantity}`,
+			)
+			.join("|")
+	}
+
+	// Cart signature covered by the last successful apply_offers response.
+	let lastPricedCartSignature = ""
+
+	function getLocalOfferDiscount(offer) {
+		if (!offer || offer.offer !== "Item Price") return null
+		if (!offer.apply_on || offer.apply_on === "Transaction") return null
+		if (offer.discount_type && offer.discount_type !== "Discount Percentage") {
+			return null
+		}
+
+		const percentage = Number.parseFloat(offer.discount_percentage) || 0
+		if (percentage <= 0 || percentage > 100) return null
+
+		return { discount_percentage: percentage }
+	}
+
+
+	function applyOffersOptimistically(offers) {
+		const restorePoints = []
+		const codes = new Set()
+		// Offers already on the cart are only re-priced onto new lines - they must
+		// not raise a second chip or a duplicate toast.
+		const alreadyApplied = new Set(getAppliedOfferCodes())
+
+		for (const offer of offers) {
+			const local = getLocalOfferDiscount(offer)
+			if (!local) continue
+
+			const scope = offersStore.getOfferScope(offer)
+			let touchedAnyLine = false
+
+			for (const line of scope.lines) {
+				const item = invoiceItems.value[line.index]
+				if (!item || item.manual_discount) continue
+				// Never stack onto a line another rule already discounts - which
+				// rule wins is ERPNext's call, so leave those to the server.
+				if (item.pricing_rules && item.pricing_rules.length > 0) continue
+				if ((item.discount_percentage || 0) >= local.discount_percentage) continue
+
+				restorePoints.push({
+					item,
+					discount_percentage: item.discount_percentage || 0,
+					discount_amount: item.discount_amount || 0,
+					pricing_rules: item.pricing_rules,
+				})
+
+				item.discount_percentage = local.discount_percentage
+				item.discount_amount = 0
+				recalculateItem(item)
+				touchedAnyLine = true
+			}
+
+			if (!touchedAnyLine) continue
+			if (alreadyApplied.has(offer.name)) continue
+
+			codes.add(offer.name)
+			appliedOffers.value = [
+				...appliedOffers.value.filter((entry) => entry.code !== offer.name),
+				{
+					name: offer.title || offer.name,
+					code: offer.name,
+					offer,
+					source: "auto",
+					applied: true,
+					pending: true, // awaiting server confirmation
+					rules: [offer.name],
+					min_qty: offer.min_qty,
+					max_qty: offer.max_qty,
+					min_amt: offer.min_amt,
+					max_amt: offer.max_amt,
+				},
+			]
+
+			showSuccess(__('{0} applied successfully', [(offer.title || offer.name)]))
+		}
+
+		if (restorePoints.length) rebuildIncrementalCache()
+
+		return {
+			codes,
+			restore() {
+				if (!restorePoints.length) return
+				for (const point of restorePoints) {
+					point.item.discount_percentage = point.discount_percentage
+					point.item.discount_amount = point.discount_amount
+					point.item.pricing_rules = point.pricing_rules
+					recalculateItem(point.item)
+				}
+				rebuildIncrementalCache()
+			},
+			/** Drops the chips shown optimistically (used when the call fails). */
+			dropChips() {
+				if (!codes.size) return
+				appliedOffers.value = appliedOffers.value.filter(
+					(entry) => !(entry.pending && codes.has(entry.code)),
+				)
+			},
+		}
+	}
+
 	async function autoApplyEligibleOffers(currentProfile) {
 		if (!posProfile.value || invoiceItems.value.length === 0) return
 
@@ -408,12 +525,34 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				!existingCodes.includes(offer.name) &&
 				!dismissedOfferCodes.value.has(offer.name),
 		)
-		if (newOffers.length === 0) return
+
+
+		const appliedOfferDefs = appliedOffers.value
+			.map((entry) => entry.offer)
+			.filter(Boolean)
+
+		const cartSignature = getCartSignature()
+		const needsRepricing =
+			existingCodes.length > 0 && cartSignature !== lastPricedCartSignature
+
+		if (newOffers.length === 0 && !needsRepricing) return
 
 		const selectedCodes = [...new Set([...existingCodes, ...newOffers.map((o) => o.name)])]
 
+		// Built before the optimistic pass so the request describes the undiscounted
+		// cart rather than the local guess.
+		const invoiceData = buildInvoiceDataForOffers(currentProfile)
+
+		// Show what the cart can price on its own before waiting on the server.
+		const optimistic = applyOffersOptimistically([
+			...appliedOfferDefs,
+			...newOffers,
+		])
+
+		// The call still runs even when nothing was priced locally: offers the cart
+		// cannot price on its own (Give Product, Discount Amount, Transaction) also
+		// need the new lines evaluated, and the server owns that result.
 		try {
-			const invoiceData = buildInvoiceDataForOffers(currentProfile)
 			const response = await applyOffersResource.submit({
 				invoice_data: invoiceData,
 				selected_offers: selectedCodes,
@@ -422,10 +561,20 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const { items: responseItems, freeItems, appliedRules } =
 				parseOfferResponse(response, existingCodes)
 
+			// Undo the local guess first, then write the authoritative result over
+			// it. Both happen in the same tick, so nothing flickers - and a line the
+			// server did NOT discount is left clean instead of keeping our guess
+			// (applyServerDiscounts intentionally does not zero untouched lines).
+			optimistic.restore()
+
 			suppressOfferReapply.value = true
 			applyServerDiscounts(responseItems)
 			processFreeItems(freeItems)
 			filterActiveOffers(appliedRules)
+
+			// The signature captured before the request - if the cart changed while
+			// it was in flight, runAutoApply's drain re-prices against the newer one.
+			lastPricedCartSignature = cartSignature
 
 			for (const offer of newOffers) {
 				if (!appliedRules.includes(offer.name)) continue
@@ -448,10 +597,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				})
 				appliedOffers.value = updatedEntries
 
-				showSuccess(__('{0} applied successfully', [(offer.title || offer.name)]))
+				// Already announced when it was applied optimistically.
+				if (!optimistic.codes.has(offer.name)) {
+					showSuccess(__('{0} applied successfully', [(offer.title || offer.name)]))
+				}
 			}
 		} catch (error) {
 			console.error("Error auto-applying offers:", error)
+			optimistic.restore()
+			optimistic.dropChips()
 		}
 	}
 
@@ -883,6 +1037,37 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
+	function buildCurrentProfile() {
+		return {
+			customer: customer.value?.name || customer.value,
+			company: posProfile.value.company,
+			selling_price_list: posProfile.value.selling_price_list,
+			currency: posProfile.value.currency,
+		}
+	}
+
+
+	async function runAutoApply() {
+		if (!settingsStore.autoApplyOffers) return
+		if (!posProfile.value) return
+
+		if (autoApplyInProgress.value) {
+			autoApplyPending.value = true
+			return
+		}
+
+		autoApplyInProgress.value = true
+		try {
+			do {
+				autoApplyPending.value = false
+				await autoApplyEligibleOffers(buildCurrentProfile())
+			} while (autoApplyPending.value)
+		} finally {
+			autoApplyInProgress.value = false
+			autoApplyPending.value = false
+		}
+	}
+
 	// Watch for cart changes to update offer snapshot and validate offers
 	// Watch subtotal and create a reactive hash of items to detect any changes
 	watch(
@@ -891,32 +1076,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			() => invoiceItems.value.map(item => `${item.item_code}:${item.quantity}`).join(',')
 		],
 		async () => {
-			// Defer to next tick to prevent blocking UI
-			await nextTick()
-
+			// The snapshot must be refreshed synchronously: it is what decides
+			// eligibility, and deferring it delayed every auto-applied offer by a
+			// frame before the request was even built.
 			syncOfferSnapshot()
 
 			if (!posProfile.value) return
 
-			const currentProfile = {
-				customer: customer.value?.name || customer.value,
-				company: posProfile.value.company,
-				selling_price_list: posProfile.value.selling_price_list,
-				currency: posProfile.value.currency,
-			}
-
 			if (appliedOffers.value.length > 0) {
-				await reapplyOffer(currentProfile)
+				await reapplyOffer(buildCurrentProfile())
 			}
 
-			if (settingsStore.autoApplyOffers && !autoApplyInProgress.value) {
-				autoApplyInProgress.value = true
-				try {
-					await autoApplyEligibleOffers(currentProfile)
-				} finally {
-					autoApplyInProgress.value = false
-				}
-			}
+			await runAutoApply()
 		},
 		{ immediate: true, flush: "post" },
 	)
@@ -935,24 +1106,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (!posProfile.value || invoiceItems.value.length === 0) return
 			if (autoApplyInProgress.value) return
 
-			autoApplyInProgress.value = true
-			try {
-				const currentProfile = {
-					customer: customer.value?.name || customer.value,
-					company: posProfile.value.company,
-					selling_price_list: posProfile.value.selling_price_list,
-					currency: posProfile.value.currency,
-				}
+			// The offer list itself changed (new customer), so the previous
+			// customer's discounts are cleared before re-evaluating from scratch.
+			suppressOfferReapply.value = true
+			appliedOffers.value = []
+			resetPricingRuleDiscounts()
+			processFreeItems([])
 
-				suppressOfferReapply.value = true
-				appliedOffers.value = []
-				resetPricingRuleDiscounts()
-				processFreeItems([])
-
-				await autoApplyEligibleOffers(currentProfile)
-			} finally {
-				autoApplyInProgress.value = false
-			}
+			await runAutoApply()
 		},
 	)
 
