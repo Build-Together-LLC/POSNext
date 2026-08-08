@@ -726,7 +726,7 @@
 				<button
 					type="button"
 					v-if="items.length > 0"
-					@click="$emit('save-draft')"
+					@click="handleHoldOrder"
 					class="flex-1 py-2.5 px-2 rounded-lg font-semibold text-xs text-orange-700 bg-orange-50 hover:bg-orange-100 active:bg-orange-200 transition-all touch-manipulation active:scale-[0.98] flex items-center justify-center"
 					:aria-label="__('Hold order as draft')"
 				>
@@ -778,7 +778,7 @@ const cartStore = usePOSCartStore()      // Pinia store for cart state managemen
 const offersStore = usePOSOffersStore()  // Pinia store for offers/promotions
 const settingsStore = usePOSSettingsStore()
 const stockStore = useStockStore()
-const { showError } = useToast()
+const { showError, showWarning } = useToast()
 const { formatQuantity } = useFormatters() // Quantity formatting utilities
 
 /**
@@ -993,6 +993,17 @@ function refreshOffers() {
 	if (customer && props.posProfile && !isOffline()) {
 		offersResource.reload()
 	}
+}
+
+function handleHoldOrder() {
+	const customerValue = props.customer?.name || props.customer
+
+	if (!customerValue) {
+		showWarning(__("Please select a customer before holding the order"))
+		return
+	}
+
+	emit("save-draft")
 }
 
 // Fetch offers whenever the POS profile OR customer becomes available / changes.

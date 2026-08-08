@@ -389,6 +389,19 @@
 												</svg>
 												<span>{{ __('Print') }}</span>
 											</button>
+											<!-- Unconditional: get_invoices only returns submitted invoices
+											     and this tab already excludes returns, so every card here is
+											     returnable by anyone who can open this screen. -->
+											<button
+												@click="$emit('create-return', invoice)"
+												class="px-3 py-2 text-xs font-semibold text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-lg transition-colors flex items-center gap-1"
+												:title="__('Create Return')"
+											>
+												<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
+												</svg>
+												<span>{{ __('Return') }}</span>
+											</button>
 										</div>
 									</div>
 								</div>
@@ -421,20 +434,36 @@
 												</p>
 												<p class="text-xs text-gray-400 mt-0.5">{{ formatDateTime(draft.created_at) }}</p>
 											</div>
-											<button
-												@click.stop="$emit('delete-draft', draft.draft_id)"
-												class="text-gray-400 hover:text-red-600 transition-colors p-1"
-												:title="__('Delete draft')"
-											>
-												<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-												</svg>
-											</button>
+											<div class="flex items-center gap-2 ms-3">
+												<!-- The card body already loads the draft, but that is an
+												     invisible affordance - this is the discoverable way in.
+												     Unconditional: any cashier who can see a held draft can
+												     resume it. -->
+												<button
+													@click.stop="$emit('load-draft', draft)"
+													class="px-3 py-2 text-xs font-semibold text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors flex items-center gap-1"
+													:title="__('Edit draft')"
+												>
+													<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+													</svg>
+													<span>{{ __('Edit') }}</span>
+												</button>
+												<button
+													@click.stop="$emit('delete-draft', draft.draft_id)"
+													class="text-gray-400 hover:text-red-600 transition-colors p-1"
+													:title="__('Delete draft')"
+												>
+													<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+													</svg>
+												</button>
+											</div>
 										</div>
 
 										<div class="flex items-center justify-between text-xs">
 											<span class="text-gray-600">{{ __('{0} item(s)', [draft.items?.length || 0]) }}</span>
-											<span class="font-bold text-purple-600">{{ formatCurrency(calculateDraftTotal(draft.items)) }}</span>
+											<span class="font-bold text-purple-600">{{ formatCurrency(draftTotal(draft)) }}</span>
 										</div>
 
 										<!-- Items Preview -->
@@ -575,6 +604,7 @@ const emit = defineEmits([
 	"update:modelValue",
 	"view-invoice",
 	"print-invoice",
+	"create-return",
 	"load-draft",
 	"delete-draft",
 	"refresh-history",
@@ -895,6 +925,13 @@ function calculateDraftTotal(items) {
 		(sum, item) => sum + (item.quantity || item.qty || 0) * (item.rate || 0),
 		0,
 	)
+}
+
+/** Server drafts carry the invoice total; cached drafts are summed line by line. */
+function draftTotal(draft) {
+	return draft?.grand_total != null
+		? draft.grand_total
+		: calculateDraftTotal(draft?.items)
 }
 
 // Lifecycle

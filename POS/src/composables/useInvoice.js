@@ -21,6 +21,7 @@ export function useInvoice() {
 	const taxRules = ref([]) // Tax rules from POS Profile
 	const taxInclusive = ref(false) // Tax inclusive setting from POS Settings
 	const disableRoundedTotal = ref(0) // 0 = rounding enabled, 1 = rounding disabled
+	const heldInvoiceName = ref(null)
 
 	// Performance: Incrementally maintained aggregates (updated on add/remove/change)
 	// This avoids O(n) array reductions on every reactive change
@@ -664,14 +665,33 @@ export function useInvoice() {
 		}
 	}
 
-	async function saveDraft() {
-		/**
-		 * Save invoice as draft (Step 1)
-		 * This creates the invoice with docstatus=0
-		 */
+	/**
+	 * Builds the Sales Invoice payload from the current cart.
+	 *
+	 * Single source of truth for the draft, hold and submit calls so all three
+	 * send identical item rates, discounts and pricing rules.
+	 *
+	 * @param {Object} [options]
+	 * @param {boolean} [options.includePayments=true] - Held drafts are unpaid,
+	 *   so holding sends an empty payments list.
+	 * @param {boolean} [options.includeSalesTeam=true]
+	 * @returns {Object} Sales Invoice payload. Carries `name` when the cart is
+	 *   bound to a held invoice, so the backend updates that invoice in place.
+	 */
+	function buildInvoicePayload({
+		includePayments = true,
+		includeSalesTeam = true,
+	} = {}) {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 		const rawItems = toRaw(invoiceItems.value)
 		const rawPayments = toRaw(payments.value)
+		const rawSalesTeam = toRaw(salesTeam.value)
+
+		const appliedPricingRules = rawItems.map((item) =>
+			Array.isArray(item.pricing_rules)
+				? item.pricing_rules.filter(Boolean)
+				: [],
+		)
 
 		const invoiceData = {
 			doctype: "Sales Invoice",
@@ -700,17 +720,41 @@ export function useInvoice() {
 				discount_percentage: item.discount_percentage || 0,
 				discount_amount: item.discount_amount || 0,
 			})),
-			payments: rawPayments.map((p) => ({
-				mode_of_payment: p.mode_of_payment,
-				amount: p.amount,
-				type: p.type,
-			})),
+			payments: includePayments
+				? rawPayments.map((p) => ({
+						mode_of_payment: p.mode_of_payment,
+						amount: p.amount,
+						type: p.type,
+					}))
+				: [],
 			discount_amount: additionalDiscount.value || 0,
 			coupon_code: couponCode.value,
 			disable_rounded_total: disableRoundedTotal.value !== undefined ? disableRoundedTotal.value : 0,
 			is_pos: 1,
-			update_stock: 1,
+			update_stock: 1, // Critical: Ensures stock is updated
+			applied_pricing_rules: appliedPricingRules,
 		}
+
+		if (heldInvoiceName.value) {
+			invoiceData.name = heldInvoiceName.value
+		}
+
+		if (includeSalesTeam && rawSalesTeam && rawSalesTeam.length > 0) {
+			invoiceData.sales_team = rawSalesTeam.map((member) => ({
+				sales_person: member.sales_person,
+				allocated_percentage: member.allocated_percentage || 0,
+			}))
+		}
+
+		return invoiceData
+	}
+
+	async function saveDraft() {
+		/**
+		 * Save invoice as draft (Step 1)
+		 * This creates the invoice with docstatus=0
+		 */
+		const invoiceData = buildInvoicePayload()
 
 		const result = await updateInvoiceResource.submit({ data: invoiceData })
 		return result?.data || result
@@ -723,60 +767,9 @@ export function useInvoice() {
 		 * 2. Validate stock and submit
 		 */
 		try {
-			// Step 1: Create invoice draft
-			// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-			const rawItems = toRaw(invoiceItems.value)
-			const rawPayments = toRaw(payments.value)
-			const rawSalesTeam = toRaw(salesTeam.value)
-
-			const appliedPricingRules = rawItems.map((item) =>
-				Array.isArray(item.pricing_rules)
-					? item.pricing_rules.filter(Boolean)
-					: [],
-			)
-
-			const invoiceData = {
-				doctype: "Sales Invoice",
-				pos_profile: posProfile.value,
-				posa_pos_opening_shift: posOpeningShift.value,
-				customer: customer.value?.name || customer.value,
-				items: rawItems.map((item) => ({
-					item_code: item.item_code,
-					item_name: item.item_name,
-					qty: item.quantity,
-
-					rate: taxInclusive.value
-						? ((item.price_list_rate || item.rate) - (item.discount_amount || 0) / (item.quantity || 1))
-						: (item.quantity > 0 ? item.amount / item.quantity : item.rate),
-					price_list_rate: item.price_list_rate || item.rate,
-					uom: item.uom,
-					warehouse: item.warehouse,
-					batch_no: item.batch_no,
-					serial_no: item.serial_no,
-					conversion_factor: item.conversion_factor || 1,
-					discount_percentage: item.discount_percentage || 0,
-					discount_amount: item.discount_amount || 0,
-				})),
-				payments: rawPayments.map((p) => ({
-					mode_of_payment: p.mode_of_payment,
-					amount: p.amount,
-					type: p.type,
-				})),
-				discount_amount: additionalDiscount.value || 0,
-				coupon_code: couponCode.value,
-				disable_rounded_total: disableRoundedTotal.value !== undefined ? disableRoundedTotal.value : 0,
-				is_pos: 1,
-				update_stock: 1, // Critical: Ensures stock is updated
-				applied_pricing_rules: appliedPricingRules,
-			}
-
-			// Add sales_team if provided
-			if (rawSalesTeam && rawSalesTeam.length > 0) {
-				invoiceData.sales_team = rawSalesTeam.map((member) => ({
-					sales_person: member.sales_person,
-					allocated_percentage: member.allocated_percentage || 0,
-				}))
-			}
+			// Step 1: Create invoice draft (or update the held draft being resumed)
+			const invoiceData = buildInvoicePayload()
+			const appliedPricingRules = invoiceData.applied_pricing_rules
 
 			const draftInvoice = await updateInvoiceResource.submit({
 				data: invoiceData,
@@ -916,6 +909,7 @@ export function useInvoice() {
 		payments.value = []
 		additionalDiscount.value = 0
 		couponCode.value = null
+		heldInvoiceName.value = null
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0
@@ -943,6 +937,7 @@ export function useInvoice() {
 		payments.value = []
 		additionalDiscount.value = 0
 		couponCode.value = null
+		heldInvoiceName.value = null
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0
@@ -1020,6 +1015,7 @@ export function useInvoice() {
 		couponCode,
 		taxRules,
 		taxInclusive,
+		heldInvoiceName,
 
 		// Computed
 		subtotal,
@@ -1044,6 +1040,7 @@ export function useInvoice() {
 		removePayment,
 		updatePayment,
 		validateStock,
+		buildInvoicePayload,
 		saveDraft,
 		submitInvoice,
 		resetInvoice,

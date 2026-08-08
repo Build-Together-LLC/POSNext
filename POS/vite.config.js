@@ -238,6 +238,11 @@ export default defineConfig({
 			"interactjs",
 		],
 	},
+	// Component specs mount into a DOM; without this vitest runs in node and
+	// every mount() throws "document is not defined".
+	test: {
+		environment: "jsdom",
+	},
 	server: {
 		allowedHosts: true,
 		port: 8080,

@@ -117,7 +117,22 @@ export const syncOfflineInvoices = async () => {
 			// Offline storage uses 'quantity' (cart format) but server expects 'qty'
 			const invoiceData = { ...invoice.data }
 			if (invoiceData.items && Array.isArray(invoiceData.items)) {
-				invoiceData.items = invoiceData.items.map((item) => ({
+				// `pricing_rules` is an array on a cart line but a Small Text field on
+				// Sales Invoice Item, so leaving it in place fails the whole submit
+				// with "Value for Pricing Rules cannot be a list". New queue entries
+				// are built by buildInvoicePayload and never carry it; this lifts it
+				// out of anything queued before that, which would otherwise keep
+				// failing forever.
+				const rulesPerItem = invoiceData.items.map((item) =>
+					Array.isArray(item.pricing_rules) ? item.pricing_rules.filter(Boolean) : [],
+				)
+
+				if (rulesPerItem.some((rules) => rules.length > 0)) {
+					invoiceData.applied_pricing_rules =
+						invoiceData.applied_pricing_rules || rulesPerItem
+				}
+
+				invoiceData.items = invoiceData.items.map(({ pricing_rules, ...item }) => ({
 					...item,
 					qty: item.quantity || item.qty || 1,
 				}))
