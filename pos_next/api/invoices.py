@@ -22,6 +22,11 @@ except Exception:  # pragma: no cover - ERPNext not installed in some environmen
     erpnext_get_applied_pricing_rules = None
 
 
+# Roles allowed to clear held POS drafts that belong to another cashier
+# (see delete_all_pos_drafts).
+POS_DRAFT_MANAGER_ROLES = ("System Manager", "Sales Manager", "Accounts Manager")
+
+
 # ==========================================
 # Helper Functions
 # ==========================================
@@ -303,6 +308,49 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 # ==========================================
 
 
+def _get_editable_invoice(doctype, invoice_name):
+    """Load the draft `invoice_name` points at, or None if a new document is due.
+
+    A held draft can be resumed on more than one terminal at a time. If the first
+    till submits it, the second must not quietly fall through to creating a
+    second Sales Invoice for the same sale - that books the goods twice. So a
+    name that exists but has left draft state is an error, not a cue to create.
+
+    Returns None only when there is nothing to update: no name at all, or a name
+    the server has never heard of (an invoice queued offline, say), in which case
+    the caller creates the document.
+    """
+    if not invoice_name:
+        return None
+
+    docstatus = frappe.db.get_value(doctype, invoice_name, "docstatus")
+
+    if docstatus is None:
+        return None
+
+    docstatus = cint(docstatus)
+
+    if docstatus == 1:
+        frappe.throw(
+            _(
+                "Invoice {0} has already been submitted, most likely from another "
+                "terminal. Refresh the held invoices before continuing - do not "
+                "charge this sale again."
+            ).format(invoice_name),
+            title=_("Already Submitted"),
+        )
+
+    if docstatus == 2:
+        frappe.throw(
+            _("Invoice {0} has been cancelled and can no longer be edited.").format(
+                invoice_name
+            ),
+            title=_("Invoice Cancelled"),
+        )
+
+    return frappe.get_doc(doctype, invoice_name)
+
+
 @frappe.whitelist()
 def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
@@ -317,11 +365,14 @@ def update_invoice(data):
         # Ensure the document type is set
         data.setdefault("doctype", doctype)
 
-        # Create or update invoice
-        if data.get("name"):
-            invoice_doc = frappe.get_doc(doctype, data.get("name"))
+        invoice_name = data.get("name")
+        # Throws if the name belongs to an invoice that is no longer a draft.
+        invoice_doc = _get_editable_invoice(doctype, invoice_name)
+
+        if invoice_doc:
             invoice_doc.update(data)
         else:
+            data.pop("name", None)
             invoice_doc = frappe.get_doc(data)
 
         pos_profile_doc = None
@@ -576,14 +627,17 @@ def submit_invoice(invoice=None, data=None):
 
         invoice_name = invoice.get("name")
 
-        # Get or create invoice
-        if not invoice_name or not frappe.db.exists(doctype, invoice_name):
-            created = update_invoice(json.dumps(invoice))
+        # Throws if this sale was already submitted (or cancelled) elsewhere,
+        # rather than booking a duplicate for the same cart.
+        invoice_doc = _get_editable_invoice(doctype, invoice_name)
+
+        if invoice_doc:
+            invoice_doc.update(invoice)
+        else:
+            invoice.pop("name", None)
+            created = update_invoice(json.dumps(invoice, default=str))
             invoice_name = created.get("name")
             invoice_doc = frappe.get_doc(doctype, invoice_name)
-        else:
-            invoice_doc = frappe.get_doc(doctype, invoice_name)
-            invoice_doc.update(invoice)
 
         # Ensure update_stock is set
         invoice_doc.update_stock = 1
@@ -962,6 +1016,12 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=24):
     """
     from datetime import datetime, timedelta
 
+    if is_server_side_draft_enabled(pos_profile):
+        return {
+            "deleted": 0,
+            "message": "Skipped: server side draft invoices are enabled for this profile",
+        }
+
     doctype = "Sales Invoice"
     cutoff_time = datetime.now() - timedelta(hours=int(max_age_hours))
 
@@ -1002,6 +1062,520 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=24):
         "deleted": deleted_count,
         "message": f"Cleaned up {deleted_count} old draft invoices",
     }
+
+
+
+
+def is_server_side_draft_enabled(pos_profile):
+    """Return True when held invoices for this POS Profile are stored server side."""
+    if not pos_profile:
+        return False
+
+    try:
+        return bool(
+            cint(
+                frappe.db.get_value(
+                    "POS Settings",
+                    {"pos_profile": pos_profile},
+                    "allow_server_side_draft_invoice",
+                )
+                or 0
+            )
+        )
+    except Exception:
+        # Field missing (site not migrated yet) - fall back to browser drafts.
+        return False
+
+
+def _get_draft_item_meta(item_codes):
+    """Fetch the Item-master fields the POS cart needs to rehydrate a held draft.
+
+    Returns (meta_by_item_code, alternate_uoms_by_item_code).
+    """
+    if not item_codes:
+        return {}, {}
+
+    item_codes = list(item_codes)
+
+    fields = [
+        "name",
+        "item_name",
+        "item_group",
+        "brand",
+        "stock_uom",
+        "image",
+        "has_batch_no",
+        "has_serial_no",
+        "is_stock_item",
+    ]
+    if frappe.db.has_column("Item", "custom_sub_brand"):
+        fields.append("custom_sub_brand")
+
+    meta = {
+        row["name"]: row
+        for row in frappe.get_all(
+            "Item", filters={"name": ["in", item_codes]}, fields=fields
+        )
+    }
+
+    uoms = {}
+    for row in frappe.get_all(
+        "UOM Conversion Detail",
+        filters={"parent": ["in", item_codes], "parenttype": "Item"},
+        fields=["parent", "uom", "conversion_factor"],
+    ):
+        # Mirror the item search payload: alternate UOMs only, stock UOM excluded.
+        if row["uom"] == (meta.get(row["parent"]) or {}).get("stock_uom"):
+            continue
+        uoms.setdefault(row["parent"], []).append(
+            {
+                "uom": row["uom"],
+                "conversion_factor": flt(row["conversion_factor"]) or 1,
+            }
+        )
+
+    return meta, uoms
+
+
+def _get_applied_rules_by_row(doc):
+    """Map each item row name to the Pricing Rules recorded against it."""
+    rules_by_row = {}
+    for row in doc.get("pricing_rules") or []:
+        if not row.get("pricing_rule"):
+            continue
+        rules_by_row.setdefault(row.get("child_docname"), []).append(row.pricing_rule)
+
+    return rules_by_row
+
+
+def _serialize_pos_draft(doc):
+    """Convert a Sales Invoice draft into the cart shape the POS front-end uses.
+
+    The POS cart works in `quantity` / line-level `discount_amount`, while the
+    Sales Invoice stores `qty` / per-unit `discount_amount`. Discounts are handed
+    back as a percentage wherever one exists so the cart recomputes the exact
+    line values itself (see recalculateItem in useInvoice.js).
+    """
+    items = doc.get("items") or []
+    meta, uoms = _get_draft_item_meta({d.item_code for d in items if d.item_code})
+    rules_by_row = _get_applied_rules_by_row(doc)
+
+    cart_items = []
+    for row in items:
+        item_meta = meta.get(row.item_code) or {}
+        qty = flt(row.qty)
+        price_list_rate = flt(row.price_list_rate) or flt(row.rate)
+        discount_percentage = flt(row.discount_percentage)
+        # Per-unit on the invoice -> line total in the cart.
+        discount_amount = 0 if discount_percentage else flt(row.discount_amount) * qty
+        pricing_rules = rules_by_row.get(row.name) or []
+
+        cart_items.append(
+            {
+                "item_code": row.item_code,
+                "item_name": row.item_name or item_meta.get("item_name"),
+                "qty": qty,
+                "quantity": qty,
+                "rate": price_list_rate,
+                "price_list_rate": price_list_rate,
+                "amount": flt(row.amount),
+                "discount_percentage": discount_percentage,
+                "discount_amount": discount_amount,
+                # A discount with no pricing rule behind it was typed in by the
+                # cashier - flag it so re-applying offers does not wipe it.
+                "manual_discount": bool(
+                    (discount_percentage or discount_amount) and not pricing_rules
+                ),
+                "pricing_rules": pricing_rules,
+                "uom": row.uom or item_meta.get("stock_uom"),
+                "stock_uom": row.stock_uom or item_meta.get("stock_uom"),
+                "conversion_factor": flt(row.conversion_factor) or 1,
+                "warehouse": row.warehouse,
+                "batch_no": row.get("batch_no"),
+                "serial_no": row.get("serial_no"),
+                "item_group": item_meta.get("item_group"),
+                "brand": item_meta.get("brand"),
+                "custom_sub_brand": item_meta.get("custom_sub_brand"),
+                "image": item_meta.get("image"),
+                "has_batch_no": cint(item_meta.get("has_batch_no")),
+                "has_serial_no": cint(item_meta.get("has_serial_no")),
+                "is_stock_item": cint(item_meta.get("is_stock_item", 1)),
+                "item_uoms": uoms.get(row.item_code) or [],
+            }
+        )
+
+    applied_rules = sorted({rule for rules in rules_by_row.values() for rule in rules})
+
+    return {
+        # draft_id keeps the browser-draft contract so the dialogs, the cart's
+        # currentDraftId and the delete/print handlers all work unchanged.
+        "draft_id": doc.name,
+        "invoice_name": doc.name,
+        "server_draft": True,
+        "pos_profile": doc.pos_profile,
+        "pos_opening_shift": doc.get("posa_pos_opening_shift"),
+        "customer": {
+            "name": doc.customer,
+            "customer_name": doc.customer_name or doc.customer,
+        },
+        "items": cart_items,
+        "applied_pricing_rules": applied_rules,
+        "additional_discount": flt(doc.discount_amount),
+        "coupon_code": doc.get("coupon_code"),
+        "grand_total": flt(doc.grand_total),
+        "created_at": cstr(doc.creation),
+        "updated_at": cstr(doc.modified),
+        "owner": doc.owner,
+    }
+
+
+def _get_pos_draft_doc(invoice_name, ptype="read"):
+    """Load a held draft after checking it exists, is unsubmitted and is reachable.
+
+    Access is decided by the POS Profile the ticket was parked on, not by
+    record-level permission on the Sales Invoice - a hold has to be resumable
+    from any till on that profile, which is the same rule get_pos_drafts lists
+    by. Deleting someone else's hold additionally needs a manager role, matching
+    delete_all_pos_drafts.
+    """
+    if not invoice_name:
+        frappe.throw(_("Draft invoice name is required"))
+
+    if not frappe.db.exists("Sales Invoice", invoice_name):
+        frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
+
+    doc = frappe.get_doc("Sales Invoice", invoice_name)
+
+    # Access first: without this, the docstatus message below would tell any
+    # logged-in user whether an arbitrary invoice exists and is still a draft.
+    _assert_pos_profile_access(doc.pos_profile)
+
+    if doc.docstatus != 0:
+        frappe.throw(_("Invoice {0} is no longer a draft").format(invoice_name))
+
+    if (
+        ptype == "delete"
+        and doc.owner != frappe.session.user
+        and not _can_delete_others_drafts()
+    ):
+        frappe.throw(
+            _("Draft {0} was held by another user and can only be deleted by a manager").format(
+                invoice_name
+            ),
+            frappe.PermissionError,
+        )
+
+    return doc
+
+
+@frappe.whitelist()
+def save_pos_draft(data):
+    """Hold the current cart as a server-side Sales Invoice draft (create or update).
+
+    Pass `name` in the payload to update an already held draft, omit it to hold a
+    new one. Returns the full draft, in the same shape as get_pos_draft (not the
+    summary rows get_pos_drafts lists).
+    """
+    data = json.loads(data) if isinstance(data, str) else data
+
+    pos_profile = data.get("pos_profile")
+    if not is_server_side_draft_enabled(pos_profile):
+        frappe.throw(
+            _("Server side draft invoices are not enabled for POS Profile {0}").format(
+                pos_profile or ""
+            )
+        )
+
+    if not data.get("items"):
+        frappe.throw(_("Cannot hold an invoice with an empty cart"))
+
+    if data.get("name"):
+        # Refuse to overwrite something that already left draft state.
+        _get_pos_draft_doc(data.get("name"), ptype="write")
+
+    # A held invoice is not paid yet - payment is captured when it is resumed.
+    data["payments"] = []
+    data.setdefault("doctype", "Sales Invoice")
+    data.setdefault("is_pos", 1)
+    data.setdefault("update_stock", 1)
+
+    saved = update_invoice(json.dumps(data, default=str))
+
+    return _serialize_pos_draft(frappe.get_doc("Sales Invoice", saved.get("name")))
+
+
+def _pos_draft_filters(pos_profile=None, pos_opening_shift=None, owner=None):
+    """Filters that identify held (unsubmitted) POS invoices."""
+    filters = {"docstatus": 0, "is_pos": 1}
+
+    if pos_profile:
+        filters["pos_profile"] = pos_profile
+
+    if pos_opening_shift and frappe.db.has_column(
+        "Sales Invoice", "posa_pos_opening_shift"
+    ):
+        filters["posa_pos_opening_shift"] = pos_opening_shift
+
+    if owner:
+        filters["owner"] = owner
+
+    return filters
+
+
+def _assert_pos_profile_access(pos_profile):
+    """Gate the held-draft endpoints on the caller being a user of this profile.
+
+    The queries below deliberately run without record-level permission checks so
+    that a parked ticket is reachable from any till on the profile - that is the
+    whole point of holding one. This is the guard that replaces them: the caller
+    must be listed on the POS Profile, or hold blanket read on Sales Invoice.
+    """
+    if not pos_profile:
+        frappe.throw(_("POS Profile is required"))
+
+    if frappe.db.exists(
+        "POS Profile User", {"parent": pos_profile, "user": frappe.session.user}
+    ):
+        return
+
+    if not frappe.has_permission("Sales Invoice", "read"):
+        frappe.throw(
+            _("You don't have access to POS Profile {0}").format(pos_profile),
+            frappe.PermissionError,
+        )
+
+
+def _pos_draft_names(pos_profile=None, pos_opening_shift=None, owner=None, limit=0):
+    """Names of held drafts, newest held first, without loading the documents.
+
+    get_all, not get_list: see _assert_pos_profile_access.
+    """
+    return frappe.get_all(
+        "Sales Invoice",
+        filters=_pos_draft_filters(pos_profile, pos_opening_shift, owner),
+        pluck="name",
+        order_by="creation desc",
+        # 0 means "every held draft" (Frappe's no-limit convention).
+        limit_page_length=cint(limit),
+    )
+
+
+def _can_delete_others_drafts():
+    """Whether the session user may clear held drafts parked by other cashiers."""
+    return bool(set(POS_DRAFT_MANAGER_ROLES) & set(frappe.get_roles()))
+
+
+def _serialize_pos_draft_summary(row, item_rows):
+    """List-shaped view of a held draft: what the drafts dialog actually renders.
+
+    The dialog shows the customer, the timestamp, the line count, the total and
+    the first few item names - none of which need the Item master, the alternate
+    UOMs or the applied Pricing Rules that _serialize_pos_draft looks up per
+    document. Resuming or printing a draft hydrates the full cart shape through
+    get_pos_draft, so `summary` marks this payload as display-only.
+    """
+    items = [
+        {
+            "item_code": item.get("item_code"),
+            "item_name": item.get("item_name") or item.get("item_code"),
+            "qty": flt(item.get("qty")),
+            # The cart works in `quantity`; keep both so the dialogs and the
+            # local-draft rows stay interchangeable.
+            "quantity": flt(item.get("qty")),
+            "rate": flt(item.get("rate")),
+            "amount": flt(item.get("amount")),
+            "uom": item.get("uom"),
+        }
+        for item in item_rows
+    ]
+
+    return {
+        # draft_id keeps the browser-draft contract (see _serialize_pos_draft).
+        "draft_id": row.get("name"),
+        "invoice_name": row.get("name"),
+        "server_draft": True,
+        "summary": True,
+        "pos_profile": row.get("pos_profile"),
+        "pos_opening_shift": row.get("posa_pos_opening_shift"),
+        "customer": {
+            "name": row.get("customer"),
+            "customer_name": row.get("customer_name") or row.get("customer"),
+        },
+        "items": items,
+        "item_count": len(items),
+        "additional_discount": flt(row.get("discount_amount")),
+        "coupon_code": row.get("coupon_code"),
+        "grand_total": flt(row.get("grand_total")),
+        "created_at": cstr(row.get("creation")),
+        "updated_at": cstr(row.get("modified")),
+        "owner": row.get("owner"),
+    }
+
+
+@frappe.whitelist()
+def get_pos_drafts(pos_profile=None, pos_opening_shift=None, limit=0, owner=None):
+    """List held draft invoices for a POS Profile, newest held first.
+
+    Ordered by `creation`, which is the timestamp the drafts dialog shows and the
+    order the POS itself applies once it merges these rows with the drafts held
+    in the browser (see sortByCreatedDesc in stores/posDrafts.js).
+
+    Returns summary rows (see _serialize_pos_draft_summary), built from two
+    queries no matter how many drafts are listed - the parents and their lines.
+    Loading a draft into the cart or printing it goes through get_pos_draft for
+    the full cart shape.
+
+    The opening shift is deliberately optional: a held invoice must still be
+    reachable after the shift that parked it was closed.
+
+    `limit` defaults to 0 - every held draft. A capped list would silently hide
+    parked tickets, and a cashier cannot resume what the list does not show;
+    holds are cleared as they are paid, so this set stays small in practice.
+
+    Held drafts stay visible to every cashier on the profile on purpose, so a
+    parked ticket can be resumed at any till - hence get_all rather than
+    get_list, gated by _assert_pos_profile_access. Pass `owner` to narrow the
+    list to a single cashier (delete_all_pos_drafts does this to protect other
+    people's drafts).
+    """
+    _assert_pos_profile_access(pos_profile)
+
+    fields = [
+        "name",
+        "customer",
+        "customer_name",
+        "pos_profile",
+        "grand_total",
+        "discount_amount",
+        "coupon_code",
+        "creation",
+        "modified",
+        "owner",
+    ]
+    if frappe.db.has_column("Sales Invoice", "posa_pos_opening_shift"):
+        fields.append("posa_pos_opening_shift")
+
+    rows = frappe.get_all(
+        "Sales Invoice",
+        filters=_pos_draft_filters(pos_profile, pos_opening_shift, owner),
+        fields=fields,
+        order_by="creation desc",
+        # 0 means "every held draft" (Frappe's no-limit convention).
+        limit_page_length=cint(limit),
+    )
+
+    if not rows:
+        return []
+
+    # One query for every line of every listed draft.
+    items_by_draft = {}
+    for item in frappe.get_all(
+        "Sales Invoice Item",
+        filters={"parent": ["in", [row["name"] for row in rows]]},
+        fields=["parent", "item_code", "item_name", "qty", "uom", "rate", "amount"],
+        order_by="parent asc, idx asc",
+        limit_page_length=0,
+    ):
+        items_by_draft.setdefault(item["parent"], []).append(item)
+
+    return [
+        _serialize_pos_draft_summary(row, items_by_draft.get(row["name"]) or [])
+        for row in rows
+    ]
+
+
+@frappe.whitelist()
+def get_pos_draft(invoice_name):
+    """Read a single held draft in cart shape."""
+    return _serialize_pos_draft(_get_pos_draft_doc(invoice_name))
+
+
+@frappe.whitelist()
+def get_pos_draft_states(invoice_names):
+    """Docstatus of the given invoices, keyed by name; unknown names are omitted.
+
+    Lets the POS reconcile a hold kept in the browser cache against the Sales
+    Invoice it is bound to - a hold whose invoice was submitted elsewhere (or by
+    this device's own offline queue) is spent, and one whose invoice was
+    cancelled or deleted has nothing left to update. See pruneBoundDrafts in
+    stores/posDrafts.js.
+    """
+    names = json.loads(invoice_names) if isinstance(invoice_names, str) else invoice_names
+
+    if not names:
+        return {}
+
+    return {
+        row["name"]: cint(row["docstatus"])
+        for row in frappe.get_all(
+            "Sales Invoice",
+            # is_pos scopes this to tickets the POS could have held, so it cannot
+            # be used to probe unrelated documents.
+            filters={"name": ["in", list(names)], "is_pos": 1},
+            fields=["name", "docstatus"],
+            limit_page_length=0,
+        )
+    }
+
+
+@frappe.whitelist()
+def delete_pos_draft(invoice_name):
+    """Delete a single held draft."""
+    doc = _get_pos_draft_doc(invoice_name, ptype="delete")
+
+    frappe.delete_doc("Sales Invoice", doc.name, force=1)
+    frappe.db.commit()
+
+    return {"deleted": doc.name}
+
+
+@frappe.whitelist()
+def delete_all_pos_drafts(pos_profile=None, pos_opening_shift=None):
+    """Clear held drafts for this profile.
+
+    Held drafts are shared - every cashier on the profile can see and resume one
+    (see get_pos_drafts), and the stock POS roles let a cashier read and delete
+    invoices raised by colleagues. Clear All must therefore not become a way for
+    one cashier to wipe the tickets another cashier parked: it removes only the
+    caller's own drafts unless the caller holds one of POS_DRAFT_MANAGER_ROLES.
+
+    Returns the deleted and failed names plus `skipped`, the number of other
+    cashiers' drafts that were deliberately left in place, so the POS can tell
+    the user why the list did not empty completely.
+    """
+    _assert_pos_profile_access(pos_profile)
+
+    owner_only = not _can_delete_others_drafts()
+
+    names = _pos_draft_names(
+        pos_profile=pos_profile,
+        pos_opening_shift=pos_opening_shift,
+        owner=frappe.session.user if owner_only else None,
+    )
+
+    skipped = 0
+    if owner_only:
+        visible = _pos_draft_names(
+            pos_profile=pos_profile, pos_opening_shift=pos_opening_shift
+        )
+        skipped = max(len(visible) - len(names), 0)
+
+    deleted, failed = [], []
+    for name in names:
+        try:
+            frappe.delete_doc("Sales Invoice", name, force=1)
+            deleted.append(name)
+        except Exception as e:
+            failed.append(name)
+            frappe.log_error(
+                f"Failed to delete held draft {name}: {e}",
+                "POS Draft Delete Error",
+            )
+
+    if deleted:
+        frappe.db.commit()
+
+    return {"deleted": deleted, "failed": failed, "skipped": skipped}
 
 
 # ==========================================

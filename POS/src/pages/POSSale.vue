@@ -336,6 +336,7 @@
 			:pos-opening-shift="shiftStore.currentShift?.name"
 			:currency="shiftStore.profileCurrency"
 			:bad-stock-warehouse="shiftStore.currentProfile?.custom_bad_stock_warehouse || ''"
+			:preselect-invoice="returnInvoiceName"
 			@return-created="handleReturnCreated"
 		/>
 
@@ -452,6 +453,7 @@
 			:draft-invoices="draftsStore.drafts"
 			@view-invoice="handleViewInvoice"
 			@print-invoice="handlePrintInvoice"
+			@create-return="handleCreateReturnFromHistory"
 			@load-draft="handleLoadDraftFromManagement"
 			@delete-draft="handleDeleteDraft"
 			@refresh-history="loadInvoiceHistoryData"
@@ -795,6 +797,10 @@ const showStockLookup = ref(false)
 
 // Invoice Management dialog
 const showInvoiceManagement = ref(false)
+// Invoice the return dialog should open on, set by the Return button on an
+// invoice card. Cleared when the dialog closes so the next plain "Return
+// Invoice" from the menu still opens on the search list.
+const returnInvoiceName = ref("")
 
 // Invoice Detail dialog
 const showInvoiceDetail = ref(false)
@@ -1529,21 +1535,29 @@ async function handlePaymentCompleted(paymentData) {
 			cartStore.disableRoundedTotal = paymentData.disable_rounded_total
 		}
 
-		// Delete draft if it exists (since we're submitting/saving invoice)
+		// Held draft this sale came from, if any. The store decides what to clean
+		// up: a server-side draft IS the invoice being submitted, so it is never
+		// deleted - submitting simply moves it out of draft state.
 		const draftIdToDelete = cartStore.currentDraftId
 
 		if (offlineStore.isOffline) {
-			const invoiceData = {
-				pos_profile: cartStore.posProfile,
-				posa_pos_opening_shift: cartStore.posOpeningShift,
-				customer: customerValue || shiftStore.profileCustomer,
-				items: JSON.parse(JSON.stringify(cartStore.invoiceItems)),
-				payments: JSON.parse(JSON.stringify(cartStore.payments)),
-				sales_team: JSON.parse(JSON.stringify(cartStore.salesTeam || [])),
-				grand_total: cartStore.grandTotal,
-				total_tax: cartStore.totalTax,
-				total_discount: cartStore.totalDiscount,
+			// Queue exactly what an online checkout would post. Raw cart items are
+			// not a Sales Invoice payload: `pricing_rules` is an array on a cart line
+			// but a Small Text field on Sales Invoice Item, so syncing one threw
+			// "Value for Pricing Rules cannot be a list" and the sale never posted.
+			// buildInvoicePayload maps the invoice fields explicitly and carries the
+			// applied rules top-level, where submit_invoice expects them - and it
+			// stamps `name` when this sale was held as a Sales Invoice, so syncing
+			// submits that document instead of raising a second one for the same cart.
+			const invoiceData = cartStore.buildInvoicePayload()
+
+			if (!invoiceData.customer) {
+				invoiceData.customer = customerValue || shiftStore.profileCustomer
 			}
+
+			// Not an invoice field the server needs - the pending-invoices dialog
+			// renders it while the sale is still queued.
+			invoiceData.grand_total = cartStore.grandTotal
 
 			await offlineStore.saveInvoiceOffline(invoiceData)
 			uiStore.showSuccess(`OFFLINE-${Date.now()}`, cartStore.grandTotal, paymentData.paid_amount)
@@ -1552,10 +1566,8 @@ async function handlePaymentCompleted(paymentData) {
 			// Reset cart hash after successful payment
 			previousCartHash = ""
 
-			// Delete draft after successful save
-			if (draftIdToDelete) {
-				draftsStore.deleteDraft(draftIdToDelete)
-			}
+			// Clear the held draft this sale came from
+			draftsStore.discardDraftAfterOfflineSave(draftIdToDelete)
 
 			showSuccess(__("Invoice saved offline. Will sync when online"))
 		} else {
@@ -1574,10 +1586,8 @@ async function handlePaymentCompleted(paymentData) {
 				// Reset cart hash after successful payment
 				previousCartHash = ""
 
-				// Delete draft after successful submission
-				if (draftIdToDelete) {
-					draftsStore.deleteDraft(draftIdToDelete)
-				}
+				// Clear the held draft this sale came from
+				draftsStore.discardDraftAfterSubmit(draftIdToDelete)
 
 				// Refresh stock - Direct API (50-200ms), no Socket.IO lag!
 				await stockStore.refresh(soldItemCodes, shiftStore.profileWarehouse)
@@ -1758,6 +1768,12 @@ async function handleLoadDraft(draft) {
 		cartStore.invoiceItems = draftData.items
 		cartStore.setCustomer(draftData.customer)
 		cartStore.currentDraftId = draft.draft_id // Set current draft ID
+		// Bind the cart to the held Sales Invoice (server draft, or a cached draft
+		// resumed from one) so checkout updates and submits that same document
+		// with the values on screen at that time.
+		cartStore.heldInvoiceName = draftData.invoice_name || null
+		cartStore.additionalDiscount = draftData.additional_discount || 0
+		cartStore.couponCode = draftData.coupon_code || null
 
 		// Rebuild incremental cache to recalculate totals (with the saved discounts)
 		cartStore.rebuildIncrementalCache()
@@ -1820,9 +1836,25 @@ function handleBatchSerialSelected(batchSerial) {
 	}
 }
 
+// Drop the preselection once the return dialog closes, so opening "Return
+// Invoice" from the menu lands on the search list rather than re-opening the
+// last invoice returned. This has to be a watcher: an @update:model-value
+// listener alongside v-model is never called, because emit() finds v-model's
+// own onUpdate:modelValue handler first and stops looking.
+watch(
+	() => uiStore.showReturnDialog,
+	(open) => {
+		if (!open) returnInvoiceName.value = ""
+	},
+)
+
 function handleCreateReturnFromHistory(invoice) {
+	// Hand the invoice to the return dialog rather than dropping the user on its
+	// search list to find again the invoice they just clicked Return on.
+	returnInvoiceName.value = invoice?.name || ""
+	showInvoiceManagement.value = false
+	uiStore.showHistoryDialog = false
 	uiStore.showReturnDialog = true
-	showWarning(__('Creating return for invoice {0}', [invoice.name]))
 }
 
 function handleCustomerCreated(newCustomer) {

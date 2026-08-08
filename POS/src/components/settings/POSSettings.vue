@@ -359,6 +359,11 @@
 												:description="__('Enable partial payment for invoices')"
 											/>
 											<CheckboxField
+												v-model="settings.allow_server_side_draft_invoice"
+												:label="__('Allow Server Side Draft Invoice')"
+												:description="__('Store held invoices as draft Sales Invoices on the server instead of this browser\'s cache, so they survive a cleared cache and can be resumed from any device')"
+											/>
+											<CheckboxField
 												v-model="settings.silent_print"
 												:label="__('Silent Print')"
 												:description="__('Print without confirmation')"
@@ -391,6 +396,7 @@ import CheckboxField from "@/components/settings/CheckboxField.vue"
 import NumberField from "@/components/settings/NumberField.vue"
 import SelectField from "@/components/settings/SelectField.vue"
 import { useToast } from "@/composables/useToast"
+import { usePOSSettingsStore } from "@/stores/posSettings"
 import { Button, call, createResource } from "frappe-ui"
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import {
@@ -406,6 +412,9 @@ import TranslatedHTML from "../common/TranslatedHTML.vue"
 const log = logger.create('POSSettings')
 const { detectSettingsChanges, updateSettingsSnapshot, emitStockSyncConfigured } = usePOSEvents()
 const { showSuccess, showError } = useToast()
+// Shared settings store - kept in sync on save so every consumer sees a setting
+// change immediately, without waiting for a page reload.
+const posSettingsStore = usePOSSettingsStore()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -436,6 +445,7 @@ const settings = ref({
 	allow_return: 0,
 	allow_write_off_change: 0,
 	allow_partial_payment: 0,
+	allow_server_side_draft_invoice: 0,
 	silent_print: 0,
 	allow_negative_stock: 0,
 	tax_inclusive: 0,
@@ -632,6 +642,15 @@ async function saveSettings() {
 			// Update original values after successful save
 			originalAllowNegativeStock.value = result.allow_negative_stock
 			originalTaxInclusive.value = result.tax_inclusive
+
+			// Push the saved values into the shared store right away. The event
+			// bus is not enough on its own: detectSettingsChanges below diffs
+			// against a snapshot taken from this already-edited ref, so it can
+			// report "no changes" and emit nothing. Anything reading the store -
+			// e.g. where a held invoice gets saved - would then keep acting on
+			// the pre-save value until a full page reload.
+			Object.assign(posSettingsStore.settings, result)
+			posSettingsStore.settings.pos_profile = props.posProfile
 		}
 
 		// Update warehouse in POS Profile if changed

@@ -509,8 +509,12 @@
 				<table v-if="paginatedItems.length > 0" class="min-w-full divide-y divide-gray-200">
 					<thead class="bg-gray-50 sticky top-0 z-10">
 						<tr>
-							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10">{{ __('Name') }}</th>
-							<th scope="col" class="hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 sm:max-w-[150px]">{{ __('Code') }}</th>
+							<!-- w-full + max-w-0 hands this column whatever the fixed-width
+							     columns leave over, which is what lets the name truncate
+							     instead of stretching the table into a sideways scroll. -->
+							<th scope="col" class="w-full max-w-0 px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10">{{ __('Name') }}</th>
+							<th scope="col" class="hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[150px]">{{ __('Code') }}</th>
+							<th v-if="showSubBrandColumn" scope="col" class="hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[130px]">{{ __('Sub Brand') }}</th>
 							<th v-if="showRackColumn" scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[90px]">{{ __('Rack') }}</th>
 							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]">{{ __('Rate') }}</th>
 							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]">{{ __('Qty') }}</th>
@@ -530,13 +534,28 @@
 								itemIndex === highlightedIndex ? 'bg-blue-100 ring-2 ring-inset ring-blue-500' : '',
 							]"
 						>
-							<td class="px-2 sm:px-3 py-2">
+							<td class="w-full max-w-0 px-2 sm:px-3 py-2">
 								<div class="text-xs sm:text-sm font-medium text-gray-900 truncate" :title="item.item_name">
 									{{ item.item_name }}
 								</div>
+								<!-- Sub brand rides under the name on phones, where its own
+								     column is hidden. -->
+								<div v-if="showSubBrandColumn && item.custom_sub_brand" class="sm:hidden text-[10px] text-gray-500 truncate">
+									{{ item.custom_sub_brand }}
+								</div>
 							</td>
-							<td class="hidden sm:table-cell px-2 sm:px-3 py-2 whitespace-nowrap sm:max-w-[150px]">
+							<td class="hidden sm:table-cell px-2 sm:px-3 py-2 w-[150px] max-w-[150px]">
 								<div class="text-xs sm:text-sm font-bold text-gray-900 truncate" :title="item.item_code">{{ item.item_code }}</div>
+							</td>
+							<td v-if="showSubBrandColumn" class="hidden sm:table-cell px-2 sm:px-3 py-2 w-[130px] max-w-[130px]">
+								<span
+									v-if="item.custom_sub_brand"
+									class="inline-block max-w-full truncate align-middle px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 text-[10px] sm:text-xs font-medium"
+									:title="item.custom_sub_brand"
+								>
+									{{ item.custom_sub_brand }}
+								</span>
+								<span v-else class="text-xs sm:text-sm text-gray-400">—</span>
 							</td>
 							<td v-if="showRackColumn" class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[90px]">
 								<span
@@ -809,7 +828,14 @@ const showRackColumn = computed(() =>
 	paginatedItems.value.some((item) => item?.custom_rack_identifier !== undefined)
 )
 
-const listColumnCount = computed(() => (showRackColumn.value ? 5 : 4))
+// Sites that don't use sub-brands would otherwise get a column of dashes.
+const showSubBrandColumn = computed(() =>
+	paginatedItems.value.some((item) => item?.custom_sub_brand)
+)
+
+const listColumnCount = computed(
+	() => 4 + (showRackColumn.value ? 1 : 0) + (showSubBrandColumn.value ? 1 : 0)
+)
 
 const SEARCH_PLACEHOLDERS = Object.freeze({
 	auto: __("Auto-Add ON - Type or scan barcode"),

@@ -642,6 +642,13 @@ const props = defineProps({
 		type: String,
 		default: "",
 	},
+	// Invoice to return, when the dialog was opened from a specific one (the
+	// Return button on an invoice card). Skips the search list and goes straight
+	// to that invoice's return form. Empty means "let the user search".
+	preselectInvoice: {
+		type: String,
+		default: "",
+	},
 })
 
 // Good/Bad stock routing is only offered when a bad-stock warehouse is configured.
@@ -890,6 +897,12 @@ watch(
 		if (val) {
 			// Auto-load invoices when dialog opens
 			loadInvoicesResource.reload()
+
+			// Opened from a specific invoice - go straight to its return form.
+			// openReturnModal only needs the name; it fetches the rest itself.
+			if (props.preselectInvoice) {
+				openReturnModal({ name: props.preselectInvoice })
+			}
 		} else {
 			resetForm()
 		}
