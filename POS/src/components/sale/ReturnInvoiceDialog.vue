@@ -689,12 +689,13 @@ const isPartiallyPaid = ref(false)
 const originalPaidAmount = ref(0)
 const originalOutstandingAmount = ref(0)
 
-// Resource for loading recent invoices (only those with items available for return)
+// Resource for loading invoices (only those with items available for return).
+
 const loadInvoicesResource = createResource({
 	url: "pos_next.api.invoices.get_returnable_invoices",
 	makeParams() {
 		return {
-			limit: 50,
+			limit: 0,
 		}
 	},
 	auto: false,
