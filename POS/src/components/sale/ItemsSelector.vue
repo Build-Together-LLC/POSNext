@@ -513,41 +513,24 @@
 							     columns leave over, which is what lets the name truncate
 							     instead of stretching the table into a sideways scroll. -->
 							<th scope="col" class="w-full max-w-0 px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10">{{ __('Name') }}</th>
-							<th scope="col" class="hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[150px]">{{ __('Code') }}</th>
-							<!-- Sub Brand carries long names, so its width is user-controlled:
-							     drag the grip on the header edge to expand or collapse it. -->
+							<!-- Code and Sub Brand are user-resizable: drag the grip on the
+							     header edge to expand or collapse the column. -->
+							<th
+								scope="col"
+								:style="codeColumn.style"
+								class="relative hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10"
+							>
+								<span class="block truncate pe-2">{{ __('Code') }}</span>
+								<ColumnResizeHandle :column="codeColumn" />
+							</th>
 							<th
 								v-if="showSubBrandColumn"
 								scope="col"
-								:style="subBrandColumnStyle"
+								:style="subBrandColumn.style"
 								class="relative hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10"
 							>
 								<span class="block truncate pe-2">{{ __('Sub Brand') }}</span>
-								<span
-									role="separator"
-									aria-orientation="vertical"
-									tabindex="0"
-									:aria-label="__('Resize Sub Brand column')"
-									:aria-valuenow="subBrandColumnWidth"
-									:aria-valuemin="SUB_BRAND_MIN_WIDTH"
-									:aria-valuemax="SUB_BRAND_MAX_WIDTH"
-									:title="__('Drag left or right to resize, double-click to reset')"
-									@pointerdown="startSubBrandResize"
-									@dblclick="resetSubBrandWidth"
-									@keydown="handleSubBrandResizeKeydown"
-									:class="[
-										'group/resize absolute top-0 end-0 h-full w-3 flex items-center justify-center',
-										'cursor-col-resize select-none touch-none focus:outline-none',
-										resizingSubBrand ? 'bg-blue-100' : 'hover:bg-blue-50',
-									]"
-								>
-									<span
-										:class="[
-											'block h-1/2 w-[2px] rounded-full transition-colors duration-100',
-											resizingSubBrand ? 'bg-blue-500' : 'bg-gray-300 group-hover/resize:bg-blue-400 group-focus/resize:bg-blue-500',
-										]"
-									></span>
-								</span>
+								<ColumnResizeHandle :column="subBrandColumn" />
 							</th>
 							<th v-if="showRackColumn" scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[90px]">{{ __('Rack') }}</th>
 							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]">{{ __('Rate') }}</th>
@@ -580,10 +563,12 @@
 									{{ item.custom_sub_brand }}
 								</div>
 							</td>
-							<td class="hidden sm:table-cell px-2 sm:px-3 py-2 w-[150px] max-w-[150px]">
-								<div class="text-xs sm:text-sm font-bold text-gray-900 truncate" :title="item.item_code">{{ item.item_code }}</div>
+							<td :style="codeColumn.style" class="hidden sm:table-cell px-2 sm:px-3 py-2">
+								<!-- Codes have no spaces, so break-all lets them wrap onto a
+								     second line when the column is collapsed. -->
+								<div class="text-xs sm:text-sm font-bold text-gray-900 line-clamp-2 break-all" :title="item.item_code">{{ item.item_code }}</div>
 							</td>
-							<td v-if="showSubBrandColumn" :style="subBrandColumnStyle" class="hidden sm:table-cell px-2 sm:px-3 py-2">
+							<td v-if="showSubBrandColumn" :style="subBrandColumn.style" class="hidden sm:table-cell px-2 sm:px-3 py-2">
 								<span
 									v-if="item.custom_sub_brand"
 									class="inline-block max-w-full truncate align-middle px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 text-[10px] sm:text-xs font-medium"
@@ -763,6 +748,7 @@
 </template>
 
 <script setup>
+import ColumnResizeHandle from "@/components/common/ColumnResizeHandle.vue"
 import LazyImage from "@/components/common/LazyImage.vue"
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue"
 import { useItemSearchStore } from "@/stores/itemSearch"
@@ -771,7 +757,7 @@ import { useStock } from "@/composables/useStock"
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { useToast } from "@/composables/useToast"
 import { storeToRefs } from "pinia"
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue"
 import {
 	createOptimizedClickHandler,
 	throttleRAF,
@@ -873,115 +859,130 @@ const listColumnCount = computed(
 	() => 4 + (showRackColumn.value ? 1 : 0) + (showSubBrandColumn.value ? 1 : 0)
 )
 
-// --- Resizable Sub Brand column -------------------------------------------
-// Sub brand names vary wildly in length between sites, so the column width is
-// dragged by the user (right = expand, left = collapse) and remembered.
-const SUB_BRAND_WIDTH_KEY = "pos_items_sub_brand_width"
-const SUB_BRAND_MIN_WIDTH = 60
-const SUB_BRAND_MAX_WIDTH = 400
-const SUB_BRAND_DEFAULT_WIDTH = 130
-const SUB_BRAND_KEYBOARD_STEP = 16
+// --- Resizable list columns -----------------------------------------------
+// Item codes and sub brand names vary wildly in length between sites, so both
+// columns are sized by the user: drag the grip on the header edge outwards to
+// expand, back in to collapse. Each column remembers its own width.
+const RESIZE_KEYBOARD_STEP = 16
 
-function clampSubBrandWidth(width) {
-	if (!Number.isFinite(width)) return SUB_BRAND_DEFAULT_WIDTH
-	return Math.min(SUB_BRAND_MAX_WIDTH, Math.max(SUB_BRAND_MIN_WIDTH, Math.round(width)))
-}
-
-function readStoredSubBrandWidth() {
-	try {
-		const stored = localStorage.getItem(SUB_BRAND_WIDTH_KEY)
-		return stored === null ? SUB_BRAND_DEFAULT_WIDTH : clampSubBrandWidth(Number(stored))
-	} catch (e) {
-		// Private mode / storage disabled - fall back to the default width
-		return SUB_BRAND_DEFAULT_WIDTH
-	}
-}
-
-const subBrandColumnWidth = ref(readStoredSubBrandWidth())
-const resizingSubBrand = ref(false)
-
-const subBrandColumnStyle = computed(() => {
-	const width = `${subBrandColumnWidth.value}px`
-	return { width, minWidth: width, maxWidth: width }
-})
-
-function persistSubBrandWidth() {
-	try {
-		localStorage.setItem(SUB_BRAND_WIDTH_KEY, String(subBrandColumnWidth.value))
-	} catch (e) {
-		// Ignore - width just won't survive a reload
-	}
-}
-
-let subBrandResizeStartX = 0
-let subBrandResizeStartWidth = 0
-
-// In RTL the column grows when the pointer moves left, so flip the delta.
-function subBrandResizeDirection() {
+// In RTL a column grows when the pointer moves left, so flip the delta.
+function resizeDirection() {
 	return document?.documentElement?.dir === "rtl" ? -1 : 1
 }
 
-function startSubBrandResize(event) {
-	if (event.button !== undefined && event.button !== 0) return
-	event.preventDefault()
-	event.stopPropagation()
-
-	resizingSubBrand.value = true
-	subBrandResizeStartX = event.clientX
-	subBrandResizeStartWidth = subBrandColumnWidth.value
-
-	window.addEventListener("pointermove", handleSubBrandResize)
-	window.addEventListener("pointerup", stopSubBrandResize)
-	window.addEventListener("pointercancel", stopSubBrandResize)
-	document.body.style.cursor = "col-resize"
-	document.body.style.userSelect = "none"
-}
-
-function handleSubBrandResize(event) {
-	if (!resizingSubBrand.value) return
-	const delta = (event.clientX - subBrandResizeStartX) * subBrandResizeDirection()
-	subBrandColumnWidth.value = clampSubBrandWidth(subBrandResizeStartWidth + delta)
-}
-
-function stopSubBrandResize() {
-	if (!resizingSubBrand.value) return
-	resizingSubBrand.value = false
-
-	window.removeEventListener("pointermove", handleSubBrandResize)
-	window.removeEventListener("pointerup", stopSubBrandResize)
-	window.removeEventListener("pointercancel", stopSubBrandResize)
-	document.body.style.cursor = ""
-	document.body.style.userSelect = ""
-
-	persistSubBrandWidth()
-}
-
-function resetSubBrandWidth() {
-	subBrandColumnWidth.value = SUB_BRAND_DEFAULT_WIDTH
-	persistSubBrandWidth()
-}
-
-function handleSubBrandResizeKeydown(event) {
-	const step =
-		event.key === "ArrowRight"
-			? SUB_BRAND_KEYBOARD_STEP
-			: event.key === "ArrowLeft"
-				? -SUB_BRAND_KEYBOARD_STEP
-				: 0
-
-	if (step) {
-		event.preventDefault()
-		event.stopPropagation()
-		subBrandColumnWidth.value = clampSubBrandWidth(
-			subBrandColumnWidth.value + step * subBrandResizeDirection()
-		)
-		persistSubBrandWidth()
-	} else if (event.key === "Home") {
-		event.preventDefault()
-		event.stopPropagation()
-		resetSubBrandWidth()
+function createResizableColumn({ label, storageKey, defaultWidth, minWidth, maxWidth }) {
+	const clamp = (value) => {
+		if (!Number.isFinite(value)) return defaultWidth
+		return Math.min(maxWidth, Math.max(minWidth, Math.round(value)))
 	}
+
+	const readStoredWidth = () => {
+		try {
+			const stored = localStorage.getItem(storageKey)
+			return stored === null ? defaultWidth : clamp(Number(stored))
+		} catch (e) {
+			// Private mode / storage disabled - fall back to the default width
+			return defaultWidth
+		}
+	}
+
+	const width = ref(readStoredWidth())
+	const resizing = ref(false)
+	const style = computed(() => {
+		const px = `${width.value}px`
+		return { width: px, minWidth: px, maxWidth: px }
+	})
+
+	const persist = () => {
+		try {
+			localStorage.setItem(storageKey, String(width.value))
+		} catch (e) {
+			// Ignore - the width just won't survive a reload
+		}
+	}
+
+	let startX = 0
+	let startWidth = 0
+
+	const onPointerMove = (event) => {
+		if (!resizing.value) return
+		width.value = clamp(startWidth + (event.clientX - startX) * resizeDirection())
+	}
+
+	const stop = () => {
+		if (!resizing.value) return
+		resizing.value = false
+
+		window.removeEventListener("pointermove", onPointerMove)
+		window.removeEventListener("pointerup", stop)
+		window.removeEventListener("pointercancel", stop)
+		document.body.style.cursor = ""
+		document.body.style.userSelect = ""
+
+		persist()
+	}
+
+	const start = (event) => {
+		if (event.button !== undefined && event.button !== 0) return
+		event.preventDefault()
+		event.stopPropagation()
+
+		resizing.value = true
+		startX = event.clientX
+		startWidth = width.value
+
+		// Listeners live on window so the pointer can leave the header mid-drag
+		window.addEventListener("pointermove", onPointerMove)
+		window.addEventListener("pointerup", stop)
+		window.addEventListener("pointercancel", stop)
+		document.body.style.cursor = "col-resize"
+		document.body.style.userSelect = "none"
+	}
+
+	const reset = () => {
+		width.value = defaultWidth
+		persist()
+	}
+
+	const onKeydown = (event) => {
+		const step =
+			event.key === "ArrowRight"
+				? RESIZE_KEYBOARD_STEP
+				: event.key === "ArrowLeft"
+					? -RESIZE_KEYBOARD_STEP
+					: 0
+
+		if (step) {
+			event.preventDefault()
+			event.stopPropagation()
+			width.value = clamp(width.value + step * resizeDirection())
+			persist()
+		} else if (event.key === "Home") {
+			event.preventDefault()
+			event.stopPropagation()
+			reset()
+		}
+	}
+
+	// reactive() so templates can read column.width / column.style directly
+	return reactive({ label, minWidth, maxWidth, width, resizing, style, start, stop, reset, onKeydown })
 }
+
+const codeColumn = createResizableColumn({
+	label: __("Code"),
+	storageKey: "pos_items_code_width",
+	defaultWidth: 150,
+	minWidth: 70,
+	maxWidth: 400,
+})
+
+const subBrandColumn = createResizableColumn({
+	label: __("Sub Brand"),
+	storageKey: "pos_items_sub_brand_width",
+	defaultWidth: 130,
+	minWidth: 60,
+	maxWidth: 400,
+})
 
 const SEARCH_PLACEHOLDERS = Object.freeze({
 	auto: __("Auto-Add ON - Type or scan barcode"),
@@ -1179,7 +1180,8 @@ onUnmounted(() => {
 	document.removeEventListener('click', handleClickOutside)
 
 	// Drop any listeners left behind by an in-progress column resize
-	stopSubBrandResize()
+	codeColumn.stop()
+	subBrandColumn.stop()
 })
 
 // Handle keydown for barcode scanner detection
