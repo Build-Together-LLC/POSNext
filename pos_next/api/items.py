@@ -546,23 +546,9 @@ def get_item_variants(template_item, pos_profile):
 					{"uom": uom["uom"], "conversion_factor": uom["conversion_factor"]}
 				)
 
-		# Get all UOM-specific prices for variants
-		uom_prices_map = {}
-		if variant_codes:
-			prices = frappe.db.sql(
-				"""
-				SELECT item_code, uom, price_list_rate
-				FROM `tabItem Price`
-				WHERE item_code IN %s AND price_list = %s
-				ORDER BY item_code, uom
-				""",
-				[variant_codes, pos_profile_doc.selling_price_list],
-				as_dict=1,
-			)
-			for price in prices:
-				if price["item_code"] not in uom_prices_map:
-					uom_prices_map[price["item_code"]] = {}
-				uom_prices_map[price["item_code"]][price["uom"]] = price["price_list_rate"]
+		# Get all UOM-specific prices for variants, filtered by validity window
+		# (falls back to date-agnostic prices per item, see helper)
+		uom_prices_map = _get_uom_prices_map(variant_codes, pos_profile_doc.selling_price_list)
 
 		# Get all variant attributes in a single query (performance optimization)
 		attributes_map = {}
@@ -621,6 +607,64 @@ def get_item_variants(template_item, pos_profile):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Variants Error")
 		frappe.throw(_("Error fetching item variants: {0}").format(str(e)))
+
+
+def _get_uom_prices_map(item_codes, price_list, transaction_date=None):
+	"""Batch-load Item Price rows as {item_code: {uom: price_list_rate}}.
+
+	Prices are filtered by their validity window (valid_from / valid_upto,
+	NULL means open-ended) so a future-dated or expired price never leaks
+	into the display rate. When several valid prices exist for the same
+	item + UOM, the one with the most recent valid_from wins.
+
+	Items whose prices ALL fall outside the window keep the original
+	(date-agnostic) behaviour and fall back to whatever price exists,
+	instead of suddenly showing 0.
+	"""
+	if not item_codes:
+		return {}
+
+	transaction_date = transaction_date or nowdate()
+
+	def build_map(rows):
+		prices_map = {}
+		for price in rows:
+			prices_map.setdefault(price["item_code"], {})[price["uom"]] = price["price_list_rate"]
+		return prices_map
+
+	valid_rows = frappe.db.sql(
+		"""
+		SELECT item_code, uom, price_list_rate
+		FROM `tabItem Price`
+		WHERE item_code IN %s AND price_list = %s
+			AND (valid_from IS NULL OR valid_from <= %s)
+			AND (valid_upto IS NULL OR valid_upto >= %s)
+		ORDER BY item_code, uom, COALESCE(valid_from, '1900-01-01')
+		""",
+		[item_codes, price_list, transaction_date, transaction_date],
+		as_dict=1,
+	)
+	# build_map is last-row-wins, and rows are ordered by valid_from ASC,
+	# so the latest currently-valid price ends up in the map
+	prices_map = build_map(valid_rows)
+
+	# Fallback: items with no currently-valid price keep the pre-existing
+	# behaviour (any price on the list, regardless of dates)
+	missing = [code for code in item_codes if code not in prices_map]
+	if missing:
+		fallback_rows = frappe.db.sql(
+			"""
+			SELECT item_code, uom, price_list_rate
+			FROM `tabItem Price`
+			WHERE item_code IN %s AND price_list = %s
+			ORDER BY item_code, uom
+			""",
+			[missing, price_list],
+			as_dict=1,
+		)
+		prices_map.update(build_map(fallback_rows))
+
+	return prices_map
 
 
 def _build_item_base_conditions(pos_profile_doc, item_group=None):
@@ -1095,20 +1139,10 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 				if row.uom:
 					conversion_map[row.parent][row.uom] = row.conversion_factor
 
-		# UOM-specific prices - batch query ALL prices for all items
+		# UOM-specific prices - batch query, filtered by validity window
+		# (falls back to date-agnostic prices per item, see helper)
 		if item_codes:
-			prices = frappe.db.sql(
-				"""
-				SELECT item_code, uom, price_list_rate
-				FROM `tabItem Price`
-				WHERE item_code IN %s AND price_list = %s
-				ORDER BY item_code, uom
-				""",
-				[item_codes, pos_profile_doc.selling_price_list],
-				as_dict=1,
-			)
-			for price in prices:
-				uom_prices_map.setdefault(price["item_code"], {})[price["uom"]] = price["price_list_rate"]
+			uom_prices_map = _get_uom_prices_map(item_codes, pos_profile_doc.selling_price_list)
 
 		# Batch query stock for all items at once (performance optimization)
 		stock_map = {}
@@ -1181,21 +1215,30 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 			# 3) If still not found and it's a template, derive min variant price
 			derived_price = None
 			if not price_row and item.get("has_variants"):
+				today = nowdate()
 				variant_prices = frappe.db.sql(
 					"""
-					SELECT MIN(ip.price_list_rate) as min_price
+					SELECT
+						MIN(CASE
+							WHEN (ip.valid_from IS NULL OR ip.valid_from <= %s)
+								AND (ip.valid_upto IS NULL OR ip.valid_upto >= %s)
+							THEN ip.price_list_rate
+						END) as min_valid_price,
+						MIN(ip.price_list_rate) as min_price
 					FROM `tabItem Price` ip
 					INNER JOIN `tabItem` i ON i.name = ip.item_code
 					WHERE i.variant_of = %s
 					AND ip.price_list = %s
 					AND i.disabled = 0
 					""",
-					[item["item_code"], pos_profile_doc.selling_price_list],
+					[today, today, item["item_code"], pos_profile_doc.selling_price_list],
 					as_dict=1,
 				)
+				# Prefer the cheapest currently-valid variant price; fall back
+				# to the date-agnostic minimum (original behaviour)
 				derived_price = (
-					variant_prices[0]["min_price"]
-					if variant_prices and variant_prices[0].get("min_price")
+					variant_prices[0].get("min_valid_price") or variant_prices[0].get("min_price")
+					if variant_prices
 					else None
 				)
 
