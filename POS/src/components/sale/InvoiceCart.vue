@@ -43,7 +43,7 @@
      - Grand Total (emphasized)
 
   5. ACTION BUTTONS
-     - Checkout - Proceed to payment
+     - Checkout - Proceed to payment (only reviewed/ticked lines; unticked lines are removed first)
      - Hold - Save as draft order
 
   ============================================================================
@@ -444,9 +444,38 @@
 					class="border rounded-md p-1.5 sm:p-2 hover:border-blue-300 hover:shadow-md transition-all duration-200 active:scale-[0.99] cursor-pointer group"
 					:class="cartSearchQuery && itemMatchesSearch(item)
 						? 'border-blue-400 ring-1 ring-blue-300 bg-blue-50/40'
-						: 'border-gray-200 bg-white'"
+						: isItemReviewed(item)
+							? 'border-green-300 bg-green-50/40'
+							: 'border-gray-200 bg-white'"
 				>
 					<div class="flex gap-1.5 sm:gap-2">
+						<!-- Review Checkbox: manual "I checked this line" confirmation before checkout -->
+						<div class="flex-shrink-0 flex items-center" @click.stop>
+							<button
+								type="button"
+								role="checkbox"
+								data-test="cart-line-review"
+								:aria-checked="isItemReviewed(item) ? 'true' : 'false'"
+								:aria-label="__('Mark {0} as reviewed', [item.item_name])"
+								:title="isItemReviewed(item) ? __('Reviewed') : __('Mark as reviewed')"
+								@click="toggleItemReviewed(item)"
+								class="flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 rounded border-2 transition-colors touch-manipulation active:scale-90"
+								:class="isItemReviewed(item)
+									? 'bg-green-600 border-green-600 text-white hover:bg-green-700'
+									: 'bg-white border-gray-300 hover:border-green-500'"
+							>
+								<svg
+									v-if="isItemReviewed(item)"
+									class="w-3.5 h-3.5 sm:w-4 sm:h-4"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+								</svg>
+							</button>
+						</div>
+
 						<!-- Item Image Thumbnail -->
 						<div class="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg flex-shrink-0 flex items-center justify-center overflow-hidden border border-gray-200">
 							<img
@@ -701,20 +730,38 @@
 				</div>
 			</div>
 
+			<!-- Review progress: checkout only takes ticked lines -->
+			<p
+				v-if="items.length > 0"
+				data-test="review-progress"
+				class="text-[11px] font-semibold mb-1 flex items-center gap-1"
+				:class="unreviewedItems.length === 0 ? 'text-green-700' : 'text-amber-700'"
+			>
+				<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+				</svg>
+				<span>{{ __('{0} of {1} items reviewed', [reviewedCount, items.length]) }}</span>
+				<span v-if="reviewedCount === 0" class="font-normal text-gray-500">
+					— {{ __('tick items to checkout') }}
+				</span>
+			</p>
+
 			<!-- Action Buttons -->
 			<div class="flex gap-1.5">
 				<!-- Checkout Button (Primary - 50% width) -->
 				<button
 					type="button"
-					@click="$emit('proceed-to-payment')"
-					:disabled="items.length === 0"
+					data-test="checkout-button"
+					@click="handleCheckout"
+					:disabled="!canCheckout"
 					:class="[
 						'flex-1 py-2.5 px-3 rounded-lg font-bold text-xs text-white transition-all flex items-center justify-center touch-manipulation',
-						items.length === 0
+						!canCheckout
 							? 'bg-gray-300 cursor-not-allowed'
 							: 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 shadow-lg hover:shadow-xl active:scale-[0.98]'
 					]"
 					:aria-label="__('Proceed to payment')"
+					:title="canCheckout ? __('Checkout with reviewed items') : __('Tick at least one item to checkout')"
 				>
 					<svg class="w-4 h-4 me-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
@@ -746,6 +793,79 @@
 			:currency="currency"
 			@update-item="handleUpdateItem"
 		/>
+
+		<!-- Unreviewed Items Confirmation: checkout keeps only ticked lines -->
+		<Dialog
+			v-model="showUnreviewedDialog"
+			:options="{ title: __('Unreviewed items in cart'), size: unreviewedDialogExpanded ? '3xl' : 'lg' }"
+		>
+			<template #body-content>
+				<div class="py-3 space-y-2">
+					<p class="text-sm text-gray-600">
+						{{ __('Only the {0} reviewed item(s) will be invoiced. The {1} unreviewed item(s) below will be removed from the cart.', [reviewedCount, unreviewedItems.length]) }}
+					</p>
+					<div class="border border-gray-200 rounded-md overflow-hidden">
+						<div class="flex items-center justify-between gap-2 px-2 py-1 bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500">
+							<span class="font-semibold">{{ __('{0} item(s) to be removed', [unreviewedItems.length]) }}</span>
+							<div class="flex items-center gap-2">
+								<span v-if="unreviewedItems.length > UNREVIEWED_LIST_VISIBLE_ROWS" data-test="unreviewed-scroll-hint">
+									{{ __('Scroll to see all') }}
+								</span>
+								<!-- Expand: widen the dialog and wrap names so long codes/names are fully readable -->
+								<button
+									type="button"
+									data-test="unreviewed-expand"
+									:aria-expanded="unreviewedDialogExpanded ? 'true' : 'false'"
+									@click="unreviewedDialogExpanded = !unreviewedDialogExpanded"
+									class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 active:bg-gray-200 font-semibold touch-manipulation"
+									:title="unreviewedDialogExpanded ? __('Collapse list') : __('Expand list to read full names')"
+								>
+									<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+										<path v-if="unreviewedDialogExpanded" stroke-linecap="round" stroke-linejoin="round" d="M9 9L4 4m0 0v4m0-4h4m7 5l5-5m0 0v4m0-4h-4M9 15l-5 5m0 0v-4m0 4h4m7-5l5 5m0 0v-4m0 4h-4"/>
+										<path v-else stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+									</svg>
+									{{ unreviewedDialogExpanded ? __('Collapse') : __('Expand') }}
+								</button>
+							</div>
+						</div>
+						<!-- Bounded height + always-visible scrollbar so a long list never hides rows -->
+						<ul
+							class="text-xs text-gray-700 overflow-y-auto divide-y divide-gray-100 unreviewed-scroll"
+							:class="unreviewedDialogExpanded ? 'max-h-[65vh]' : 'max-h-64'"
+							data-test="unreviewed-list"
+						>
+							<li
+								v-for="item in unreviewedItems"
+								:key="reviewKey(item)"
+								class="flex items-baseline gap-2 px-2 py-1"
+							>
+								<span
+									class="flex-1 min-w-0"
+									:class="unreviewedDialogExpanded ? 'whitespace-normal break-words' : 'truncate'"
+									:title="unreviewedDialogExpanded ? null : `${item.item_code ? item.item_code + ' : ' : ''}${item.item_name}`"
+									data-test="unreviewed-name"
+								>
+									<span v-if="item.item_code" class="font-semibold">{{ item.item_code }} : </span>{{ item.item_name }}
+								</span>
+								<span class="text-gray-400 flex-shrink-0 tabular-nums">
+									{{ item.quantity }} {{ item.uom }}
+								</span>
+							</li>
+						</ul>
+					</div>
+				</div>
+			</template>
+			<template #actions>
+				<div class="flex gap-2 w-full">
+					<Button class="flex-1" variant="subtle" data-test="unreviewed-cancel" @click="showUnreviewedDialog = false">
+						{{ __('Go back') }}
+					</Button>
+					<Button class="flex-1" variant="solid" theme="red" data-test="unreviewed-confirm" @click="confirmCheckoutReviewedOnly">
+						{{ __('Remove & Checkout') }}
+					</Button>
+				</div>
+			</template>
+		</Dialog>
 	</div>
 </template>
 
@@ -1198,6 +1318,110 @@ watch(
 )
 
 /**
+ * Cart lines the operator has ticked during the final review before checkout.
+ * Keyed by item_code + uom (the same identity the cart uses for a line), so a
+ * tick survives quantity/price edits but not the line being removed. Purely a
+ * visual confirmation aid: it is never written to the invoice.
+ */
+const reviewedItems = ref(new Set())
+
+/** Identity of a cart line for the reviewed set. */
+const reviewKey = (item) => `${item.item_code}-${item.uom}`
+
+/** True when the operator has ticked this cart line. */
+const isItemReviewed = (item) => reviewedItems.value.has(reviewKey(item))
+
+/** Toggle the reviewed tick on a cart line. */
+const toggleItemReviewed = (item) => {
+	const key = reviewKey(item)
+	const next = new Set(reviewedItems.value)
+	if (next.has(key)) next.delete(key)
+	else next.add(key)
+	reviewedItems.value = next
+}
+
+/**
+ * Drop reviewed ticks for lines that left the cart (removed, cleared, or the
+ * invoice was submitted), so a stale tick never carries over to a new line
+ * with the same code.
+ */
+watch(
+	() => props.items.map(reviewKey),
+	(keys) => {
+		if (reviewedItems.value.size === 0) return
+		const live = new Set(keys)
+		const next = new Set(
+			[...reviewedItems.value].filter((key) => live.has(key)),
+		)
+		if (next.size !== reviewedItems.value.size) reviewedItems.value = next
+	},
+)
+
+/** Number of cart lines the operator has ticked. */
+const reviewedCount = computed(() => props.items.filter(isItemReviewed).length)
+
+/** Cart lines not yet ticked — these are dropped at checkout. */
+const unreviewedItems = computed(() =>
+	props.items.filter((item) => !isItemReviewed(item)),
+)
+
+/** Checkout needs at least one reviewed line: nothing unreviewed is ever invoiced. */
+const canCheckout = computed(
+	() => props.items.length > 0 && reviewedCount.value > 0,
+)
+
+/** Whether the "unreviewed items will be removed" confirmation is open. */
+const showUnreviewedDialog = ref(false)
+
+/** Rows that fit in the unreviewed list before it scrolls; drives the "scroll to see all" hint. */
+const UNREVIEWED_LIST_VISIBLE_ROWS = 8
+
+/**
+ * Expanded mode widens the confirmation dialog, lets the list grow taller and
+ * wraps item code + name instead of truncating, so long names are readable.
+ */
+const unreviewedDialogExpanded = ref(false)
+
+/** Reopen the dialog in its compact size each time. */
+watch(showUnreviewedDialog, (open) => {
+	if (!open) unreviewedDialogExpanded.value = false
+})
+
+/**
+ * Checkout entry point. Only ticked lines may reach the invoice: with every
+ * line ticked we go straight to payment, otherwise the operator confirms that
+ * the unticked lines are removed from the cart first.
+ */
+function handleCheckout() {
+	if (props.items.length === 0) return
+	if (reviewedCount.value === 0) {
+		showWarning(__("Tick the items you have reviewed before checkout"))
+		return
+	}
+	if (unreviewedItems.value.length > 0) {
+		showUnreviewedDialog.value = true
+		return
+	}
+	emit("proceed-to-payment")
+}
+
+/** Drop every unreviewed line from the cart, then proceed to payment with what is left. */
+function confirmCheckoutReviewedOnly() {
+	const dropped = unreviewedItems.value.map((item) => ({
+		item_code: item.item_code,
+		uom: item.uom,
+	}))
+	for (const { item_code, uom } of dropped) emit("remove-item", item_code, uom)
+	showUnreviewedDialog.value = false
+	if (dropped.length > 0) {
+		showWarning(
+			__("{0} unreviewed item(s) removed from cart", [dropped.length]),
+		)
+	}
+	emit("proceed-to-payment")
+}
+
+/**
  * Cart lines newest-first, so the item just added is visible without scrolling.
  * This is display-only: props.items keeps its insertion order, which is the
  * order the lines are written to the invoice.
@@ -1618,3 +1842,26 @@ onBeforeUnmount(() => {
 	document.removeEventListener("click", handleOutsideClick)
 })
 </script>
+
+<style scoped>
+/*
+ * Keep the scrollbar of the unreviewed-items list visible at all times.
+ * Overlay scrollbars (macOS, some touch devices) hide until the user scrolls,
+ * which makes a long list look complete when it is not.
+ */
+.unreviewed-scroll {
+	scrollbar-width: thin;
+	scrollbar-gutter: stable;
+	scrollbar-color: #9ca3af #f3f4f6;
+}
+.unreviewed-scroll::-webkit-scrollbar {
+	width: 8px;
+}
+.unreviewed-scroll::-webkit-scrollbar-track {
+	background: #f3f4f6;
+}
+.unreviewed-scroll::-webkit-scrollbar-thumb {
+	background: #9ca3af;
+	border-radius: 4px;
+}
+</style>
