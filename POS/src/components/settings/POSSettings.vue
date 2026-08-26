@@ -339,6 +339,11 @@
 										</div>
 										<div class="flex flex-col gap-3">
 											<CheckboxField
+												v-model="settings.require_cart_item_review"
+												:label="__('Require Cart Item Review')"
+												:description="__('Show a review checkbox on every cart line. Checkout stays disabled until the cashier has ticked every line.')"
+											/>
+											<CheckboxField
 												v-model="settings.allow_credit_sale"
 												:label="__('Allow Credit Sale')"
 												:description="__('Enable sales on credit')"
@@ -450,6 +455,7 @@ const settings = ref({
 	allow_negative_stock: 0,
 	tax_inclusive: 0,
 	auto_apply_offers: 0,
+	require_cart_item_review: 0,
 })
 
 // Stock Sync Settings (localStorage persisted)

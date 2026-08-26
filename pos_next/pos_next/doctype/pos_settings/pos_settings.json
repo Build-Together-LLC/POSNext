@@ -27,6 +27,7 @@
   "hide_expected_amount",
   "display_discount_percentage",
   "display_discount_amount",
+  "require_cart_item_review",
   "section_break_operations",
   "allow_sales_order",
   "allow_select_sales_order",
@@ -209,6 +210,13 @@
    "fieldname": "display_discount_amount",
    "fieldtype": "Check",
    "label": "Display Discount Amount"
+  },
+  {
+   "default": "0",
+   "description": "Show a review checkbox on every cart line. Checkout stays disabled until the cashier has ticked every line.",
+   "fieldname": "require_cart_item_review",
+   "fieldtype": "Check",
+   "label": "Require Cart Item Review"
   },
   {
    "collapsible": 1,
@@ -432,7 +440,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-08 10:10:25.765855",
+ "modified": "2026-08-26 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
