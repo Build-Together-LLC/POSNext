@@ -70,15 +70,29 @@ const ITEMS = [
 	},
 ]
 
-function mountCart(items = ITEMS) {
+/**
+ * Mount the cart with the "Require Cart Item Review" POS Setting on (default)
+ * or off, via the posSettings store's initial state.
+ */
+function mountCart(items = ITEMS, { requireReview = true } = {}) {
 	return mount(InvoiceCart, {
 		props: { items, customer: null, appliedOffers: [] },
 		global: {
-			plugins: [createTestingPinia({ createSpy: vi.fn })],
+			plugins: [
+				createTestingPinia({
+					createSpy: vi.fn,
+					initialState: {
+						posSettings: {
+							settings: { require_cart_item_review: requireReview ? 1 : 0 },
+						},
+					},
+				}),
+			],
 			stubs: {
 				EditItemDialog: true,
 				FeatherIcon: true,
 				teleport: true,
+				// frappe-ui Dialog/Button are registered globally in main.js; stub them here.
 				Dialog: {
 					props: ["modelValue", "options"],
 					template:
@@ -94,6 +108,28 @@ function mountCart(items = ITEMS) {
 const checkboxes = (wrapper) =>
 	wrapper.findAll('[data-test="cart-line-review"]')
 const isChecked = (box) => box.attributes("aria-checked") === "true"
+const checkoutButton = (wrapper) =>
+	wrapper.find('[data-test="checkout-button"]')
+const progress = (wrapper) => wrapper.find('[data-test="review-progress"]')
+
+describe("InvoiceCart — 'Require Cart Item Review' setting off", () => {
+	it("renders no checkboxes or progress line, and checkout only needs a non-empty cart", async () => {
+		const wrapper = mountCart(ITEMS, { requireReview: false })
+
+		expect(checkboxes(wrapper)).toHaveLength(0)
+		expect(progress(wrapper).exists()).toBe(false)
+		expect(checkoutButton(wrapper).attributes("disabled")).toBeUndefined()
+
+		await checkoutButton(wrapper).trigger("click")
+		expect(wrapper.emitted("proceed-to-payment")).toHaveLength(1)
+		expect(wrapper.emitted("remove-item")).toBeUndefined()
+	})
+
+	it("still disables checkout on an empty cart", () => {
+		const wrapper = mountCart([], { requireReview: false })
+		expect(checkoutButton(wrapper).attributes("disabled")).toBeDefined()
+	})
+})
 
 describe("InvoiceCart — per-line review checkbox", () => {
 	it("renders one unchecked checkbox for every cart line", () => {
@@ -160,42 +196,51 @@ describe("InvoiceCart — per-line review checkbox", () => {
 	})
 })
 
-const checkoutButton = (wrapper) =>
-	wrapper.find('[data-test="checkout-button"]')
-
-describe("InvoiceCart — checkout only takes reviewed lines", () => {
-	it("keeps Checkout disabled until at least one line is ticked", async () => {
+describe("InvoiceCart — checkout is blocked until every line is reviewed", () => {
+	it("keeps Checkout disabled while any line is unticked", async () => {
 		const wrapper = mountCart()
-		const checkout = checkoutButton(wrapper)
+		const boxes = checkboxes(wrapper)
 
-		expect(checkout.attributes("disabled")).toBeDefined()
-		expect(wrapper.find('[data-test="review-progress"]').text()).toContain(
-			"0 of 3 items reviewed",
-		)
+		expect(checkoutButton(wrapper).attributes("disabled")).toBeDefined()
+		expect(progress(wrapper).text()).toContain("0 of 3 items reviewed")
 
-		await checkboxes(wrapper)[0].trigger("click")
-		expect(checkout.attributes("disabled")).toBeUndefined()
-		expect(wrapper.find('[data-test="review-progress"]').text()).toContain(
-			"1 of 3 items reviewed",
-		)
+		await boxes[0].trigger("click")
+		await boxes[1].trigger("click")
+		expect(checkoutButton(wrapper).attributes("disabled")).toBeDefined()
+		expect(progress(wrapper).text()).toContain("2 of 3 items reviewed")
+
+		await boxes[2].trigger("click")
+		expect(checkoutButton(wrapper).attributes("disabled")).toBeUndefined()
+		expect(progress(wrapper).text()).toContain("3 of 3 items reviewed")
+		expect(wrapper.find('[data-test="show-unreviewed"]').exists()).toBe(false)
 	})
 
-	it("proceeds straight to payment when every line is ticked", async () => {
+	it("proceeds to payment once every line is ticked, without touching the cart", async () => {
 		const wrapper = mountCart()
 		for (const box of checkboxes(wrapper)) await box.trigger("click")
 
 		await checkoutButton(wrapper).trigger("click")
 
-		expect(wrapper.find('[data-test="dialog"]').exists()).toBe(false)
-		expect(wrapper.emitted("remove-item")).toBeUndefined()
 		expect(wrapper.emitted("proceed-to-payment")).toHaveLength(1)
+		expect(wrapper.emitted("remove-item")).toBeUndefined()
+		expect(wrapper.find('[data-test="dialog"]').exists()).toBe(false)
 	})
 
-	it("asks before dropping unticked lines, and cancelling changes nothing", async () => {
+	it("never removes lines: a click on the disabled button does nothing", async () => {
 		const wrapper = mountCart()
 		await checkboxes(wrapper)[0].trigger("click")
 
 		await checkoutButton(wrapper).trigger("click")
+
+		expect(wrapper.emitted("remove-item")).toBeUndefined()
+		expect(wrapper.emitted("proceed-to-payment")).toBeUndefined()
+	})
+
+	it("lists the unreviewed lines from the progress link, read-only", async () => {
+		const wrapper = mountCart()
+		await checkboxes(wrapper)[0].trigger("click")
+
+		await wrapper.find('[data-test="show-unreviewed"]').trigger("click")
 		const dialog = wrapper.find('[data-test="dialog"]')
 		expect(dialog.exists()).toBe(true)
 		// Lines are displayed newest-first, so ticking index 0 leaves the first two props items unticked.
@@ -203,26 +248,12 @@ describe("InvoiceCart — checkout only takes reviewed lines", () => {
 		expect(listed).toContain(ITEMS[0].item_code)
 		expect(listed).toContain(ITEMS[1].item_code)
 		expect(listed).not.toContain(ITEMS[2].item_code)
+		expect(dialog.find('[data-test="unreviewed-confirm"]').exists()).toBe(false)
 
-		await dialog.find('[data-test="unreviewed-cancel"]').trigger("click")
+		await dialog.find('[data-test="unreviewed-close"]').trigger("click")
 		expect(wrapper.find('[data-test="dialog"]').exists()).toBe(false)
 		expect(wrapper.emitted("remove-item")).toBeUndefined()
 		expect(wrapper.emitted("proceed-to-payment")).toBeUndefined()
-	})
-
-	it("removes every unticked line from the cart, then proceeds to payment", async () => {
-		const wrapper = mountCart()
-		await checkboxes(wrapper)[0].trigger("click")
-		await checkoutButton(wrapper).trigger("click")
-
-		await wrapper.find('[data-test="unreviewed-confirm"]').trigger("click")
-
-		expect(wrapper.emitted("remove-item")).toEqual([
-			[ITEMS[0].item_code, ITEMS[0].uom],
-			[ITEMS[1].item_code, ITEMS[1].uom],
-		])
-		expect(wrapper.emitted("proceed-to-payment")).toHaveLength(1)
-		expect(wrapper.find('[data-test="dialog"]').exists()).toBe(false)
 	})
 })
 
@@ -239,7 +270,7 @@ describe("InvoiceCart — unreviewed list stays scrollable when long", () => {
 	it("bounds the list height with a scrollable container and shows a scroll hint", async () => {
 		const wrapper = mountCart(MANY)
 		await checkboxes(wrapper)[0].trigger("click")
-		await checkoutButton(wrapper).trigger("click")
+		await wrapper.find('[data-test="show-unreviewed"]').trigger("click")
 
 		const list = wrapper.find('[data-test="unreviewed-list"]')
 		expect(list.findAll("li")).toHaveLength(MANY.length - 1)
@@ -254,7 +285,7 @@ describe("InvoiceCart — unreviewed list stays scrollable when long", () => {
 	it("omits the scroll hint for a short list", async () => {
 		const wrapper = mountCart()
 		await checkboxes(wrapper)[0].trigger("click")
-		await checkoutButton(wrapper).trigger("click")
+		await wrapper.find('[data-test="show-unreviewed"]').trigger("click")
 
 		expect(wrapper.find('[data-test="unreviewed-list"]').exists()).toBe(true)
 		expect(wrapper.find('[data-test="unreviewed-scroll-hint"]').exists()).toBe(
@@ -276,7 +307,7 @@ describe("InvoiceCart — unreviewed dialog can be expanded to read full names",
 	async function openDialog() {
 		const wrapper = mountCart(LONG)
 		await checkboxes(wrapper)[0].trigger("click")
-		await checkoutButton(wrapper).trigger("click")
+		await wrapper.find('[data-test="show-unreviewed"]').trigger("click")
 		return wrapper
 	}
 
@@ -323,9 +354,9 @@ describe("InvoiceCart — unreviewed dialog can be expanded to read full names",
 	it("reopens compact after being closed while expanded", async () => {
 		const wrapper = await openDialog()
 		await wrapper.find('[data-test="unreviewed-expand"]').trigger("click")
-		await wrapper.find('[data-test="unreviewed-cancel"]').trigger("click")
+		await wrapper.find('[data-test="unreviewed-close"]').trigger("click")
 
-		await checkoutButton(wrapper).trigger("click")
+		await wrapper.find('[data-test="show-unreviewed"]').trigger("click")
 		expect(wrapper.find('[data-test="dialog"]').attributes("data-size")).toBe(
 			"lg",
 		)

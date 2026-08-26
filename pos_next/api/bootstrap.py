@@ -159,6 +159,7 @@ def get_pos_settings(pos_profile):
 				"enable_sales_persons",
 				"silent_print",
 				"auto_apply_offers",
+				"require_cart_item_review",
 				"allow_server_side_draft_invoice"
 			],
 			as_dict=True
@@ -193,6 +194,7 @@ def get_default_pos_settings():
 		"enable_sales_persons": "Disabled",
 		"silent_print": 0,
 		"auto_apply_offers": 0,
+		"require_cart_item_review": 0,
 		"allow_server_side_draft_invoice": 0
 	}
 
