@@ -283,6 +283,50 @@ describe("InvoiceCart — checkout keeps only reviewed lines", () => {
 	})
 })
 
+describe("InvoiceCart — select all", () => {
+	const selectAll = (wrapper) => wrapper.find('[data-test="review-select-all"]')
+
+	it("ticks every line at once and enables checkout", async () => {
+		const wrapper = mountCart()
+		expect(selectAll(wrapper).attributes("aria-checked")).toBe("false")
+		expect(selectAll(wrapper).text()).toContain("Select all")
+
+		await selectAll(wrapper).trigger("click")
+
+		expect(checkboxes(wrapper).every(isChecked)).toBe(true)
+		expect(selectAll(wrapper).attributes("aria-checked")).toBe("true")
+		expect(selectAll(wrapper).text()).toContain("Clear all")
+		expect(checkoutButton(wrapper).attributes("disabled")).toBeUndefined()
+		expect(progress(wrapper).text()).toContain("3 of 3 items reviewed")
+	})
+
+	it("clears every tick when all lines are already ticked", async () => {
+		const wrapper = mountCart()
+		await selectAll(wrapper).trigger("click")
+		await selectAll(wrapper).trigger("click")
+
+		expect(checkboxes(wrapper).some(isChecked)).toBe(false)
+		expect(selectAll(wrapper).attributes("aria-checked")).toBe("false")
+		expect(checkoutButton(wrapper).attributes("disabled")).toBeDefined()
+	})
+
+	it("shows a mixed state while only some lines are ticked, and completes the rest", async () => {
+		const wrapper = mountCart()
+		await checkboxes(wrapper)[0].trigger("click")
+		expect(selectAll(wrapper).attributes("aria-checked")).toBe("mixed")
+		expect(selectAll(wrapper).text()).toContain("Select all")
+
+		// From a mixed state, select-all completes the ticks rather than clearing.
+		await selectAll(wrapper).trigger("click")
+		expect(checkboxes(wrapper).every(isChecked)).toBe(true)
+	})
+
+	it("is not rendered when the review setting is off", () => {
+		const wrapper = mountCart(ITEMS, { requireReview: false })
+		expect(selectAll(wrapper).exists()).toBe(false)
+	})
+})
+
 describe("InvoiceCart — unreviewed list stays scrollable when long", () => {
 	const MANY = Array.from({ length: 12 }, (_, i) => ({
 		item_code: `CODE-${i}`,
