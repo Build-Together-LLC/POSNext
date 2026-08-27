@@ -58,6 +58,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const selectionMode = ref("uom") // 'uom' or 'variant'
 	const suppressOfferReapply = ref(false)
 	const autoApplyInProgress = ref(false)
+	// True while the cart-change watcher below is reapplying/auto-applying
+	// offers (server calls). Checkout flows that mutate the cart first must
+	// wait for this to clear so the payment screen opens with settled totals.
+	const offersRecalcInProgress = ref(false)
 	// A cart change arrived mid-request; drained instead of dropped (see runAutoApply)
 	const autoApplyPending = ref(false)
 	const dismissedOfferCodes = ref(new Set())
@@ -1086,11 +1090,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			if (!posProfile.value) return
 
-			if (appliedOffers.value.length > 0) {
-				await reapplyOffer(buildCurrentProfile())
-			}
+			offersRecalcInProgress.value = true
+			try {
+				if (appliedOffers.value.length > 0) {
+					await reapplyOffer(buildCurrentProfile())
+				}
 
-			await runAutoApply()
+				await runAutoApply()
+			} finally {
+				offersRecalcInProgress.value = false
+			}
 		},
 		{ immediate: true, flush: "post" },
 	)
@@ -1144,6 +1153,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		suppressOfferReapply,
 		currentDraftId,
 		heldInvoiceName,
+		offersRecalcInProgress,
 		// Computed
 		itemCount,
 		isEmpty,

@@ -150,7 +150,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	)
 	const fetchCoupon = computed(() => Boolean(settings.value.fetch_coupon))
 	const autoApplyOffers = computed(() => Boolean(settings.value.auto_apply_offers))
-	/** Cart lines must each be ticked as reviewed before checkout is allowed. */
+	/** Cart lines must be reviewed at checkout; unticked lines are removed after confirmation. */
 	const requireCartItemReview = computed(() =>
 		Boolean(settings.value.require_cart_item_review),
 	)

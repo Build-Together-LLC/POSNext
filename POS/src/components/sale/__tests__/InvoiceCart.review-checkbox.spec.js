@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeAll } from "vitest"
-import { mount } from "@vue/test-utils"
+import { flushPromises, mount } from "@vue/test-utils"
 import { createTestingPinia } from "@pinia/testing"
 
 // Frappe injects `__` as a global translation helper at runtime.
@@ -42,6 +42,7 @@ vi.mock("@/composables/useToast", () => ({
 vi.mock("../EditItemDialog.vue", () => ({ default: { template: "<div />" } }))
 
 import InvoiceCart from "../InvoiceCart.vue"
+import { usePOSCartStore } from "@/stores/posCart"
 
 const ITEMS = [
 	{
@@ -122,7 +123,7 @@ describe("InvoiceCart — 'Require Cart Item Review' setting off", () => {
 
 		await checkoutButton(wrapper).trigger("click")
 		expect(wrapper.emitted("proceed-to-payment")).toHaveLength(1)
-		expect(wrapper.emitted("remove-item")).toBeUndefined()
+		expect(usePOSCartStore().removeItem).not.toHaveBeenCalled()
 	})
 
 	it("still disables checkout on an empty cart", () => {
@@ -196,51 +197,36 @@ describe("InvoiceCart — per-line review checkbox", () => {
 	})
 })
 
-describe("InvoiceCart — checkout is blocked until every line is reviewed", () => {
-	it("keeps Checkout disabled while any line is unticked", async () => {
+describe("InvoiceCart — checkout keeps only reviewed lines", () => {
+	it("keeps Checkout disabled until at least one line is ticked", async () => {
 		const wrapper = mountCart()
-		const boxes = checkboxes(wrapper)
 
 		expect(checkoutButton(wrapper).attributes("disabled")).toBeDefined()
 		expect(progress(wrapper).text()).toContain("0 of 3 items reviewed")
+		expect(progress(wrapper).text()).toContain("tick items to checkout")
 
-		await boxes[0].trigger("click")
-		await boxes[1].trigger("click")
-		expect(checkoutButton(wrapper).attributes("disabled")).toBeDefined()
-		expect(progress(wrapper).text()).toContain("2 of 3 items reviewed")
-
-		await boxes[2].trigger("click")
+		await checkboxes(wrapper)[0].trigger("click")
 		expect(checkoutButton(wrapper).attributes("disabled")).toBeUndefined()
-		expect(progress(wrapper).text()).toContain("3 of 3 items reviewed")
-		expect(wrapper.find('[data-test="show-unreviewed"]').exists()).toBe(false)
+		expect(progress(wrapper).text()).toContain("1 of 3 items reviewed")
 	})
 
-	it("proceeds to payment once every line is ticked, without touching the cart", async () => {
+	it("proceeds straight to payment when every line is ticked, without touching the cart", async () => {
 		const wrapper = mountCart()
 		for (const box of checkboxes(wrapper)) await box.trigger("click")
 
 		await checkoutButton(wrapper).trigger("click")
+		await flushPromises()
 
 		expect(wrapper.emitted("proceed-to-payment")).toHaveLength(1)
-		expect(wrapper.emitted("remove-item")).toBeUndefined()
+		expect(usePOSCartStore().removeItem).not.toHaveBeenCalled()
 		expect(wrapper.find('[data-test="dialog"]').exists()).toBe(false)
 	})
 
-	it("never removes lines: a click on the disabled button does nothing", async () => {
+	it("asks before dropping unticked lines, and cancelling changes nothing", async () => {
 		const wrapper = mountCart()
 		await checkboxes(wrapper)[0].trigger("click")
 
 		await checkoutButton(wrapper).trigger("click")
-
-		expect(wrapper.emitted("remove-item")).toBeUndefined()
-		expect(wrapper.emitted("proceed-to-payment")).toBeUndefined()
-	})
-
-	it("lists the unreviewed lines from the progress link, read-only", async () => {
-		const wrapper = mountCart()
-		await checkboxes(wrapper)[0].trigger("click")
-
-		await wrapper.find('[data-test="show-unreviewed"]').trigger("click")
 		const dialog = wrapper.find('[data-test="dialog"]')
 		expect(dialog.exists()).toBe(true)
 		// Lines are displayed newest-first, so ticking index 0 leaves the first two props items unticked.
@@ -248,12 +234,52 @@ describe("InvoiceCart — checkout is blocked until every line is reviewed", () 
 		expect(listed).toContain(ITEMS[0].item_code)
 		expect(listed).toContain(ITEMS[1].item_code)
 		expect(listed).not.toContain(ITEMS[2].item_code)
-		expect(dialog.find('[data-test="unreviewed-confirm"]').exists()).toBe(false)
 
-		await dialog.find('[data-test="unreviewed-close"]').trigger("click")
+		await dialog.find('[data-test="unreviewed-cancel"]').trigger("click")
 		expect(wrapper.find('[data-test="dialog"]').exists()).toBe(false)
-		expect(wrapper.emitted("remove-item")).toBeUndefined()
+		expect(usePOSCartStore().removeItem).not.toHaveBeenCalled()
 		expect(wrapper.emitted("proceed-to-payment")).toBeUndefined()
+	})
+
+	it("removes every unticked line, waits for offers to settle, then proceeds", async () => {
+		const wrapper = mountCart()
+		await checkboxes(wrapper)[0].trigger("click")
+		await checkoutButton(wrapper).trigger("click")
+
+		await wrapper.find('[data-test="unreviewed-confirm"]').trigger("click")
+		await flushPromises()
+
+		const cartStore = usePOSCartStore()
+		expect(cartStore.removeItem.mock.calls).toEqual([
+			[ITEMS[0].item_code, ITEMS[0].uom],
+			[ITEMS[1].item_code, ITEMS[1].uom],
+		])
+		expect(wrapper.emitted("proceed-to-payment")).toHaveLength(1)
+		expect(wrapper.find('[data-test="dialog"]').exists()).toBe(false)
+	})
+
+	it("waits for a pending offers recalculation before opening payment", async () => {
+		vi.useFakeTimers()
+		try {
+			const wrapper = mountCart()
+			const cartStore = usePOSCartStore()
+			cartStore.offersRecalcInProgress = true
+
+			await checkboxes(wrapper)[0].trigger("click")
+			await checkoutButton(wrapper).trigger("click")
+			await wrapper.find('[data-test="unreviewed-confirm"]').trigger("click")
+			await vi.advanceTimersByTimeAsync(200)
+
+			// Recalc still running: lines are removed but payment has not opened.
+			expect(cartStore.removeItem).toHaveBeenCalled()
+			expect(wrapper.emitted("proceed-to-payment")).toBeUndefined()
+
+			cartStore.offersRecalcInProgress = false
+			await vi.advanceTimersByTimeAsync(200)
+			expect(wrapper.emitted("proceed-to-payment")).toHaveLength(1)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })
 
@@ -270,7 +296,7 @@ describe("InvoiceCart — unreviewed list stays scrollable when long", () => {
 	it("bounds the list height with a scrollable container and shows a scroll hint", async () => {
 		const wrapper = mountCart(MANY)
 		await checkboxes(wrapper)[0].trigger("click")
-		await wrapper.find('[data-test="show-unreviewed"]').trigger("click")
+		await checkoutButton(wrapper).trigger("click")
 
 		const list = wrapper.find('[data-test="unreviewed-list"]')
 		expect(list.findAll("li")).toHaveLength(MANY.length - 1)
@@ -285,7 +311,7 @@ describe("InvoiceCart — unreviewed list stays scrollable when long", () => {
 	it("omits the scroll hint for a short list", async () => {
 		const wrapper = mountCart()
 		await checkboxes(wrapper)[0].trigger("click")
-		await wrapper.find('[data-test="show-unreviewed"]').trigger("click")
+		await checkoutButton(wrapper).trigger("click")
 
 		expect(wrapper.find('[data-test="unreviewed-list"]').exists()).toBe(true)
 		expect(wrapper.find('[data-test="unreviewed-scroll-hint"]').exists()).toBe(
@@ -307,7 +333,7 @@ describe("InvoiceCart — unreviewed dialog can be expanded to read full names",
 	async function openDialog() {
 		const wrapper = mountCart(LONG)
 		await checkboxes(wrapper)[0].trigger("click")
-		await wrapper.find('[data-test="show-unreviewed"]').trigger("click")
+		await checkoutButton(wrapper).trigger("click")
 		return wrapper
 	}
 
@@ -354,9 +380,9 @@ describe("InvoiceCart — unreviewed dialog can be expanded to read full names",
 	it("reopens compact after being closed while expanded", async () => {
 		const wrapper = await openDialog()
 		await wrapper.find('[data-test="unreviewed-expand"]').trigger("click")
-		await wrapper.find('[data-test="unreviewed-close"]').trigger("click")
+		await wrapper.find('[data-test="unreviewed-cancel"]').trigger("click")
 
-		await wrapper.find('[data-test="show-unreviewed"]').trigger("click")
+		await checkoutButton(wrapper).trigger("click")
 		expect(wrapper.find('[data-test="dialog"]').attributes("data-size")).toBe(
 			"lg",
 		)

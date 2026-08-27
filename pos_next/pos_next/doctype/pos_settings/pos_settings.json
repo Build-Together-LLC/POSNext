@@ -213,7 +213,7 @@
   },
   {
    "default": "0",
-   "description": "Show a review checkbox on every cart line. Checkout stays disabled until the cashier has ticked every line.",
+   "description": "Show a review checkbox on every cart line. At checkout, lines left unticked are removed from the cart after the cashier confirms.",
    "fieldname": "require_cart_item_review",
    "fieldtype": "Check",
    "label": "Require Cart Item Review"
@@ -440,7 +440,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-26 12:00:00.000000",
+ "modified": "2026-08-27 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
