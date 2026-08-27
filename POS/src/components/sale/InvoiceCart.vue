@@ -302,6 +302,46 @@
                                         </span>
                                 </button>
                         </div>
+
+                        <!-- Review select-all bar (POS Setting "Require Cart Item Review"): tick all cart lines from the top -->
+                        <div
+                                v-if="requireCartItemReview && items.length > 0"
+                                data-test="review-select-all-bar"
+                                class="mt-2 flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold"
+                                :class="allReviewed
+                                        ? 'bg-green-50 border-green-200 text-green-700'
+                                        : 'bg-amber-50 border-amber-200 text-amber-700'"
+                        >
+                                <span>{{ __('{0} of {1} items reviewed', [reviewedCount, items.length]) }}</span>
+                                <button
+                                        type="button"
+                                        role="checkbox"
+                                        data-test="review-select-all-top"
+                                        :aria-checked="allReviewed ? 'true' : reviewedCount > 0 ? 'mixed' : 'false'"
+                                        :aria-label="allReviewed ? __('Clear all review ticks') : __('Mark all items as reviewed')"
+                                        @click="toggleAllReviewed"
+                                        class="flex items-center gap-1.5 text-gray-700 hover:text-gray-900 touch-manipulation active:scale-95 transition-transform"
+                                >
+                                        <span
+                                                class="flex items-center justify-center w-4 h-4 rounded border-2 transition-colors"
+                                                :class="allReviewed
+                                                        ? 'bg-green-600 border-green-600 text-white'
+                                                        : reviewedCount > 0
+                                                                ? 'bg-amber-500 border-amber-500 text-white'
+                                                                : 'bg-white border-gray-300'"
+                                        >
+                                                <svg v-if="allReviewed" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                                                </svg>
+                                                <svg v-else-if="reviewedCount > 0" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14"/>
+                                                </svg>
+                                        </span>
+                                        <span class="font-semibold underline underline-offset-2">
+                                                {{ allReviewed ? __('Clear all') : __('Select all') }}
+                                        </span>
+                                </button>
+                        </div>
                 </div>
 
 		<!-- Cart Items -->

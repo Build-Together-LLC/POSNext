@@ -324,6 +324,32 @@ describe("InvoiceCart — select all", () => {
 	it("is not rendered when the review setting is off", () => {
 		const wrapper = mountCart(ITEMS, { requireReview: false })
 		expect(selectAll(wrapper).exists()).toBe(false)
+		expect(wrapper.find('[data-test="review-select-all-top"]').exists()).toBe(
+			false,
+		)
+	})
+
+	it("offers the same control at the top of the cart, in sync with the bottom one", async () => {
+		const wrapper = mountCart()
+		const top = wrapper.find('[data-test="review-select-all-top"]')
+		expect(top.exists()).toBe(true)
+		expect(top.attributes("aria-checked")).toBe("false")
+		expect(
+			wrapper.find('[data-test="review-select-all-bar"]').text(),
+		).toContain("0 of 3 items reviewed")
+
+		await top.trigger("click")
+		expect(checkboxes(wrapper).every(isChecked)).toBe(true)
+		expect(top.attributes("aria-checked")).toBe("true")
+		expect(top.text()).toContain("Clear all")
+		// The bottom control mirrors the same state.
+		expect(selectAll(wrapper).attributes("aria-checked")).toBe("true")
+		expect(checkoutButton(wrapper).attributes("disabled")).toBeUndefined()
+
+		// One line unticked from a line checkbox: both controls show mixed.
+		await checkboxes(wrapper)[0].trigger("click")
+		expect(top.attributes("aria-checked")).toBe("mixed")
+		expect(selectAll(wrapper).attributes("aria-checked")).toBe("mixed")
 	})
 })
 
