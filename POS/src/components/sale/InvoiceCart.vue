@@ -770,52 +770,21 @@
 				</div>
 			</div>
 
-			<!-- Review progress (POS Setting "Require Cart Item Review") with a select-all toggle for the line ticks -->
-			<div
+			<!-- Review progress (POS Setting "Require Cart Item Review"): select-all lives in the bar under Offers/Coupon -->
+			<p
 				v-if="requireCartItemReview && items.length > 0"
 				data-test="review-progress"
-				class="text-[11px] font-semibold mb-1 flex items-center justify-between gap-1 flex-wrap"
+				class="text-[11px] font-semibold mb-1 flex items-center gap-1 flex-wrap"
 				:class="unreviewedItems.length === 0 ? 'text-green-700' : 'text-amber-700'"
 			>
-				<span class="flex items-center gap-1">
-					<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
-						<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-					</svg>
-					<span>{{ __('{0} of {1} items reviewed', [reviewedCount, items.length]) }}</span>
-					<span v-if="reviewedCount === 0" class="font-normal text-gray-500">
-						— {{ __('tick items to checkout') }}
-					</span>
+				<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+				</svg>
+				<span>{{ __('{0} of {1} items reviewed', [reviewedCount, items.length]) }}</span>
+				<span v-if="reviewedCount === 0" class="font-normal text-gray-500">
+					— {{ __('tick items to checkout') }}
 				</span>
-				<!-- Select all: ticks every line at once; shows a dash while only some lines are ticked -->
-				<button
-					type="button"
-					role="checkbox"
-					data-test="review-select-all"
-					:aria-checked="allReviewed ? 'true' : reviewedCount > 0 ? 'mixed' : 'false'"
-					:aria-label="allReviewed ? __('Clear all review ticks') : __('Mark all items as reviewed')"
-					@click="toggleAllReviewed"
-					class="flex items-center gap-1 text-gray-700 hover:text-gray-900 touch-manipulation active:scale-95 transition-transform"
-				>
-					<span
-						class="flex items-center justify-center w-4 h-4 rounded border-2 transition-colors"
-						:class="allReviewed
-							? 'bg-green-600 border-green-600 text-white'
-							: reviewedCount > 0
-								? 'bg-amber-500 border-amber-500 text-white'
-								: 'bg-white border-gray-300'"
-					>
-						<svg v-if="allReviewed" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-						</svg>
-						<svg v-else-if="reviewedCount > 0" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14"/>
-						</svg>
-					</span>
-					<span class="font-semibold underline underline-offset-2">
-						{{ allReviewed ? __('Clear all') : __('Select all') }}
-					</span>
-				</button>
-			</div>
+			</p>
 
 			<!-- Action Buttons -->
 			<div class="flex gap-1.5">
