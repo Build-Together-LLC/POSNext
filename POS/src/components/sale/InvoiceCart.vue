@@ -312,7 +312,6 @@
                                         ? 'bg-green-50 border-green-200 text-green-700'
                                         : 'bg-amber-50 border-amber-200 text-amber-700'"
                         >
-                                <span>{{ __('{0} of {1} items reviewed', [reviewedCount, items.length]) }}</span>
                                 <button
                                         type="button"
                                         role="checkbox"
@@ -341,6 +340,7 @@
                                                 {{ allReviewed ? __('Clear all') : __('Select all') }}
                                         </span>
                                 </button>
+                                <span>{{ __('{0} of {1} items reviewed', [reviewedCount, items.length]) }}</span>
                         </div>
                 </div>
 
