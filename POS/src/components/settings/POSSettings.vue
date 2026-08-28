@@ -341,7 +341,7 @@
 											<CheckboxField
 												v-model="settings.require_cart_item_review"
 												:label="__('Require Cart Item Review')"
-												:description="__('Show a review checkbox on every cart line. Checkout stays disabled until the cashier has ticked every line.')"
+												:description="__('Show a review checkbox on every cart line. At checkout, lines left unticked are removed from the cart after the cashier confirms.')"
 											/>
 											<CheckboxField
 												v-model="settings.allow_credit_sale"

@@ -43,7 +43,7 @@
      - Grand Total (emphasized)
 
   5. ACTION BUTTONS
-     - Checkout - Proceed to payment (with "Require Cart Item Review" on, every line must be ticked first)
+     - Checkout - Proceed to payment (with "Require Cart Item Review" on, unticked lines are removed after confirmation)
      - Hold - Save as draft order
 
   ============================================================================
@@ -301,6 +301,46 @@
                                                 {{ availableGiftCards.length }}
                                         </span>
                                 </button>
+                        </div>
+
+                        <!-- Review select-all bar (POS Setting "Require Cart Item Review"): tick all cart lines from the top -->
+                        <div
+                                v-if="requireCartItemReview && items.length > 0"
+                                data-test="review-select-all-bar"
+                                class="mt-2 flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold"
+                                :class="allReviewed
+                                        ? 'bg-green-50 border-green-200 text-green-700'
+                                        : 'bg-amber-50 border-amber-200 text-amber-700'"
+                        >
+                                <button
+                                        type="button"
+                                        role="checkbox"
+                                        data-test="review-select-all-top"
+                                        :aria-checked="allReviewed ? 'true' : reviewedCount > 0 ? 'mixed' : 'false'"
+                                        :aria-label="allReviewed ? __('Clear all review ticks') : __('Mark all items as reviewed')"
+                                        @click="toggleAllReviewed"
+                                        class="flex items-center gap-1.5 text-gray-700 hover:text-gray-900 touch-manipulation active:scale-95 transition-transform"
+                                >
+                                        <span
+                                                class="flex items-center justify-center w-4 h-4 rounded border-2 transition-colors"
+                                                :class="allReviewed
+                                                        ? 'bg-green-600 border-green-600 text-white'
+                                                        : reviewedCount > 0
+                                                                ? 'bg-amber-500 border-amber-500 text-white'
+                                                                : 'bg-white border-gray-300'"
+                                        >
+                                                <svg v-if="allReviewed" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                                                </svg>
+                                                <svg v-else-if="reviewedCount > 0" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14"/>
+                                                </svg>
+                                        </span>
+                                        <span class="font-semibold underline underline-offset-2">
+                                                {{ allReviewed ? __('Clear all') : __('Select all') }}
+                                        </span>
+                                </button>
+                                <span>{{ __('{0} of {1} items reviewed', [reviewedCount, items.length]) }}</span>
                         </div>
                 </div>
 
@@ -730,7 +770,7 @@
 				</div>
 			</div>
 
-			<!-- Review progress (POS Setting "Require Cart Item Review"): checkout unlocks once every line is ticked -->
+			<!-- Review progress (POS Setting "Require Cart Item Review"): select-all lives in the bar under Offers/Coupon -->
 			<p
 				v-if="requireCartItemReview && items.length > 0"
 				data-test="review-progress"
@@ -741,17 +781,9 @@
 					<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
 				</svg>
 				<span>{{ __('{0} of {1} items reviewed', [reviewedCount, items.length]) }}</span>
-				<template v-if="unreviewedItems.length > 0">
-					<span class="font-normal text-gray-500">— {{ __('tick every item to checkout') }}</span>
-					<button
-						type="button"
-						data-test="show-unreviewed"
-						@click="showUnreviewedDialog = true"
-						class="underline underline-offset-2 hover:text-amber-900 touch-manipulation"
-					>
-						{{ __('Show unreviewed') }}
-					</button>
-				</template>
+				<span v-if="reviewedCount === 0" class="font-normal text-gray-500">
+					— {{ __('tick items to checkout') }}
+				</span>
 			</p>
 
 			<!-- Action Buttons -->
@@ -769,7 +801,7 @@
 							: 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 shadow-lg hover:shadow-xl active:scale-[0.98]'
 					]"
 					:aria-label="__('Proceed to payment')"
-					:title="canCheckout || !requireCartItemReview ? __('Proceed to payment') : __('Tick every item to checkout')"
+					:title="canCheckout || !requireCartItemReview ? __('Proceed to payment') : __('Tick at least one item to checkout')"
 				>
 					<svg class="w-4 h-4 me-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
@@ -802,19 +834,20 @@
 			@update-item="handleUpdateItem"
 		/>
 
-		<!-- Unreviewed Items viewer: lists the lines still to tick. Read-only — nothing is removed from the cart. -->
+		<!-- Unreviewed Items Confirmation: checkout removes unticked lines after the cashier confirms -->
 		<Dialog
 			v-model="showUnreviewedDialog"
-			:options="{ title: __('Items not yet reviewed'), size: unreviewedDialogExpanded ? '3xl' : 'lg' }"
+			:options="{ title: __('Unreviewed items in cart'), size: unreviewedDialogExpanded ? '3xl' : 'lg' }"
+			:dismissable="!removingUnreviewed"
 		>
 			<template #body-content>
 				<div class="py-3 space-y-2">
 					<p class="text-sm text-gray-600">
-						{{ __('{0} of {1} items reviewed. Tick the {2} item(s) below in the cart to enable checkout.', [reviewedCount, items.length, unreviewedItems.length]) }}
+						{{ __('Only the {0} reviewed item(s) will be invoiced. The {1} unreviewed item(s) below will be removed from the cart.', [reviewedCount, unreviewedItems.length]) }}
 					</p>
 					<div class="border border-gray-200 rounded-md overflow-hidden">
 						<div class="flex items-center justify-between gap-2 px-2 py-1 bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500">
-							<span class="font-semibold">{{ __('{0} item(s) not yet reviewed', [unreviewedItems.length]) }}</span>
+							<span class="font-semibold">{{ __('{0} item(s) to be removed', [unreviewedItems.length]) }}</span>
 							<div class="flex items-center gap-2">
 								<span v-if="unreviewedItems.length > UNREVIEWED_LIST_VISIBLE_ROWS" data-test="unreviewed-scroll-hint">
 									{{ __('Scroll to see all') }}
@@ -864,9 +897,27 @@
 				</div>
 			</template>
 			<template #actions>
-				<Button class="w-full" variant="solid" data-test="unreviewed-close" @click="showUnreviewedDialog = false">
-					{{ __('Back to cart') }}
-				</Button>
+				<div class="flex gap-2 w-full">
+					<Button
+						class="flex-1"
+						variant="subtle"
+						data-test="unreviewed-cancel"
+						:disabled="removingUnreviewed"
+						@click="showUnreviewedDialog = false"
+					>
+						{{ __('Go back') }}
+					</Button>
+					<Button
+						class="flex-1"
+						variant="solid"
+						theme="red"
+						data-test="unreviewed-confirm"
+						:loading="removingUnreviewed"
+						@click="confirmCheckoutReviewedOnly"
+					>
+						{{ __('Remove & Checkout') }}
+					</Button>
+				</div>
 			</template>
 		</Dialog>
 	</div>
@@ -1377,14 +1428,13 @@ const unreviewedItems = computed(() =>
 )
 
 /**
- * Checkout needs a non-empty cart and, when review is required, every line
- * ticked. Nothing is ever removed from the cart to get there, so the offer
- * recalculation that follows a removal can never race the payment screen.
+ * Checkout needs a non-empty cart and, when review is required, at least one
+ * ticked line — only ticked lines are ever invoiced.
  */
 const canCheckout = computed(
 	() =>
 		props.items.length > 0 &&
-		(!requireCartItemReview.value || unreviewedItems.value.length === 0),
+		(!requireCartItemReview.value || reviewedCount.value > 0),
 )
 
 /** Whether the "unreviewed items will be removed" confirmation is open. */
@@ -1404,19 +1454,80 @@ watch(showUnreviewedDialog, (open) => {
 	if (!open) unreviewedDialogExpanded.value = false
 })
 
+/** Every cart line is ticked. */
+const allReviewed = computed(
+	() => props.items.length > 0 && unreviewedItems.value.length === 0,
+)
+
+/** Tick every line at once, or clear every tick when all are already ticked. */
+function toggleAllReviewed() {
+	reviewedItems.value = allReviewed.value
+		? new Set()
+		: new Set(props.items.map(reviewKey))
+}
+
+/** True while unticked lines are being removed and offers resettle. */
+const removingUnreviewed = ref(false)
+
 /**
- * Checkout entry point. The button is disabled while lines are unreviewed;
- * this guard covers keyboard/programmatic clicks and points the cashier at
- * the lines still to tick. The cart itself is never modified here.
+ * Checkout entry point. With review required, every line ticked goes straight
+ * to payment; unticked lines first need the cashier to confirm their removal.
  */
 function handleCheckout() {
 	if (props.items.length === 0) return
-	if (requireCartItemReview.value && unreviewedItems.value.length > 0) {
-		showWarning(__("Tick every item in the cart before checkout"))
-		showUnreviewedDialog.value = true
-		return
+	if (requireCartItemReview.value) {
+		if (reviewedCount.value === 0) {
+			showWarning(__("Tick the items you have reviewed before checkout"))
+			return
+		}
+		if (unreviewedItems.value.length > 0) {
+			showUnreviewedDialog.value = true
+			return
+		}
 	}
 	emit("proceed-to-payment")
+}
+
+/**
+ * Wait for the cart store's offer recalculation (triggered by the removals,
+ * flush: "post" + server calls) to settle, so the payment screen opens with
+ * final totals instead of having discounts change under the cashier. The
+ * timeout keeps checkout usable if the offers endpoint hangs.
+ */
+async function waitForOffersToSettle(timeoutMs = 10000) {
+	await nextTick()
+	const start = Date.now()
+	while (cartStore.offersRecalcInProgress && Date.now() - start < timeoutMs) {
+		await new Promise((resolve) => setTimeout(resolve, 50))
+	}
+}
+
+/**
+ * Drop every unreviewed line from the cart, wait for offers to resettle, then
+ * proceed to payment with what is left.
+ */
+async function confirmCheckoutReviewedOnly() {
+	if (removingUnreviewed.value) return
+	removingUnreviewed.value = true
+	try {
+		const dropped = unreviewedItems.value.map((item) => ({
+			item_code: item.item_code,
+			uom: item.uom,
+		}))
+		for (const { item_code, uom } of dropped) {
+			cartStore.removeItem(item_code, uom)
+		}
+		if (dropped.length > 0) {
+			showWarning(
+				__("{0} unreviewed item(s) removed from cart", [dropped.length]),
+			)
+		}
+		await waitForOffersToSettle()
+		showUnreviewedDialog.value = false
+		emit("proceed-to-payment")
+	} finally {
+		removingUnreviewed.value = false
+	}
 }
 
 /**
