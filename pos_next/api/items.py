@@ -76,6 +76,11 @@ def _batch_settings(pos_profile):
 	if not pos_profile:
 		return True, True
 
+	# the columns are absent until this app's migration has run on the site
+	for field in ("filter_batches_by_pos_warehouse", "auto_select_single_batch"):
+		if not frappe.db.has_column("POS Settings", field):
+			return True, True
+
 	row = frappe.db.get_value(
 		"POS Settings",
 		{"pos_profile": pos_profile},
