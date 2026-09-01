@@ -204,6 +204,7 @@
 <script setup>
 import { Button, Dialog, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
+import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 
 const props = defineProps({
@@ -220,6 +221,7 @@ const emit = defineEmits(["update:modelValue", "batch-serial-selected"])
 
 // Serial Number Store for caching
 const serialStore = useSerialNumberStore()
+const settingsStore = usePOSSettingsStore()
 
 const show = ref(props.modelValue)
 const availableBatches = ref([])
@@ -228,29 +230,25 @@ const selectedBatch = ref(null)
 const selectedSerials = ref([])
 const serialSearchQuery = ref("")
 
-// Resource for loading batches
 const batchesResource = createResource({
-	url: "frappe.client.get_list",
+	url: "pos_next.api.items.get_batch_serial_details",
 	makeParams() {
 		return {
-			doctype: "Batch",
-			filters: {
-				item: props.item?.item_code,
-				disabled: 0,
-			},
-			fields: ["name as batch_no", "expiry_date"],
-			limit_page_length: 100,
+			item_code: props.item?.item_code,
+			warehouse: props.warehouse,
 		}
 	},
 	auto: false,
 	async onSuccess(data) {
-		if (data && Array.isArray(data)) {
-			// For simplicity, set qty to 999 for all batches
-			// In production, you'd want to query actual stock
-			availableBatches.value = data.map((batch) => ({
-				...batch,
-				qty: 999,
-			}))
+		const batches = data?.batches
+		if (!Array.isArray(batches)) return
+
+		availableBatches.value = batches
+		if (batches.length !== 1) return
+
+		selectedBatch.value = batches[0]
+		if (settingsStore.autoSelectSingleBatch && !props.item?.has_serial_no) {
+			handleConfirm()
 		}
 	},
 	onError(error) {

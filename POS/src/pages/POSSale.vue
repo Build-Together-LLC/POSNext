@@ -1818,7 +1818,7 @@ async function handleApplyOffer(offer) {
 	}
 }
 
-function handleBatchSerialSelected(batchSerial) {
+async function handleBatchSerialSelected(batchSerial) {
 	if (cartStore.pendingItem) {
 		// Use quantity from batchSerial if provided (for multiple serial numbers), otherwise use pendingItemQty
 		const qty = batchSerial.quantity || cartStore.pendingItemQty
@@ -1827,6 +1827,26 @@ function handleBatchSerialSelected(batchSerial) {
 			quantity: qty,
 			...batchSerial,
 		}
+
+		if (batchSerial.batch_no) {
+			try {
+				const itemDetails = await cartStore.getItemDetailsResource.submit({
+					item_code: cartStore.pendingItem.item_code,
+					pos_profile: cartStore.posProfile,
+					customer: cartStore.customer?.name || cartStore.customer,
+					qty,
+					uom: cartStore.pendingItem.uom,
+					batch_no: batchSerial.batch_no,
+				})
+				if (itemDetails?.price_list_rate) {
+					itemToAdd.price_list_rate = itemDetails.price_list_rate
+					itemToAdd.rate = itemDetails.price_list_rate
+				}
+			} catch (error) {
+				console.error("Failed to fetch batch price, using list price:", error)
+			}
+		}
+
 		try {
 			cartStore.addItem(itemToAdd, qty, false, shiftStore.currentProfile)
 			cartStore.clearPendingItem()
