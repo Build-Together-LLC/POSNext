@@ -10,7 +10,7 @@ from erpnext.stock.doctype.batch.batch import get_batch_qty
 from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_details
 from frappe import _, as_json
 from frappe.query_builder import DocType, functions as fn
-from frappe.utils import flt, nowdate
+from frappe.utils import cint, flt, nowdate
 
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
@@ -58,13 +58,39 @@ def get_stock_availability(item_code, warehouse):
 		# Include all child warehouses when a group warehouse is set
 		warehouses = frappe.db.get_descendants("Warehouse", warehouse) or []
 
-	rows = frappe.get_all(
-		"Bin",
-		fields=["sum(actual_qty) as actual_qty"],
-		filters={"item_code": item_code, "warehouse": ["in", warehouses]},
-	)
+	if not warehouses:
+		return 0.0
 
-	return flt(rows[0].actual_qty) if rows else 0.0
+	bin_table = frappe.qb.DocType("Bin")
+	rows = (
+		frappe.qb.from_(bin_table)
+		.select(fn.Sum(bin_table.actual_qty))
+		.where(bin_table.item_code == item_code)
+		.where(bin_table.warehouse.isin(warehouses))
+	).run()
+
+	return flt(rows[0][0]) if rows and rows[0][0] is not None else 0.0
+
+
+def _batch_settings(pos_profile):
+	if not pos_profile:
+		return True, True
+
+	# the columns are absent until this app's migration has run on the site
+	for field in ("filter_batches_by_pos_warehouse", "auto_select_single_batch"):
+		if not frappe.db.has_column("POS Settings", field):
+			return True, True
+
+	row = frappe.db.get_value(
+		"POS Settings",
+		{"pos_profile": pos_profile},
+		["filter_batches_by_pos_warehouse", "auto_select_single_batch"],
+		as_dict=True,
+	)
+	if not row:
+		return True, True
+
+	return bool(cint(row.filter_batches_by_pos_warehouse)), bool(cint(row.auto_select_single_batch))
 
 
 def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=None):
@@ -174,9 +200,13 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	#   - Batch A: 50 qty, expires in 2 days → INCLUDED (sell first!)
 	#   - Batch B: 100 qty, expires in 30 days → INCLUDED
 	#   - Batch C: 20 qty, expired yesterday → EXCLUDED
+	filter_by_warehouse, auto_select_single = _batch_settings(item.get("pos_profile"))
+
 	if warehouse and item.get("has_batch_no"):
 		# Get all batches with available quantity for this item in warehouse
-		batch_list = get_batch_qty(warehouse=warehouse, item_code=item_code)
+		batch_list = get_batch_qty(
+			warehouse=warehouse if filter_by_warehouse else None, item_code=item_code
+		)
 		if batch_list:
 			for batch in batch_list:
 				# Filter 1: Only batches with available stock
@@ -226,6 +256,10 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 			},
 			fields=["name as serial_no"],
 		)
+
+	if item.get("has_batch_no") and not item.get("batch_no") and auto_select_single:
+		if len(batch_no_data) == 1:
+			item["batch_no"] = batch_no_data[0]["batch_no"]
 
 	item["selling_price_list"] = price_list
 
@@ -281,10 +315,15 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 			"price_list_currency": item.get("price_list_currency"),
 			"plc_conversion_rate": item.get("plc_conversion_rate"),
 			"conversion_rate": item.get("conversion_rate"),
+			"batch_no": item.get("batch_no"),
+			"warehouse": warehouse,
 		}
 	)
 
 	res = erpnext_get_item_details(args, doc)
+
+	if item.get("batch_no"):
+		res["batch_no"] = item.get("batch_no")
 
 	if item.get("is_stock_item") and warehouse:
 		res["actual_qty"] = get_stock_availability(item_code, warehouse)
@@ -454,17 +493,21 @@ def get_batch_serial_details(item_code, warehouse):
 		}
 
 		if has_batch_no:
-			# Get available batches (note: qty should come from get_batch_qty)
-			batches = frappe.db.sql(
-				"""
-				SELECT batch_no, batch_qty as qty, expiry_date
-				FROM `tabBatch`
-				WHERE item = %s AND batch_qty > 0
-				ORDER BY expiry_date ASC, creation ASC
-				""",
-				item_code,
-				as_dict=1,
-			)
+			batches = []
+			for batch in get_batch_qty(warehouse=warehouse, item_code=item_code) or []:
+				if flt(batch.get("qty")) <= 0 or not batch.get("batch_no"):
+					continue
+				batch_doc = frappe.get_cached_doc("Batch", batch.get("batch_no"))
+				if batch_doc.disabled:
+					continue
+				batches.append(
+					{
+						"batch_no": batch.get("batch_no"),
+						"qty": flt(batch.get("qty")),
+						"expiry_date": batch_doc.expiry_date,
+					}
+				)
+			batches.sort(key=lambda b: (b["expiry_date"] is None, b["expiry_date"]))
 			result["batches"] = batches
 
 		if has_serial_no:
@@ -683,6 +726,21 @@ def _build_item_base_conditions(pos_profile_doc, item_group=None):
 	if item_group:
 		conditions.append("item_group = %s")
 		params.append(item_group)
+
+	if pos_profile_doc.get("hide_unavailable_items") and pos_profile_doc.warehouse:
+		conditions.append(
+			"""(
+				is_stock_item = 0
+				OR has_variants = 1
+				OR EXISTS (
+					SELECT 1 FROM `tabBin` bin
+					WHERE bin.item_code = `tabItem`.name
+					  AND bin.warehouse = %s
+					  AND bin.actual_qty > 0
+				)
+			)"""
+		)
+		params.append(pos_profile_doc.warehouse)
 
 	return conditions, params
 
@@ -1087,20 +1145,21 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 			params.extend([limit, start])
 			items = frappe.db.sql(query, tuple(params), as_dict=1)
 		else:
-			list_fields = list(ITEM_RESULT_FIELDS)
-			if rack_field:
-				list_fields.append(
-					rack_field if rack_field == RACK_FIELD_ALIAS else f"{rack_field} as {RACK_FIELD_ALIAS}"
-				)
+			conditions, params = _build_item_base_conditions(pos_profile_doc, item_group)
 
-			items = frappe.get_list(
-				"Item",
-				filters=filters,
-				fields=list_fields,
-				start=start,
-				page_length=limit,
-				order_by="item_name asc",
-			)
+			select_columns = ITEM_RESULT_COLUMNS
+			if rack_field:
+				select_columns += f",\n\t`{rack_field}` as `{RACK_FIELD_ALIAS}`"
+
+			query = f"""
+				SELECT {select_columns}
+				FROM `tabItem`
+				WHERE {" AND ".join(conditions)}
+				ORDER BY item_name ASC
+				LIMIT %s OFFSET %s
+			"""
+			params.extend([limit, start])
+			items = frappe.db.sql(query, tuple(params), as_dict=1)
 
 		# Prepare maps for enrichment
 		item_codes = [item["item_code"] for item in items]
@@ -1334,7 +1393,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 
 
 @frappe.whitelist()
-def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
+def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None, batch_no=None):
 	"""Get detailed item info including price, tax, stock"""
 	try:
 		# Parse pos_profile if it's a JSON string
@@ -1371,6 +1430,9 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
 		# Include UOM if provided to fetch correct price list rate
 		if uom:
 			item["uom"] = uom
+
+		if batch_no:
+			item["batch_no"] = batch_no
 
 		return get_item_detail(
 			item=json.dumps(item),

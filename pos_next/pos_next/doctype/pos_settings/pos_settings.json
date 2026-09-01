@@ -57,6 +57,9 @@
   "allow_submissions_in_background_job",
   "allow_delete_offline_invoice",
   "allow_change_posting_date",
+  "section_break_batch",
+  "filter_batches_by_pos_warehouse",
+  "auto_select_single_batch",
   "section_break_misc",
   "input_qty",
   "allow_negative_stock"
@@ -411,6 +414,26 @@
    "label": "Allow Change Posting Date"
   },
   {
+   "fieldname": "section_break_batch",
+   "fieldtype": "Section Break",
+   "label": "Batch Handling"
+  },
+  {
+   "default": "1",
+   "description": "List only batches that have stock in the POS Profile's warehouse. Turn off to list every batch of the item.",
+   "fieldname": "filter_batches_by_pos_warehouse",
+   "fieldtype": "Check",
+   "label": "Only Batches Stocked in POS Warehouse"
+  },
+  {
+   "default": "1",
+   "depends_on": "filter_batches_by_pos_warehouse",
+   "description": "When exactly one batch is available, select it automatically and price the line from it.",
+   "fieldname": "auto_select_single_batch",
+   "fieldtype": "Check",
+   "label": "Auto-Select Single Batch"
+  },
+  {
    "collapsible": 1,
    "fieldname": "section_break_misc",
    "fieldtype": "Section Break",
@@ -440,7 +463,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-27 12:00:00.000000",
+ "modified": "2026-09-01 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
