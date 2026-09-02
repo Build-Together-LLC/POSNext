@@ -72,6 +72,58 @@ def get_stock_availability(item_code, warehouse):
 	return flt(rows[0][0]) if rows and rows[0][0] is not None else 0.0
 
 
+def available_batches(item_code, warehouse, include_other_warehouses=False):
+	"""Sellable batches of `item_code`, each counted by what `warehouse` holds.
+
+	Quantity is always this warehouse's stock. get_batch_qty() called without a
+	warehouse returns one row per (batch, warehouse) pair, so the same batch comes
+	back once for every warehouse that stocks it, each row carrying that other
+	warehouse's quantity - which is how a Birhata till listed a batch three times
+	and priced it off Main's stock.
+
+	`include_other_warehouses` reflects the "Only Batches Stocked in POS Warehouse"
+	setting, which is about which batches are *listed*, never about the number shown
+	against them: a batch stocked only elsewhere is listed at 0, not at its stock
+	somewhere else.
+
+	Expired and disabled batches are always excluded. Sorted first to expire first.
+	"""
+	if not warehouse or not item_code:
+		return []
+
+	in_warehouse = {}
+	for row in get_batch_qty(warehouse=warehouse, item_code=item_code) or []:
+		batch_no = row.get("batch_no")
+		if batch_no:
+			in_warehouse[batch_no] = flt(row.get("qty"))
+
+	if include_other_warehouses:
+		candidates = frappe.get_all("Batch", filters={"item": item_code}, pluck="name")
+	else:
+		candidates = [b for b, qty in in_warehouse.items() if qty > 0]
+
+	today = nowdate()
+	batches = []
+	for batch_no in candidates:
+		batch_doc = frappe.get_cached_doc("Batch", batch_no)
+		if batch_doc.disabled:
+			continue
+		if batch_doc.expiry_date and str(batch_doc.expiry_date) <= str(today):
+			continue
+
+		batches.append(
+			{
+				"batch_no": batch_no,
+				"batch_qty": flt(in_warehouse.get(batch_no)),
+				"expiry_date": batch_doc.expiry_date,
+				"manufacturing_date": batch_doc.manufacturing_date,
+			}
+		)
+
+	batches.sort(key=lambda b: (b["expiry_date"] is None, b["expiry_date"], b["batch_no"]))
+	return batches
+
+
 def _batch_settings(pos_profile):
 	if not pos_profile:
 		return True, True
@@ -203,32 +255,9 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	filter_by_warehouse, auto_select_single = _batch_settings(item.get("pos_profile"))
 
 	if warehouse and item.get("has_batch_no"):
-		# Get all batches with available quantity for this item in warehouse
-		batch_list = get_batch_qty(
-			warehouse=warehouse if filter_by_warehouse else None, item_code=item_code
+		batch_no_data = available_batches(
+			item_code, warehouse, include_other_warehouses=not filter_by_warehouse
 		)
-		if batch_list:
-			for batch in batch_list:
-				# Filter 1: Only batches with available stock
-				if batch.qty > 0 and batch.batch_no:
-					# Fetch batch metadata (expiry, manufacturing dates, disabled status)
-					batch_doc = frappe.get_cached_doc("Batch", batch.batch_no)
-
-					# Filter 2: Exclude expired batches
-					# Filter 3: Exclude disabled batches
-					is_not_expired = (
-						str(batch_doc.expiry_date) > str(today)
-						or batch_doc.expiry_date in ["", None]
-					)
-					is_enabled = batch_doc.disabled == 0
-
-					if is_not_expired and is_enabled:
-						batch_no_data.append({
-							"batch_no": batch.batch_no,
-							"batch_qty": batch.qty,
-							"expiry_date": batch_doc.expiry_date,
-							"manufacturing_date": batch_doc.manufacturing_date,
-						})
 
 	# ===========================================================================
 	# SERIAL NUMBER TRACKING: Get available serial numbers
@@ -493,22 +522,16 @@ def get_batch_serial_details(item_code, warehouse):
 		}
 
 		if has_batch_no:
-			batches = []
-			for batch in get_batch_qty(warehouse=warehouse, item_code=item_code) or []:
-				if flt(batch.get("qty")) <= 0 or not batch.get("batch_no"):
-					continue
-				batch_doc = frappe.get_cached_doc("Batch", batch.get("batch_no"))
-				if batch_doc.disabled:
-					continue
-				batches.append(
-					{
-						"batch_no": batch.get("batch_no"),
-						"qty": flt(batch.get("qty")),
-						"expiry_date": batch_doc.expiry_date,
-					}
-				)
-			batches.sort(key=lambda b: (b["expiry_date"] is None, b["expiry_date"]))
-			result["batches"] = batches
+			# Same source as the item tile, so the picker and the tile can never
+			# disagree about how much of a batch this warehouse actually holds.
+			result["batches"] = [
+				{
+					"batch_no": b["batch_no"],
+					"qty": b["batch_qty"],
+					"expiry_date": b["expiry_date"],
+				}
+				for b in available_batches(item_code, warehouse)
+			]
 
 		if has_serial_no:
 			# Get available serial numbers
