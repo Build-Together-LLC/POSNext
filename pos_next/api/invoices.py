@@ -308,25 +308,58 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 # ==========================================
 
 
-def _get_editable_invoice(doctype, invoice_name):
-    """Load the draft `invoice_name` points at, or None if a new document is due.
+OFFLINE_ID_FIELD = "posa_offline_id"
+
+
+def _offline_id_supported(doctype):
+    """Whether this site carries the offline-id column. Not every site does."""
+    return frappe.db.has_column(doctype, OFFLINE_ID_FIELD)
+
+
+def _find_by_offline_id(doctype, offline_id):
+    """The invoice already booked for this sale, by its offline id.
+
+    The offline id is the sale's identity across a dropped connection: the
+    document name may never have reached the till, but the row it names is the
+    same sale. The column is unique, so resolving it here is what stops a re-sync
+    from inserting a second invoice - and, because a duplicate key aborts the
+    whole submit, from stranding the original draft unsubmitted.
+    """
+    if not offline_id or not _offline_id_supported(doctype):
+        return None
+
+    return frappe.db.get_value(
+        doctype, {OFFLINE_ID_FIELD: offline_id}, ["name", "docstatus"], as_dict=True
+    )
+
+
+def _get_editable_invoice(doctype, invoice_name, offline_id=None):
+    """Load the draft this sale points at, or None if a new document is due.
 
     A held draft can be resumed on more than one terminal at a time. If the first
     till submits it, the second must not quietly fall through to creating a
     second Sales Invoice for the same sale - that books the goods twice. So a
     name that exists but has left draft state is an error, not a cue to create.
 
-    Returns None only when there is nothing to update: no name at all, or a name
-    the server has never heard of (an invoice queued offline, say), in which case
-    the caller creates the document.
+    When the name is unknown here - queued offline, or lost with the connection -
+    the offline id is consulted before giving up, so a retry updates the sale it
+    already created instead of trying to insert it a second time.
+
+    Returns None only when there is nothing to update: no name and no offline id
+    the server has heard of, in which case the caller creates the document.
     """
-    if not invoice_name:
+    if not invoice_name and not offline_id:
         return None
 
-    docstatus = frappe.db.get_value(doctype, invoice_name, "docstatus")
+    docstatus = (
+        frappe.db.get_value(doctype, invoice_name, "docstatus") if invoice_name else None
+    )
 
     if docstatus is None:
-        return None
+        existing = _find_by_offline_id(doctype, offline_id)
+        if not existing:
+            return None
+        invoice_name, docstatus = existing.name, existing.docstatus
 
     docstatus = cint(docstatus)
 
@@ -366,10 +399,15 @@ def update_invoice(data):
         data.setdefault("doctype", doctype)
 
         invoice_name = data.get("name")
+        offline_id = data.get(OFFLINE_ID_FIELD)
         # Throws if the name belongs to an invoice that is no longer a draft.
-        invoice_doc = _get_editable_invoice(doctype, invoice_name)
+        invoice_doc = _get_editable_invoice(doctype, invoice_name, offline_id)
 
         if invoice_doc:
+            # The resolved draft's own name wins. An offline-id match can land on a
+            # different name than the till sent, and update() would otherwise carry
+            # the stale name across and rename the document.
+            data.pop("name", None)
             invoice_doc.update(data)
         else:
             data.pop("name", None)
@@ -568,7 +606,20 @@ def update_invoice(data):
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
         invoice_doc.docstatus = 0
-        invoice_doc.save()
+
+        try:
+            invoice_doc.save()
+        except frappe.UniqueValidationError:
+            # Another request booked this same sale between the lookup above and
+            # this insert - the offline id is unique precisely so the second one
+            # loses. Hand back the invoice that won instead of failing, which is
+            # what stranded the first one as an unsubmitted draft.
+            existing = _find_by_offline_id(doctype, invoice_doc.get(OFFLINE_ID_FIELD))
+            if not existing or existing.name == invoice_doc.get("name"):
+                raise
+            # Throws if that invoice has already left draft, so a genuine
+            # double-charge still surfaces rather than being papered over.
+            invoice_doc = _get_editable_invoice(doctype, existing.name)
 
         return invoice_doc.as_dict()
     except Exception as e:
@@ -626,13 +677,21 @@ def submit_invoice(invoice=None, data=None):
         doctype = "Sales Invoice"
 
         invoice_name = invoice.get("name")
+        offline_id = invoice.get(OFFLINE_ID_FIELD)
 
         # Throws if this sale was already submitted (or cancelled) elsewhere,
-        # rather than booking a duplicate for the same cart.
-        invoice_doc = _get_editable_invoice(doctype, invoice_name)
+        # rather than booking a duplicate for the same cart. The offline id is
+        # consulted when the name is unknown here, so a checkout retry updates
+        # the draft it already created instead of inserting a second invoice
+        # that then fails on the unique key and leaves the first one in Draft.
+        invoice_doc = _get_editable_invoice(doctype, invoice_name, offline_id)
 
         if invoice_doc:
+            # As in update_invoice: the resolved draft's name wins over whatever
+            # name the till sent, which may be stale or unknown to this server.
+            invoice.pop("name", None)
             invoice_doc.update(invoice)
+            invoice_name = invoice_doc.name
         else:
             invoice.pop("name", None)
             created = update_invoice(json.dumps(invoice, default=str))
