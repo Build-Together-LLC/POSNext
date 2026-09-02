@@ -155,10 +155,32 @@ export function useInvoice() {
 	})
 
 	// Actions
+	/**
+	 * Whether a cart line is the one identified by item / uom / batch.
+	 *
+	 * A batch-tracked item sits in the cart as one line per batch, because each
+	 * batch carries its own price - an MRP-per-batch item has a different rate on
+	 * every batch. So the batch is part of a line's identity. Leaving it out made
+	 * a second batch grow the first line at the first batch's price, and made the
+	 * qty stepper and the remove button act on whichever line came first.
+	 *
+	 * `batchNo === undefined` means "don't care" and matches on item/uom alone.
+	 */
+	function lineMatches(line, itemCode, uom = null, batchNo = undefined) {
+		if (line.item_code !== itemCode) return false
+		if (uom != null && line.uom !== uom) return false
+		if (batchNo !== undefined && (line.batch_no || null) !== (batchNo || null)) {
+			return false
+		}
+		return true
+	}
+
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom
-		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom,
+		// Strict on batch: a different batch is a different line, never a top-up
+		// of the one already there.
+		const existingItem = invoiceItems.value.find((i) =>
+			lineMatches(i, item.item_code, itemUom, item.batch_no || null),
 		)
 
 		if (existingItem) {
@@ -243,15 +265,10 @@ export function useInvoice() {
 	 *                            If provided, only removes the item with matching item_code AND uom.
 	 *                            If null, removes the first item matching item_code.
 	 */
-	function removeItem(itemCode, uom = null) {
-		let itemToRemove
-		if (uom) {
-			itemToRemove = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom,
-			)
-		} else {
-			itemToRemove = invoiceItems.value.find((i) => i.item_code === itemCode)
-		}
+	function removeItem(itemCode, uom = null, batchNo = undefined) {
+		const itemToRemove = invoiceItems.value.find((i) =>
+			lineMatches(i, itemCode, uom, batchNo),
+		)
 
 		if (itemToRemove) {
 			// Update cache incrementally (subtract removed item values)
@@ -267,14 +284,13 @@ export function useInvoice() {
 			}
 		}
 
-		if (uom) {
-			invoiceItems.value = invoiceItems.value.filter(
-				(i) => !(i.item_code === itemCode && i.uom === uom),
-			)
-		} else {
-			invoiceItems.value = invoiceItems.value.filter(
-				(i) => i.item_code !== itemCode,
-			)
+		// Drop only the line that was removed. Filtering on item/uom alone took
+		// every batch of that item with it.
+		const removeIndex = invoiceItems.value.findIndex((i) =>
+			lineMatches(i, itemCode, uom, batchNo),
+		)
+		if (removeIndex !== -1) {
+			invoiceItems.value.splice(removeIndex, 1)
 		}
 	}
 
@@ -285,16 +301,14 @@ export function useInvoice() {
 	 * @param {string|null} uom - Optional UOM to match when same item exists with different UOMs.
 	 *                            If provided, only updates the item with matching item_code AND uom.
 	 *                            If null, updates the first item matching item_code.
+	 * @param {string|null} batchNo - Batch of the line being stepped. Required to
+	 *                            reach the right line when an item is in the cart
+	 *                            under more than one batch; omit for don't-care.
 	 */
-	function updateItemQuantity(itemCode, quantity, uom = null) {
-		let item
-		if (uom) {
-			item = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom,
-			)
-		} else {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode)
-		}
+	function updateItemQuantity(itemCode, quantity, uom = null, batchNo = undefined) {
+		const item = invoiceItems.value.find((i) =>
+			lineMatches(i, itemCode, uom, batchNo),
+		)
 
 		if (item) {
 			const settingsStore = usePOSSettingsStore()

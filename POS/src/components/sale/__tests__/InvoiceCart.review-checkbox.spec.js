@@ -249,10 +249,12 @@ describe("InvoiceCart — checkout keeps only reviewed lines", () => {
 		await wrapper.find('[data-test="unreviewed-confirm"]').trigger("click")
 		await flushPromises()
 
+		// The batch is passed too, so an item held in the cart under more than one
+		// batch drops only the line that was left unticked.
 		const cartStore = usePOSCartStore()
 		expect(cartStore.removeItem.mock.calls).toEqual([
-			[ITEMS[0].item_code, ITEMS[0].uom],
-			[ITEMS[1].item_code, ITEMS[1].uom],
+			[ITEMS[0].item_code, ITEMS[0].uom, ITEMS[0].batch_no || null],
+			[ITEMS[1].item_code, ITEMS[1].uom, ITEMS[1].batch_no || null],
 		])
 		expect(wrapper.emitted("proceed-to-payment")).toHaveLength(1)
 		expect(wrapper.find('[data-test="dialog"]').exists()).toBe(false)
