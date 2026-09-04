@@ -10,6 +10,8 @@ from frappe.utils import flt, cint, nowdate, nowtime, get_datetime, cstr
 from erpnext.stock.doctype.batch.batch import get_batch_qty, get_batch_no
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 
+from pos_next.api.edit_lock import guard as guard_edit_lock
+
 try:
     from erpnext.accounts.doctype.pricing_rule.pricing_rule import (
         apply_pricing_rule as erpnext_apply_pricing_rule,
@@ -366,6 +368,11 @@ def update_invoice(data):
         data.setdefault("doctype", doctype)
 
         invoice_name = data.get("name")
+
+        # Turn the write away if another cashier is working on this draft, and hold the claim for
+        # us while we are. A new sale has no name yet, so there is nothing to contend over.
+        guard_edit_lock(doctype, invoice_name)
+
         # Throws if the name belongs to an invoice that is no longer a draft.
         invoice_doc = _get_editable_invoice(doctype, invoice_name)
 
@@ -626,6 +633,11 @@ def submit_invoice(invoice=None, data=None):
         doctype = "Sales Invoice"
 
         invoice_name = invoice.get("name")
+
+        # Banking a draft while another till is still adding to it would submit their
+        # half-finished cart, so turn the submit away before anything is booked. The
+        # already-submitted case is a different failure and is handled just below.
+        guard_edit_lock(doctype, invoice_name)
 
         # Throws if this sale was already submitted (or cancelled) elsewhere,
         # rather than booking a duplicate for the same cart.
@@ -1003,6 +1015,9 @@ def delete_invoice(invoice):
     # Check if it's a draft
     if frappe.db.get_value(doctype, invoice, "docstatus") != 0:
         frappe.throw(_("Cannot delete submitted invoice {0}").format(invoice))
+
+    # Never delete a draft out from under the cashier who is editing it.
+    guard_edit_lock(doctype, invoice)
 
     frappe.delete_doc(doctype, invoice, force=1)
     return _("Invoice {0} Deleted").format(invoice)
@@ -1522,6 +1537,10 @@ def get_pos_draft_states(invoice_names):
 def delete_pos_draft(invoice_name):
     """Delete a single held draft."""
     doc = _get_pos_draft_doc(invoice_name, ptype="delete")
+
+    # Held drafts are shared, so this is reachable while a colleague has the ticket open on
+    # another till. Deleting it under them would lose the cart they are still building.
+    guard_edit_lock("Sales Invoice", doc.name)
 
     frappe.delete_doc("Sales Invoice", doc.name, force=1)
     frappe.db.commit()

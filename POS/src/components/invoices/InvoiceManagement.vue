@@ -570,6 +570,7 @@
 <script setup>
 import InvoiceFilters from "@/components/invoices/InvoiceFilters.vue"
 import PaymentDialog from "@/components/sale/PaymentDialog.vue"
+import { useEditLock } from "@/composables/useEditLock"
 import { useInvoiceFilters } from "@/composables/useInvoiceFilters"
 import { useInvoiceFiltersStore } from "@/stores/invoiceFilters"
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
@@ -581,6 +582,18 @@ import { computed, onMounted, ref, watch } from "vue"
 
 const { showSuccess, showError } = useToast()
 const { formatDate, formatDateTime, formatTime } = useFormatters()
+// Two tills can open the same unpaid invoice from this list, so hold it while one is settling it.
+const {
+	acquire: acquireInvoiceLock,
+	release: releaseInvoiceLock,
+	lockedBy: invoiceLockedBy,
+} = useEditLock()
+
+function lockedInvoiceMessage() {
+	const holder = invoiceLockedBy.value
+	if (!holder) return null
+	return holder.message || holder.full_name || holder.user || null
+}
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -870,7 +883,18 @@ async function loadUnpaidSummary() {
 	}
 }
 
-function selectInvoiceForPayment(invoice) {
+async function selectInvoiceForPayment(invoice) {
+	// Claim before the dialog opens, so a second cashier is told now rather than after they have
+	// keyed in a payment. The server refuses the write regardless.
+	const mine = await acquireInvoiceLock("Sales Invoice", invoice?.name)
+	if (!mine) {
+		showError(
+			lockedInvoiceMessage() ||
+				__("This invoice is being settled by another user. Please try again in a moment."),
+		)
+		return
+	}
+
 	selectedInvoice.value = invoice
 	showPaymentDialog.value = true
 }
@@ -897,8 +921,16 @@ async function handlePaymentCompleted(paymentData) {
 	} catch (error) {
 		console.error("Error adding payment:", error)
 		showError(error.message || __("Failed to add payment"))
+	} finally {
+		await releaseInvoiceLock()
 	}
 }
+
+// Closing the dialog — settled, cancelled or dismissed — frees the invoice straight away. The
+// server's TTL is only the safety net for a till that never gets to say goodbye.
+watch(showPaymentDialog, (open) => {
+	if (!open) releaseInvoiceLock()
+})
 
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
