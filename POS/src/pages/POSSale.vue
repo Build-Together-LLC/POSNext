@@ -1765,6 +1765,9 @@ async function handleLoadDraft(draft) {
 		}
 
 		const draftData = await draftsStore.loadDraft(draft)
+		// Null when another till is holding this draft; loadDraft has already said so.
+		if (!draftData) return
+
 		cartStore.invoiceItems = draftData.items
 		cartStore.setCustomer(draftData.customer)
 		cartStore.currentDraftId = draft.draft_id // Set current draft ID
