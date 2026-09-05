@@ -60,6 +60,7 @@
   "section_break_batch",
   "filter_batches_by_pos_warehouse",
   "auto_select_single_batch",
+  "allow_multiple_batches_per_item",
   "section_break_misc",
   "input_qty",
   "allow_negative_stock"
@@ -432,6 +433,13 @@
    "fieldname": "auto_select_single_batch",
    "fieldtype": "Check",
    "label": "Auto-Select Single Batch"
+  },
+  {
+   "default": "0",
+   "description": "Keep each batch of an item on its own cart line, priced from that batch. Off: a second batch is added to the existing line at the first batch's price.",
+   "fieldname": "allow_multiple_batches_per_item",
+   "fieldtype": "Check",
+   "label": "Allow Multiple Batches Per Item"
   },
   {
    "collapsible": 1,

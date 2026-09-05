@@ -218,7 +218,7 @@
 						:applied-offers="cartStore.appliedOffers"
 						:warehouses="profileWarehouses"
 						@update-quantity="cartStore.updateItemQuantity"
-						@remove-item="(itemCode, uom) => cartStore.removeItem(itemCode, uom)"
+						@remove-item="(itemCode, uom, batchNo) => cartStore.removeItem(itemCode, uom, batchNo)"
 						@select-customer="handleCustomerSelected"
 						@create-customer="handleCreateCustomer"
 						@proceed-to-payment="handleProceedToPayment"

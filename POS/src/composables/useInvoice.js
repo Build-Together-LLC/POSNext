@@ -154,11 +154,22 @@ export function useInvoice() {
 		)
 	})
 
+	function batchScoped() {
+		return usePOSSettingsStore().allowMultipleBatchesPerItem
+	}
+
+	function lineMatches(line, itemCode, uom, batchNo) {
+		if (line.item_code !== itemCode) return false
+		if (uom != null && line.uom !== uom) return false
+		if (batchNo === undefined || !batchScoped()) return true
+		return (line.batch_no || null) === (batchNo || null)
+	}
+
 	// Actions
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom
-		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom,
+		const existingItem = invoiceItems.value.find((i) =>
+			lineMatches(i, item.item_code, itemUom, item.batch_no || null),
 		)
 
 		if (existingItem) {
@@ -243,15 +254,12 @@ export function useInvoice() {
 	 *                            If provided, only removes the item with matching item_code AND uom.
 	 *                            If null, removes the first item matching item_code.
 	 */
-	function removeItem(itemCode, uom = null) {
-		let itemToRemove
-		if (uom) {
-			itemToRemove = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom,
-			)
-		} else {
-			itemToRemove = invoiceItems.value.find((i) => i.item_code === itemCode)
-		}
+	function removeItem(itemCode, uom = null, batchNo = undefined) {
+		const removeIndex = invoiceItems.value.findIndex((i) =>
+			lineMatches(i, itemCode, uom, batchNo),
+		)
+		const itemToRemove =
+			removeIndex === -1 ? null : invoiceItems.value[removeIndex]
 
 		if (itemToRemove) {
 			// Update cache incrementally (subtract removed item values)
@@ -267,15 +275,7 @@ export function useInvoice() {
 			}
 		}
 
-		if (uom) {
-			invoiceItems.value = invoiceItems.value.filter(
-				(i) => !(i.item_code === itemCode && i.uom === uom),
-			)
-		} else {
-			invoiceItems.value = invoiceItems.value.filter(
-				(i) => i.item_code !== itemCode,
-			)
-		}
+		if (removeIndex !== -1) invoiceItems.value.splice(removeIndex, 1)
 	}
 
 	/**
@@ -286,15 +286,10 @@ export function useInvoice() {
 	 *                            If provided, only updates the item with matching item_code AND uom.
 	 *                            If null, updates the first item matching item_code.
 	 */
-	function updateItemQuantity(itemCode, quantity, uom = null) {
-		let item
-		if (uom) {
-			item = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom,
-			)
-		} else {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode)
-		}
+	function updateItemQuantity(itemCode, quantity, uom = null, batchNo = undefined) {
+		const item = invoiceItems.value.find((i) =>
+			lineMatches(i, itemCode, uom, batchNo),
+		)
 
 		if (item) {
 			const settingsStore = usePOSSettingsStore()

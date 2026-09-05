@@ -58,6 +58,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allow_negative_stock: 0,
 		filter_batches_by_pos_warehouse: 1,
 		auto_select_single_batch: 1,
+		allow_multiple_batches_per_item: 0,
 		// Sales Persons
 		enable_sales_persons: "Disabled",
 	})
@@ -199,6 +200,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	)
 	const autoSelectSingleBatch = computed(() =>
 		Boolean(settings.value.auto_select_single_batch),
+	)
+	const allowMultipleBatchesPerItem = computed(() =>
+		Boolean(settings.value.allow_multiple_batches_per_item),
 	)
 
 	// Computed - Sales Persons
@@ -450,6 +454,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allowNegativeStock,
 		filterBatchesByPosWarehouse,
 		autoSelectSingleBatch,
+		allowMultipleBatchesPerItem,
 
 		// Computed - Sales Persons
 		enableSalesPersons,
