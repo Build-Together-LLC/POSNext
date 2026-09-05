@@ -355,6 +355,7 @@ function handleConfirm() {
 
 	if (props.item?.has_batch_no && selectedBatch.value) {
 		result.batch_no = selectedBatch.value.batch_no
+		result.actual_batch_qty = Number(selectedBatch.value.qty) || 0
 	}
 
 	if (props.item?.has_serial_no) {

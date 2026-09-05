@@ -297,6 +297,16 @@ export function useInvoice() {
 			const isStockItem = item.is_stock_item !== false
 			const newQuantity = Number.parseFloat(quantity) || 1
 
+			const batchCap =
+				item.batch_no && settingsStore.allowMultipleBatchesPerItem
+					? Number(item.actual_batch_qty) || 0
+					: 0
+			if (isStockItem && batchCap && newQuantity > batchCap && settingsStore.shouldEnforceStockValidation()) {
+				const { showError } = useToast()
+				showError(__('Only {0} available in batch {1}.', [batchCap, item.batch_no]))
+				return
+			}
+
 			if (isStockItem && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
 				const serverStock = stockStore.server.get(itemCode)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
 				const reservedQty = stockStore.reserved.get(itemCode) || 0

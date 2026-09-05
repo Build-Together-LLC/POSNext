@@ -89,7 +89,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const hasActualQty = item.actual_qty !== undefined || item.stock_qty !== undefined
 		const shouldValidateStock = !isNonStockItem && (item.is_stock_item || item.is_bundle || hasActualQty)
 
-		if (shouldValidateStock && !item.has_serial_no && !item.has_batch_no) {
+		const batchCap =
+			item.batch_no && settingsStore.allowMultipleBatchesPerItem
+				? Number(item.actual_batch_qty) || 0
+				: 0
+		if (shouldValidateStock && batchCap && settingsStore.shouldEnforceStockValidation() && qty > batchCap) {
+			throw new Error(
+				`Only ${batchCap} available in batch ${item.batch_no}.`
+			)
+		}
+
+		if (shouldValidateStock && !batchCap && !item.has_serial_no && !item.has_batch_no) {
 			const serverStock = stockStore.server.get(item.item_code)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
 			const reservedQty = stockStore.reserved.get(item.item_code) || 0
 			const availableQty = serverStock - reservedQty

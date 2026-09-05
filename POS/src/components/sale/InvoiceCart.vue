@@ -1744,19 +1744,28 @@ function getItemAvailableStock(item) {
 	return serverStock - reservedQty
 }
 
+function batchLimit(item) {
+	if (!item.batch_no || !settingsStore.allowMultipleBatchesPerItem) return 0
+	return Number(item.actual_batch_qty) || 0
+}
+
 function incrementQuantity(item) {
 	const isStockItem = item.is_stock_item !== false
-	if (isStockItem && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
-		const availableStock = getItemAvailableStock(item)
-		if (availableStock <= 0) {
+	const limit = batchLimit(item)
+	const newQty = Math.round((item.quantity + getSmartStep(item.quantity)) * 10000) / 10000
+	if (isStockItem && settingsStore.shouldEnforceStockValidation()) {
+		if (limit) {
+			if (newQty > limit) {
+				showError(__('Only {0} available in batch {1}.', [limit, item.batch_no]))
+				return
+			}
+		} else if (!item.has_serial_no && !item.has_batch_no && getItemAvailableStock(item) <= 0) {
 			showError(item.is_bundle
 				? __('"{0}" cannot be incremented. Bundle quantity reaches 0.', [item.item_name])
 				: __('"{0}" cannot be incremented. Quantity reaches 0.', [item.item_name]))
 			return
 		}
 	}
-	const step = getSmartStep(item.quantity)
-	const newQty = Math.round((item.quantity + step) * 10000) / 10000
 	emit("update-quantity", item.item_code, newQty, item.uom, item.batch_no || null)
 }
 
@@ -1790,7 +1799,13 @@ function updateQuantity(item, value) {
 	// Allow any positive number during typing (don't round yet)
 	if (!isNaN(qty) && qty > 0) {
 		const isStockItem = item.is_stock_item !== false
-		if (isStockItem && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
+		const limit = batchLimit(item)
+		if (isStockItem && limit && settingsStore.shouldEnforceStockValidation() && qty > limit) {
+			showError(__('Only {0} available in batch {1}.', [limit, item.batch_no]))
+			emit("update-quantity", item.item_code, limit, item.uom, item.batch_no || null)
+			return
+		}
+		if (isStockItem && !limit && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
 			const availableStock = getItemAvailableStock(item)
 			const maxAvailable = item.quantity + (availableStock || 0)
 			if (qty > maxAvailable) {
