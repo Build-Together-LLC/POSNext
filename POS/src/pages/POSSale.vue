@@ -217,6 +217,7 @@
 						:currency="shiftStore.profileCurrency"
 						:applied-offers="cartStore.appliedOffers"
 						:warehouses="profileWarehouses"
+						:is-saving-draft="isHoldingDraft || draftsStore.isSavingDraft"
 						@update-quantity="cartStore.updateItemQuantity"
 						@remove-item="(itemCode, uom) => cartStore.removeItem(itemCode, uom)"
 						@select-customer="handleCustomerSelected"
@@ -811,6 +812,9 @@ const invoiceHistoryData = ref([])
 
 // Stock sync status
 const isStockSyncActive = ref(false)
+
+// Saving draft (holding order) status
+const isHoldingDraft = ref(false)
 
 // Warehouses state and resource
 const warehousesList = ref([])
@@ -1731,17 +1735,25 @@ function logoutWithCloseShift() {
 }
 
 async function handleSaveDraft() {
-	const savedDraft = await draftsStore.saveDraftInvoice(
-		cartStore.invoiceItems,
-		cartStore.customer,
-		cartStore.posProfile,
-		cartStore.appliedOffers,
-		cartStore.currentDraftId,
-	)
-	if (savedDraft) {
-		cartStore.clearCart()
-		// Reset cart hash when cart is saved as draft and cleared
-		previousCartHash = ""
+	if (isHoldingDraft.value) return
+	isHoldingDraft.value = true
+	try {
+		const savedDraft = await draftsStore.saveDraftInvoice(
+			cartStore.invoiceItems,
+			cartStore.customer,
+			cartStore.posProfile,
+			cartStore.appliedOffers,
+			cartStore.currentDraftId,
+		)
+		if (savedDraft) {
+			cartStore.clearCart()
+			// Reset cart hash when cart is saved as draft and cleared
+			previousCartHash = ""
+		}
+	} catch (error) {
+		log.error("Error saving draft:", error)
+	} finally {
+		isHoldingDraft.value = false
 	}
 }
 

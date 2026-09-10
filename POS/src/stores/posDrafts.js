@@ -59,6 +59,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 	// Cached drafts the server kept rejecting; surfaced so the UI can offer
 	// retryFailedDrafts() instead of leaving them silently stuck.
 	const failedDraftsCount = ref(0)
+	const isSavingDraft = ref(false)
 
 	// Reconnect can fire more than once - keep one flush running at a time.
 	let flushingOfflineDrafts = false
@@ -331,26 +332,31 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			return null
 		}
 
-		const toServer = await resolveServerDraftMode()
-
-		if (useServerDrafts.value && isOffline()) {
-			showWarning(
-				__(
-					"Offline - holding this invoice on this device until the connection is back",
-				),
-			)
+		if (isSavingDraft.value) {
+			return null
 		}
 
-		// Deep resolve: missing this would re-hold as a new cached draft instead
-		// of updating the one being resumed, leaving two copies of the sale.
-		const existing = draftId ? await resolveDraftDeep(draftId) : null
-		const existingIsServer = existing ? isServerDraft(existing) : false
-		const boundInvoice =
-			cartStore.heldInvoiceName ||
-			boundInvoiceName(existing) ||
-			(existingIsServer ? draftId : null)
-
+		isSavingDraft.value = true
 		try {
+			const toServer = await resolveServerDraftMode()
+
+			if (useServerDrafts.value && isOffline()) {
+				showWarning(
+					__(
+						"Offline - holding this invoice on this device until the connection is back",
+					),
+				)
+			}
+
+			// Deep resolve: missing this would re-hold as a new cached draft instead
+			// of updating the one being resumed, leaving two copies of the sale.
+			const existing = draftId ? await resolveDraftDeep(draftId) : null
+			const existingIsServer = existing ? isServerDraft(existing) : false
+			const boundInvoice =
+				cartStore.heldInvoiceName ||
+				boundInvoiceName(existing) ||
+				(existingIsServer ? draftId : null)
+
 			let savedDraft
 
 			if (toServer) {
@@ -409,6 +415,8 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			console.error("Error saving draft:", error)
 			showError(__("Failed to save draft"))
 			return null
+		} finally {
+			isSavingDraft.value = false
 		}
 	}
 
@@ -789,6 +797,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		draftsCount,
 		drafts,
 		failedDraftsCount,
+		isSavingDraft,
 
 		// Computed
 		useServerDrafts,

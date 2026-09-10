@@ -42,9 +42,9 @@ const ITEMS = [
 	{ item_code: ".1010050/C", item_name: "CANISTER CLASIC BS4", qty: 2, uom: "Nos", rate: 387, amount: 774 },
 ]
 
-function mountCart() {
+function mountCart(props = {}) {
 	return mount(InvoiceCart, {
-		props: { items: ITEMS, customer: null, appliedOffers: [] },
+		props: { items: ITEMS, customer: null, appliedOffers: [], ...props },
 		global: {
 			plugins: [createTestingPinia({ createSpy: vi.fn })],
 			stubs: { EditItemDialog: true, FeatherIcon: true, teleport: true },
@@ -112,5 +112,33 @@ describe("InvoiceCart — item code + search in cart", () => {
 
 		expect(wrapper.emitted("save-draft")).toBeUndefined()
 		expect(showWarning).toHaveBeenCalledWith("Please select a customer before holding the order")
+	})
+
+	it("emits save-draft when customer is selected and hold is clicked", async () => {
+		const wrapper = mountCart({ customer: { name: "CUST-001" } })
+		const holdButton = wrapper.find('[data-test="hold-button"]')
+
+		expect(holdButton.attributes("disabled")).toBeUndefined()
+		expect(holdButton.text()).toContain("Hold")
+		expect(holdButton.find(".animate-spin").exists()).toBe(false)
+
+		await holdButton.trigger("click")
+		expect(wrapper.emitted("save-draft")).toHaveLength(1)
+	})
+
+	it("disables hold button, shows spinner and 'Saving...' when isSavingDraft is true", async () => {
+		const wrapper = mountCart({
+			customer: { name: "CUST-001" },
+			isSavingDraft: true,
+		})
+		const holdButton = wrapper.find('[data-test="hold-button"]')
+
+		expect(holdButton.attributes("disabled")).toBeDefined()
+		expect(holdButton.classes()).toContain("cursor-not-allowed")
+		expect(holdButton.text()).toContain("Saving...")
+		expect(holdButton.find(".animate-spin").exists()).toBe(true)
+
+		await holdButton.trigger("click")
+		expect(wrapper.emitted("save-draft")).toBeUndefined()
 	})
 })
