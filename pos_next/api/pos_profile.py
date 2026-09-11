@@ -84,7 +84,9 @@ def get_pos_settings(pos_profile):
 				"allow_partial_payment",
 				"decimal_precision",
 				"allow_negative_stock",
-				"enable_sales_persons"
+				"enable_sales_persons",
+				"track_order_loss",
+				"order_loss_max_demand_qty"
 			],
 			as_dict=True
 		)
@@ -105,7 +107,9 @@ def get_pos_settings(pos_profile):
 				"allow_partial_payment": 0,
 				"decimal_precision": "2",
 				"allow_negative_stock": 0,
-				"enable_sales_persons": "Disabled"
+				"enable_sales_persons": "Disabled",
+				"track_order_loss": 0,
+				"order_loss_max_demand_qty": 0
 			}
 
 		return pos_settings

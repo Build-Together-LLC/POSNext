@@ -58,6 +58,11 @@ const CURRENT_SCHEMA = {
 	// Payment queue for offline payments
 	payment_queue: "++id, timestamp, synced",
 
+	// Lost demand recorded while the till was offline. Keyed on the same
+	// idempotency key the server upserts on, so re-queueing a shortfall
+	// overwrites it here instead of stacking up a second copy.
+	order_loss_queue: "&idempotency_key, timestamp, synced, cart_session_id",
+
 	// Drafts (already handled by draftManager, but keeping for consistency)
 	drafts: "++id, draft_id, timestamp",
 
