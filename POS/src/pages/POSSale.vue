@@ -1787,6 +1787,9 @@ async function handleLoadDraft(draft) {
 		// resumed from one) so checkout updates and submits that same document
 		// with the values on screen at that time.
 		cartStore.heldInvoiceName = draftData.invoice_name || null
+		// Version this till is working from; the server refuses a save built on it
+		// once another till has changed the draft.
+		cartStore.heldInvoiceModified = draftData.modified || null
 		cartStore.additionalDiscount = draftData.additional_discount || 0
 		cartStore.couponCode = draftData.coupon_code || null
 

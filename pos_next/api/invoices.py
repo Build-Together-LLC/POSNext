@@ -6,7 +6,16 @@ from __future__ import unicode_literals
 import json
 import frappe
 from frappe import _
-from frappe.utils import flt, cint, nowdate, nowtime, get_datetime, cstr
+from frappe.utils import (
+    flt,
+    cint,
+    nowdate,
+    nowtime,
+    get_datetime,
+    cstr,
+    format_datetime,
+    get_fullname,
+)
 from erpnext.stock.doctype.batch.batch import get_batch_qty, get_batch_no
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 
@@ -353,6 +362,62 @@ def _get_editable_invoice(doctype, invoice_name):
     return frappe.get_doc(doctype, invoice_name)
 
 
+def _same_timestamp(left, right):
+    """Compare two `modified` values, whatever shape they arrive in."""
+    try:
+        return get_datetime(left) == get_datetime(right)
+    except Exception:
+        return cstr(left) == cstr(right)
+
+
+def _assert_not_stale(doctype, name, client_modified):
+    """Refuse a write built from a copy of the document someone has since changed.
+
+    Every POS write sends the whole cart, so the last save wins outright: two
+    tills that both resumed the same hold would overwrite each other's lines
+    with no trace of what was lost. The desk is protected from this by
+    Document.check_if_latest, which compares the `modified` the form was loaded
+    with against the one in the database - but nothing in the POS carried that
+    timestamp to the server, so the check never had anything to compare.
+
+    The edit lock (edit_lock.guard) keeps two cashiers apart while both are
+    active; it is a cache claim with a short TTL, so it lapses as soon as a till
+    goes quiet and the second save lands unchallenged. This is the check that
+    still holds then, and it reports the clash with a message a cashier can act
+    on rather than the desk's "please refresh".
+
+    Callers that send no timestamp - the offline draft flush, an older client -
+    are let through as before.
+    """
+    if not (name and client_modified):
+        return
+
+    current = frappe.db.get_value(
+        doctype, name, ["modified", "modified_by"], as_dict=True
+    )
+
+    # Nothing on file to clash with: a new sale, or a draft queued offline whose
+    # name the server has never seen. update_invoice creates it.
+    if not current:
+        return
+
+    if _same_timestamp(current.modified, client_modified):
+        return
+
+    frappe.throw(
+        _(
+            "{0} was changed by {1} at {2}, after this till loaded it. Saving now "
+            "would overwrite those changes - reload the draft to pick them up first."
+        ).format(
+            name,
+            get_fullname(current.modified_by),
+            format_datetime(current.modified),
+        ),
+        frappe.TimestampMismatchError,
+        title=_("Draft Changed Elsewhere"),
+    )
+
+
 @frappe.whitelist()
 def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
@@ -364,6 +429,11 @@ def update_invoice(data):
 
         applied_pricing_rules = data.pop("applied_pricing_rules", None)
 
+        # The `modified` the client last saw. Popped rather than applied, so the
+        # document keeps the database's own value and this is the only thing that
+        # decides the clash (see _assert_not_stale).
+        client_modified = data.pop("modified", None)
+
         # Ensure the document type is set
         data.setdefault("doctype", doctype)
 
@@ -372,6 +442,10 @@ def update_invoice(data):
         # Turn the write away if another cashier is working on this draft, and hold the claim for
         # us while we are. A new sale has no name yet, so there is nothing to contend over.
         guard_edit_lock(doctype, invoice_name)
+
+        # And turn it away if they have already saved since this cart was loaded,
+        # which the lock alone does not cover once it has lapsed.
+        _assert_not_stale(doctype, invoice_name, client_modified)
 
         # Throws if the name belongs to an invoice that is no longer a draft.
         invoice_doc = _get_editable_invoice(doctype, invoice_name)
@@ -629,6 +703,11 @@ def submit_invoice(invoice=None, data=None):
         # Not a Sales Invoice field: strip so invoice_doc.update(invoice) ignores it.
         invoice.pop("applied_pricing_rules", None)
 
+        # The `modified` the client last saw - checked below, never applied to the
+        # document. update_invoice returns the freshly saved value, so a checkout
+        # that saves the draft first arrives here with the current one.
+        client_modified = invoice.pop("modified", None)
+
         pos_profile = invoice.get("pos_profile")
         doctype = "Sales Invoice"
 
@@ -638,6 +717,10 @@ def submit_invoice(invoice=None, data=None):
         # half-finished cart, so turn the submit away before anything is booked. The
         # already-submitted case is a different failure and is handled just below.
         guard_edit_lock(doctype, invoice_name)
+
+        # Banking someone else's later changes under this cart's totals is the
+        # same loss as overwriting them on a hold - refuse it here too.
+        _assert_not_stale(doctype, invoice_name, client_modified)
 
         # Throws if this sale was already submitted (or cancelled) elsewhere,
         # rather than booking a duplicate for the same cart.
@@ -1240,6 +1323,9 @@ def _serialize_pos_draft(doc):
         "grand_total": flt(doc.grand_total),
         "created_at": cstr(doc.creation),
         "updated_at": cstr(doc.modified),
+        # Sent back on the next write so the server can tell whether another till
+        # has saved in the meantime (see _assert_not_stale).
+        "modified": cstr(doc.modified),
         "owner": doc.owner,
     }
 

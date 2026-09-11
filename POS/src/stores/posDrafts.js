@@ -15,6 +15,7 @@ import {
 	getServerDraftStates,
 	saveServerDraft,
 } from "@/utils/serverDraftManager"
+import { isStaleDocumentError, parseError } from "@/utils/errorHandler"
 import { isOffline } from "@/utils/offline"
 import { offlineState } from "@/utils/offline/offlineState"
 import { useEditLock } from "@/composables/useEditLock"
@@ -371,6 +372,12 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 				savedDraft = await saveServerDraft(payload)
 
+				// Keep the cart on the version we just wrote, so a cart that stays
+				// bound to this draft does not clash with our own save.
+				if (cartStore.heldInvoiceName === savedDraft?.invoice_name) {
+					cartStore.heldInvoiceModified = savedDraft?.modified || null
+				}
+
 				// Promoted out of the cache - drop the copy left behind. Keyed off
 				// `existing`, not `draftId`: an id that resolved to nothing is a
 				// server draft, and there is no cached copy to remove.
@@ -413,6 +420,21 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			return savedDraft
 		} catch (error) {
 			console.error("Error saving draft:", error)
+
+			if (isStaleDocumentError(error)) {
+				// Someone else saved this draft while it was open here. Nothing is
+				// written, and the cart is left alone so the cashier can copy
+				// anything they still need before resuming the newer version.
+				showError(
+					parseError(error).message ||
+						__(
+							"This draft was changed on another till. Open it again from Drafts to get the latest version.",
+						),
+				)
+				await loadDrafts()
+				return null
+			}
+
 			showError(__("Failed to save draft"))
 			return null
 		} finally {
@@ -452,6 +474,10 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 					? buildAppliedOffersFromRules(source.applied_pricing_rules)
 					: source.applied_offers || [], // Restore applied offers
 				invoice_name: boundInvoiceName(source),
+				// Version of the Sales Invoice we are resuming. Carried into the
+				// cart and sent back on the next write, so a save built on this
+				// copy is refused if another till has changed it meanwhile.
+				modified: source.modified || null,
 				additional_discount: source.additional_discount || 0,
 				coupon_code: source.coupon_code || null,
 			}
@@ -589,6 +615,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 					if (cartStore.currentDraftId === draft.draft_id) {
 						cartStore.currentDraftId = savedDraft?.draft_id || null
 						cartStore.heldInvoiceName = savedDraft?.invoice_name || null
+						cartStore.heldInvoiceModified = savedDraft?.modified || null
 					}
 
 					await deleteDraft(draft.draft_id)

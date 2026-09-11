@@ -116,6 +116,15 @@ export const syncOfflineInvoices = async () => {
 			// Transform items: map 'quantity' to 'qty' for ERPNext compatibility
 			// Offline storage uses 'quantity' (cart format) but server expects 'qty'
 			const invoiceData = { ...invoice.data }
+
+			// The payload carries the draft version the till was on when the sale
+			// was taken, which the server uses to refuse a write that would
+			// overwrite someone else's later changes. That check does not belong
+			// here: this sale is already paid for, and days may have passed, so
+			// refusing it would strand the money in the queue for good. The sale
+			// wins; whoever edited the draft since has not been paid for it.
+			delete invoiceData.modified
+
 			if (invoiceData.items && Array.isArray(invoiceData.items)) {
 				// `pricing_rules` is an array on a cart line but a Small Text field on
 				// Sales Invoice Item, so leaving it in place fails the whole submit

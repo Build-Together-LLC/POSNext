@@ -22,6 +22,10 @@ export function useInvoice() {
 	const taxInclusive = ref(false) // Tax inclusive setting from POS Settings
 	const disableRoundedTotal = ref(0) // 0 = rounding enabled, 1 = rounding disabled
 	const heldInvoiceName = ref(null)
+	// `modified` of the held Sales Invoice as this till last saw it. Sent with
+	// every write so the server can refuse one built on a copy another till has
+	// since changed, instead of silently overwriting their cart.
+	const heldInvoiceModified = ref(null)
 
 	// Performance: Incrementally maintained aggregates (updated on add/remove/change)
 	// This avoids O(n) array reductions on every reactive change
@@ -737,6 +741,12 @@ export function useInvoice() {
 
 		if (heldInvoiceName.value) {
 			invoiceData.name = heldInvoiceName.value
+
+			// Let the server reject this write if the draft moved on since we
+			// loaded it (see _assert_not_stale in api/invoices.py).
+			if (heldInvoiceModified.value) {
+				invoiceData.modified = heldInvoiceModified.value
+			}
 		}
 
 		if (includeSalesTeam && rawSalesTeam && rawSalesTeam.length > 0) {
@@ -757,7 +767,25 @@ export function useInvoice() {
 		const invoiceData = buildInvoicePayload()
 
 		const result = await updateInvoiceResource.submit({ data: invoiceData })
-		return result?.data || result
+		const saved = result?.data || result
+		trackSavedInvoice(saved)
+
+		return saved
+	}
+
+	/**
+	 * Remember the `modified` the server just wrote, for the draft this cart is
+	 * bound to.
+	 *
+	 * Without this a second write built from the same cart would clash with our
+	 * own previous one - a checkout that saves the draft and then fails on stock,
+	 * say, and is retried.
+	 */
+	function trackSavedInvoice(savedDoc) {
+		if (!savedDoc?.name) return
+		if (heldInvoiceName.value && savedDoc.name !== heldInvoiceName.value) return
+
+		heldInvoiceModified.value = savedDoc.modified || null
 	}
 
 	async function submitInvoice() {
@@ -789,6 +817,11 @@ export function useInvoice() {
 					"Failed to create draft invoice - no invoice name returned",
 				)
 			}
+
+			// Step 2 sends this document back, so it already carries the fresh
+			// timestamp; this keeps the cart's copy current for a retry after a
+			// submit that fails (stock, payment) with the draft already saved.
+			trackSavedInvoice(invoiceDoc)
 
 			const submitData = {
 				change_amount:
@@ -910,6 +943,7 @@ export function useInvoice() {
 		additionalDiscount.value = 0
 		couponCode.value = null
 		heldInvoiceName.value = null
+		heldInvoiceModified.value = null
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0
@@ -938,6 +972,7 @@ export function useInvoice() {
 		additionalDiscount.value = 0
 		couponCode.value = null
 		heldInvoiceName.value = null
+		heldInvoiceModified.value = null
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0
@@ -1016,6 +1051,7 @@ export function useInvoice() {
 		taxRules,
 		taxInclusive,
 		heldInvoiceName,
+		heldInvoiceModified,
 
 		// Computed
 		subtotal,

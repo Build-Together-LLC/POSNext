@@ -29,6 +29,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		taxInclusive,
 		disableRoundedTotal,
 		heldInvoiceName,
+		heldInvoiceModified,
 		buildInvoicePayload,
 		addItem: addItemToInvoice,
 		removeItem,
@@ -1153,6 +1154,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		suppressOfferReapply,
 		currentDraftId,
 		heldInvoiceName,
+		heldInvoiceModified,
 		offersRecalcInProgress,
 		// Computed
 		itemCount,
