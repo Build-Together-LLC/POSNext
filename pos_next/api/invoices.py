@@ -418,6 +418,54 @@ def _assert_not_stale(doctype, name, client_modified):
     )
 
 
+# Fields the server fetched from whoever the invoice was last saved for. Frappe
+# refreshes customer_name, tax_id and loyalty_program itself on every save
+# (fetch_from without fetch_if_empty), but these are only ever *filled in* -
+# ERPNext's set_missing_values uses update_if_missing - so they survive a change
+# of customer. Left behind they are at best wrong on the print (another
+# customer's address and contact) and at worst booked wrong (debit_to is the
+# previous customer's receivable account); the billing address also fails
+# validate_party_address outright with "Billing Address does not belong to ...".
+PARTY_FETCHED_FIELDS = (
+    "customer_address",
+    "address_display",
+    "shipping_address_name",
+    "shipping_address",
+    "dispatch_address_name",
+    "dispatch_address",
+    "contact_person",
+    "contact_display",
+    "contact_mobile",
+    "contact_phone",
+    "contact_email",
+    "customer_group",
+    "territory",
+    "tax_withholding_category",
+    "language",
+    "debit_to",
+    "party_account_currency",
+)
+
+
+def _clear_stale_party_details(invoice_doc, previous_customer, data=None):
+    """Drop the previous customer's fetched details when a draft changes hands.
+
+    Clearing them is what makes ERPNext re-fetch: set_missing_values only fills
+    blanks. Anything the caller sent explicitly is left alone - the POS is
+    allowed to pick an address itself.
+    """
+    if not previous_customer or previous_customer == invoice_doc.get("customer"):
+        return
+
+    data = data or {}
+
+    for fieldname in PARTY_FETCHED_FIELDS:
+        if data.get(fieldname):
+            continue
+        if invoice_doc.meta.has_field(fieldname):
+            invoice_doc.set(fieldname, None)
+
+
 @frappe.whitelist()
 def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
@@ -451,7 +499,9 @@ def update_invoice(data):
         invoice_doc = _get_editable_invoice(doctype, invoice_name)
 
         if invoice_doc:
+            previous_customer = invoice_doc.get("customer")
             invoice_doc.update(data)
+            _clear_stale_party_details(invoice_doc, previous_customer, data)
         else:
             data.pop("name", None)
             invoice_doc = frappe.get_doc(data)
@@ -727,7 +777,9 @@ def submit_invoice(invoice=None, data=None):
         invoice_doc = _get_editable_invoice(doctype, invoice_name)
 
         if invoice_doc:
+            previous_customer = invoice_doc.get("customer")
             invoice_doc.update(invoice)
+            _clear_stale_party_details(invoice_doc, previous_customer, invoice)
         else:
             invoice.pop("name", None)
             created = update_invoice(json.dumps(invoice, default=str))
