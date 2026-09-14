@@ -76,6 +76,7 @@ class POSClosingShift(Document):
 
     def on_submit(self):
         opening_entry = frappe.get_doc("POS Opening Shift", self.pos_opening_shift)
+        opening_entry.flags.ignore_permissions = True
         opening_entry.pos_closing_shift = self.name
         opening_entry.set_status()
         self.delete_draft_invoices()
@@ -86,6 +87,7 @@ class POSClosingShift(Document):
     def on_cancel(self):
         if frappe.db.exists("POS Opening Shift", self.pos_opening_shift):
             opening_entry = frappe.get_doc("POS Opening Shift", self.pos_opening_shift)
+            opening_entry.flags.ignore_permissions = True
             if opening_entry.pos_closing_shift == self.name:
                 opening_entry.pos_closing_shift = ""
                 opening_entry.set_status()
