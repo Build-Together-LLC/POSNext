@@ -50,6 +50,29 @@ function cleanErrorMessage(rawMessage) {
 }
 
 /**
+ * True when the document had already moved on (frappe.TimestampMismatchError).
+ * Told apart from other failures because nothing was written and nothing is
+ * wrong with the cart - the answer is to reload, not to correct anything.
+ *
+ * @param {Object} error - The error object from an API call
+ * @returns {boolean}
+ */
+export function isStaleDocumentError(error) {
+	if (!error) return false
+
+	const excType = (
+		error.exc_type ||
+		error.resourceError?.exc_type ||
+		""
+	).toLowerCase()
+
+	if (excType === "timestampmismatcherror") return true
+
+	// Fallback for callers that only get the raw traceback back.
+	return String(error.exception || "").includes("TimestampMismatchError")
+}
+
+/**
  * Parse error and return structured error information
  * @param {Error} error - The error object from API call
  * @returns {Object} - Structured error information
@@ -115,8 +138,19 @@ export function parseError(error) {
 	const normalizedMessage = (context.message || "").toLowerCase()
 	const excType = (error.exc_type || "").toLowerCase()
 
+	// Someone else saved first: the write was refused, nothing was lost.
+	if (isStaleDocumentError(error)) {
+		context.type = "warning"
+		context.title = __("Draft Changed Elsewhere")
+		context.retryable = false
+
+		if (!context.message || context.message === __("An unexpected error occurred")) {
+			context.message =
+				__("This draft was changed on another till. Open it again from Drafts to get the latest version.")
+		}
+	}
 	// Insufficient Stock
-	if (
+	else if (
 		excType === "negativestockerror" ||
 		normalizedMessage.includes("needed in") ||
 		normalizedMessage.includes("insufficient stock") ||
