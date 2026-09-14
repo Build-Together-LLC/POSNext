@@ -373,21 +373,11 @@ def _same_timestamp(left, right):
 def _assert_not_stale(doctype, name, client_modified):
     """Refuse a write built from a copy of the document someone has since changed.
 
-    Every POS write sends the whole cart, so the last save wins outright: two
-    tills that both resumed the same hold would overwrite each other's lines
-    with no trace of what was lost. The desk is protected from this by
-    Document.check_if_latest, which compares the `modified` the form was loaded
-    with against the one in the database - but nothing in the POS carried that
-    timestamp to the server, so the check never had anything to compare.
-
-    The edit lock (edit_lock.guard) keeps two cashiers apart while both are
-    active; it is a cache claim with a short TTL, so it lapses as soon as a till
-    goes quiet and the second save lands unchallenged. This is the check that
-    still holds then, and it reports the clash with a message a cashier can act
-    on rather than the desk's "please refresh".
-
-    Callers that send no timestamp - the offline draft flush, an older client -
-    are let through as before.
+    Every POS write posts the whole cart, so the last save wins outright. The
+    desk gets this from Document.check_if_latest; nothing in the POS carried
+    `modified` to the server, so there was never anything to compare. The edit
+    lock only covers the window where both tills are active - this still holds
+    once it lapses. No timestamp (offline flush, older client) is let through.
     """
     if not (name and client_modified):
         return
@@ -396,8 +386,7 @@ def _assert_not_stale(doctype, name, client_modified):
         doctype, name, ["modified", "modified_by"], as_dict=True
     )
 
-    # Nothing on file to clash with: a new sale, or a draft queued offline whose
-    # name the server has never seen. update_invoice creates it.
+    # No row yet: a new sale, or an offline draft the server has not seen.
     if not current:
         return
 
@@ -477,9 +466,7 @@ def update_invoice(data):
 
         applied_pricing_rules = data.pop("applied_pricing_rules", None)
 
-        # The `modified` the client last saw. Popped rather than applied, so the
-        # document keeps the database's own value and this is the only thing that
-        # decides the clash (see _assert_not_stale).
+        # Popped, never applied: it only decides the clash (see _assert_not_stale).
         client_modified = data.pop("modified", None)
 
         # Ensure the document type is set
@@ -491,8 +478,7 @@ def update_invoice(data):
         # us while we are. A new sale has no name yet, so there is nothing to contend over.
         guard_edit_lock(doctype, invoice_name)
 
-        # And turn it away if they have already saved since this cart was loaded,
-        # which the lock alone does not cover once it has lapsed.
+        # And once the lock has lapsed and they saved in the meantime.
         _assert_not_stale(doctype, invoice_name, client_modified)
 
         # Throws if the name belongs to an invoice that is no longer a draft.
@@ -753,9 +739,7 @@ def submit_invoice(invoice=None, data=None):
         # Not a Sales Invoice field: strip so invoice_doc.update(invoice) ignores it.
         invoice.pop("applied_pricing_rules", None)
 
-        # The `modified` the client last saw - checked below, never applied to the
-        # document. update_invoice returns the freshly saved value, so a checkout
-        # that saves the draft first arrives here with the current one.
+        # As in update_invoice; step 1 returns the fresh value, so a checkout has it.
         client_modified = invoice.pop("modified", None)
 
         pos_profile = invoice.get("pos_profile")
@@ -768,8 +752,7 @@ def submit_invoice(invoice=None, data=None):
         # already-submitted case is a different failure and is handled just below.
         guard_edit_lock(doctype, invoice_name)
 
-        # Banking someone else's later changes under this cart's totals is the
-        # same loss as overwriting them on a hold - refuse it here too.
+        # Banking someone else's changes under this cart's totals is the same loss.
         _assert_not_stale(doctype, invoice_name, client_modified)
 
         # Throws if this sale was already submitted (or cancelled) elsewhere,
@@ -1375,8 +1358,7 @@ def _serialize_pos_draft(doc):
         "grand_total": flt(doc.grand_total),
         "created_at": cstr(doc.creation),
         "updated_at": cstr(doc.modified),
-        # Sent back on the next write so the server can tell whether another till
-        # has saved in the meantime (see _assert_not_stale).
+        # Sent back on the next write (see _assert_not_stale).
         "modified": cstr(doc.modified),
         "owner": doc.owner,
     }

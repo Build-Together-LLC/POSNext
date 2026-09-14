@@ -22,9 +22,7 @@ export function useInvoice() {
 	const taxInclusive = ref(false) // Tax inclusive setting from POS Settings
 	const disableRoundedTotal = ref(0) // 0 = rounding enabled, 1 = rounding disabled
 	const heldInvoiceName = ref(null)
-	// `modified` of the held Sales Invoice as this till last saw it. Sent with
-	// every write so the server can refuse one built on a copy another till has
-	// since changed, instead of silently overwriting their cart.
+	// `modified` this till last saw; sent with every write so a stale save is refused.
 	const heldInvoiceModified = ref(null)
 
 	// Performance: Incrementally maintained aggregates (updated on add/remove/change)
@@ -742,8 +740,7 @@ export function useInvoice() {
 		if (heldInvoiceName.value) {
 			invoiceData.name = heldInvoiceName.value
 
-			// Let the server reject this write if the draft moved on since we
-			// loaded it (see _assert_not_stale in api/invoices.py).
+			// Lets the server refuse a write built on a draft that has moved on.
 			if (heldInvoiceModified.value) {
 				invoiceData.modified = heldInvoiceModified.value
 			}
@@ -774,12 +771,8 @@ export function useInvoice() {
 	}
 
 	/**
-	 * Remember the `modified` the server just wrote, for the draft this cart is
-	 * bound to.
-	 *
-	 * Without this a second write built from the same cart would clash with our
-	 * own previous one - a checkout that saves the draft and then fails on stock,
-	 * say, and is retried.
+	 * Remember the `modified` the server just wrote, so a second write from the
+	 * same cart cannot clash with our own previous one.
 	 */
 	function trackSavedInvoice(savedDoc) {
 		if (!savedDoc?.name) return
@@ -818,9 +811,7 @@ export function useInvoice() {
 				)
 			}
 
-			// Step 2 sends this document back, so it already carries the fresh
-			// timestamp; this keeps the cart's copy current for a retry after a
-			// submit that fails (stock, payment) with the draft already saved.
+			// Keeps the cart current for a retry after a submit that fails on stock.
 			trackSavedInvoice(invoiceDoc)
 
 			const submitData = {

@@ -372,8 +372,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 				savedDraft = await saveServerDraft(payload)
 
-				// Keep the cart on the version we just wrote, so a cart that stays
-				// bound to this draft does not clash with our own save.
+				// Keep the cart on the version we just wrote, so it cannot clash with it.
 				if (cartStore.heldInvoiceName === savedDraft?.invoice_name) {
 					cartStore.heldInvoiceModified = savedDraft?.modified || null
 				}
@@ -422,9 +421,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			console.error("Error saving draft:", error)
 
 			if (isStaleDocumentError(error)) {
-				// Someone else saved this draft while it was open here. Nothing is
-				// written, and the cart is left alone so the cashier can copy
-				// anything they still need before resuming the newer version.
+				// Nothing was written, so the cart is left alone for the cashier to copy from.
 				showError(
 					parseError(error).message ||
 						__(
@@ -474,9 +471,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 					? buildAppliedOffersFromRules(source.applied_pricing_rules)
 					: source.applied_offers || [], // Restore applied offers
 				invoice_name: boundInvoiceName(source),
-				// Version of the Sales Invoice we are resuming. Carried into the
-				// cart and sent back on the next write, so a save built on this
-				// copy is refused if another till has changed it meanwhile.
+				// Version being resumed; sent back on the next write to catch a clash.
 				modified: source.modified || null,
 				additional_discount: source.additional_discount || 0,
 				coupon_code: source.coupon_code || null,

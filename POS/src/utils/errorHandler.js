@@ -50,12 +50,9 @@ function cleanErrorMessage(rawMessage) {
 }
 
 /**
- * True when the server refused the write because the document had already moved
- * on (frappe.TimestampMismatchError - see _assert_not_stale in api/invoices.py).
- *
- * Worth telling apart from every other validation failure: nothing was written
- * and nothing is wrong with the cart, so the answer is to reload the draft
- * rather than to correct anything.
+ * True when the document had already moved on (frappe.TimestampMismatchError).
+ * Told apart from other failures because nothing was written and nothing is
+ * wrong with the cart - the answer is to reload, not to correct anything.
  *
  * @param {Object} error - The error object from an API call
  * @returns {boolean}
@@ -141,8 +138,7 @@ export function parseError(error) {
 	const normalizedMessage = (context.message || "").toLowerCase()
 	const excType = (error.exc_type || "").toLowerCase()
 
-	// Someone else saved the document first - the write was refused, nothing was
-	// lost, and the cashier has to reload before trying again.
+	// Someone else saved first: the write was refused, nothing was lost.
 	if (isStaleDocumentError(error)) {
 		context.type = "warning"
 		context.title = __("Draft Changed Elsewhere")
