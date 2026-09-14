@@ -752,6 +752,7 @@ import ColumnResizeHandle from "@/components/common/ColumnResizeHandle.vue"
 import LazyImage from "@/components/common/LazyImage.vue"
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue"
 import { useItemSearchStore } from "@/stores/itemSearch"
+import { usePOSOrderLossStore } from "@/stores/orderLoss"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useStock } from "@/composables/useStock"
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
@@ -782,6 +783,7 @@ const emit = defineEmits(["item-selected"])
 // Use composables
 const { getStockStatus } = useStock()
 const settingsStore = usePOSSettingsStore()
+const orderLossStore = usePOSOrderLossStore()
 const { showError, showWarning } = useToast()
 
 // Use Pinia store
@@ -1360,6 +1362,9 @@ function handleItemClick(itemCode) {
 	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
 		if (settingsStore.shouldEnforceStockValidation()) {
 			if (qty <= 0) {
+				// Nothing on the shelf, so this never becomes a cart line and
+				// never reaches an invoice - the loss is the whole ask.
+				captureShortfall(item, 1, qty, "Item Tile")
 				showError(item.is_bundle 
 					? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
 					: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
@@ -1374,6 +1379,15 @@ function handleItemClick(itemCode) {
 	}
 
 	emit("item-selected", item)
+}
+
+/** Offer a refused quantity up as lost demand; never let it break the till. */
+function captureShortfall(item, requestedQty, availableQty, source) {
+	try {
+		orderLossStore.recordShortfall({ item, requestedQty, availableQty, source })
+	} catch (error) {
+		console.warn("Loss of order: could not capture shortfall", error)
+	}
 }
 
 async function handleBarcodeSearch(forceAutoAdd = false) {
@@ -1397,6 +1411,7 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 			if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
 				if (settingsStore.shouldEnforceStockValidation()) {
 					if (qty <= 0) {
+						captureShortfall(item, 1, qty, "Barcode Scan")
 						showError(item.is_bundle 
 							? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
 							: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
@@ -1427,6 +1442,7 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 		if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
 			if (settingsStore.shouldEnforceStockValidation()) {
 				if (qty <= 0) {
+					captureShortfall(item, 1, qty, "Barcode Scan")
 					showError(item.is_bundle 
 						? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
 						: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))

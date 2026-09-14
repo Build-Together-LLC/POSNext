@@ -5,12 +5,18 @@
 				:id="fieldId"
 				type="checkbox"
 				:checked="modelValue"
+				:disabled="disabled"
 				@change="$emit('update:modelValue', $event.target.checked ? 1 : 0)"
-				class="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 focus:ring-1 cursor-pointer"
+				class="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 focus:ring-1"
+				:class="disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'"
 			/>
 		</div>
 		<div class="flex-1 min-w-0">
-			<label :for="fieldId" class="block text-sm font-medium text-gray-900 cursor-pointer">
+			<label
+				:for="fieldId"
+				class="block text-sm font-medium"
+				:class="disabled ? 'text-gray-400 cursor-not-allowed' : 'text-gray-900 cursor-pointer'"
+			>
 				{{ label }}
 			</label>
 			<p v-if="description" class="text-xs text-gray-500 mt-0.5 leading-tight">
@@ -35,6 +41,11 @@ const props = defineProps({
 	description: {
 		type: String,
 		default: "",
+	},
+	// For a setting that cannot apply while another one is on.
+	disabled: {
+		type: Boolean,
+		default: false,
 	},
 })
 

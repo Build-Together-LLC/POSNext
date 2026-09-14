@@ -1,6 +1,7 @@
 import { createResource } from "frappe-ui"
 import { computed, ref, toRaw } from "vue"
 import { isOffline } from "@/utils/offline"
+import { usePOSOrderLossStore } from "@/stores/orderLoss"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useStockStore } from "@/stores/stock"
@@ -9,6 +10,8 @@ import { useToast } from "@/composables/useToast"
 export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
 	const serialStore = useSerialNumberStore()
+	// Unmet demand recorded during this sale, settled against the invoice below.
+	const orderLossStore = usePOSOrderLossStore()
 	// State
 	const invoiceItems = ref([])
 	const customer = ref(null)
@@ -308,6 +311,19 @@ export function useInvoice() {
 				const availableStock = serverStock - reservedQty
 				const maxAvailable = item.quantity + availableStock
 				if (newQuantity > maxAvailable) {
+					// The ask is known here and nowhere after: the line keeps its
+					// old quantity and the difference simply disappears.
+					try {
+						orderLossStore.recordShortfall({
+							item,
+							requestedQty: newQuantity,
+							availableQty: maxAvailable,
+							source: "Qty Update",
+						})
+					} catch (error) {
+						console.warn("Loss of order: could not capture shortfall", error)
+					}
+
 					const { showError } = useToast()
 					showError(__('Cannot update quantity for "{0}". Only {1} available in stock.', [item.item_name, Math.max(0, Math.floor(maxAvailable))]))
 					return
@@ -767,6 +783,10 @@ export function useInvoice() {
 		 * 2. Validate stock and submit
 		 */
 		try {
+			// Anything the till could not sell for this customer goes in before the
+			// sale is banked, so the server can settle it against the invoice.
+			await orderLossStore.flush({ force: true }).catch(() => {})
+
 			// Step 1: Create invoice draft (or update the held draft being resumed)
 			const invoiceData = buildInvoicePayload()
 			const appliedPricingRules = invoiceData.applied_pricing_rules
@@ -795,6 +815,8 @@ export function useInvoice() {
 					remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
 
 				applied_pricing_rules: appliedPricingRules,
+				// Lets the server match this sale to the demand it fell short of.
+				order_loss_session: orderLossStore.sessionId,
 			}
 
 			try {

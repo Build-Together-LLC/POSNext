@@ -21,6 +21,7 @@ export const usePOSUIStore = defineStore("posUI", () => {
 	const { isOpen: showOffersDialog } = useDialog("offers")
 	const { isOpen: showBatchSerialDialog } = useDialog("batchSerial")
 	const { isOpen: showHistoryDialog } = useDialog("history")
+	const { isOpen: showOrderLossDialog } = useDialog("orderLossList")
 	const { isOpen: showOfflineInvoicesDialog } = useDialog("offlineInvoices")
 	const { isOpen: showCreateCustomerDialog } = useDialog("createCustomer")
 	const { isOpen: showClearCartDialog } = useDialog("clearCart")
@@ -180,6 +181,7 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		showOffersDialog,
 		showBatchSerialDialog,
 		showHistoryDialog,
+		showOrderLossDialog,
 		showOfflineInvoicesDialog,
 		showCreateCustomerDialog,
 		showClearCartDialog,

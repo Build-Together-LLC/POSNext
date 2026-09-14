@@ -165,6 +165,24 @@
 													/>
 												</div>
 											</div>
+											<div class="mt-4 pt-4 border-t border-gray-200 flex flex-col gap-3">
+												<CheckboxField
+													v-model="settings.track_order_loss"
+													:disabled="Boolean(settings.allow_negative_stock)"
+													:label="__('Track Loss of Order')"
+													:description="__('Record what customers asked for but could not be sold. The cashier confirms each shortfall, and nothing about the existing block or clamp changes.')"
+												/>
+												<p v-if="settings.allow_negative_stock" class="text-xs text-gray-500 ps-1">
+													{{ __('Unavailable while negative stock is allowed: the till never refuses a quantity, so the full amount is always sold and there is no lost demand to record.') }}
+												</p>
+												<NumberField
+													v-if="settings.track_order_loss && !settings.allow_negative_stock"
+													v-model="settings.order_loss_max_demand_qty"
+													:label="__('Ignore Demand Above Qty')"
+													:description="__('Guards against a mistyped quantity. 0 means no limit.')"
+													:min="0"
+												/>
+											</div>
 										</div>
 									</div>
 
@@ -453,6 +471,8 @@ const settings = ref({
 	allow_server_side_draft_invoice: 0,
 	silent_print: 0,
 	allow_negative_stock: 0,
+	track_order_loss: 0,
+	order_loss_max_demand_qty: 0,
 	tax_inclusive: 0,
 	auto_apply_offers: 0,
 	require_cart_item_review: 0,
