@@ -20,6 +20,26 @@ def _clean_address(text):
     return text.strip(" ,")
 
 
+def _customer_groups_for_pos_profile(pos_profile):
+    """Return allowed Customer Groups from a POS Profile, including child groups."""
+    if not pos_profile:
+        return []
+
+    configured_groups = frappe.get_all(
+        "POS Customer Group",
+        filters={"parent": pos_profile},
+        pluck="customer_group",
+    )
+    if not configured_groups:
+        return []
+
+    groups = set(configured_groups)
+    for group in configured_groups:
+        groups.update(frappe.db.get_descendants("Customer Group", group) or [])
+
+    return list(groups)
+
+
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20):
 
@@ -41,19 +61,18 @@ def get_customers(search_term="", pos_profile=None, limit=20):
 
         filters = {}
 
-        # Filter by POS Profile customer group if specified
+        # Filter by Customer Groups configured on POS Profile.
         if pos_profile:
             frappe.logger().debug(f"Loading POS Profile: {pos_profile}")
-            profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
-            # Check if customer_group field exists (it may not exist in all versions)
-            if hasattr(profile_doc, "customer_group") and profile_doc.customer_group:
-                filters["customer_group"] = profile_doc.customer_group
-                frappe.logger().debug(f"Filtering by customer_group: {profile_doc.customer_group}")
+            customer_groups = _customer_groups_for_pos_profile(pos_profile)
+            if customer_groups:
+                filters["customer_group"] = ["in", customer_groups]
+                frappe.logger().debug(f"Filtering by customer_groups: {customer_groups}")
 
         # Return all customers (for client-side filtering)
         filters["disabled"] = 0
         customer_limit = limit if limit not in (None, 0) else frappe.db.count("Customer", filters)
-        fields = ["name", "customer_name", "mobile_no", "email_id"]
+        fields = ["name", "customer_name", "mobile_no", "email_id", "customer_group"]
         if frappe.get_meta("Customer").has_field("custom_vehicle_no"):
             fields.append("custom_vehicle_no")
 

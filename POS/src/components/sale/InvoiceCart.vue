@@ -1093,7 +1093,8 @@ const customersResource = createResource({
 		allCustomers.value = customers
 		customersLoaded.value = true
 
-		// Also cache in worker for offline support
+		// Replace cached customers with the POS Profile-scoped list for offline support.
+		await offlineWorker.clearCustomersCache()
 		await offlineWorker.cacheCustomers(customers)
 	},
 	onError(error) {
