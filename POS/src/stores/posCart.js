@@ -94,24 +94,27 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return Number(item?.conversion_factor) || 1
 	}
 
+	function isEnabledFlag(value) {
+		return value === true || value === 1 || value === "1"
+	}
+
 	function getItemServerStock(item) {
 		return stockStore.server.get(item.item_code)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
 	}
 
 	function shouldValidateStock(item) {
-		const isNonStockItem = item.is_stock_item === 0 || item.is_stock_item === false
+		const isNonStockItem = item.is_stock_item === 0 || item.is_stock_item === false || item.is_stock_item === "0"
 		const hasActualQty = item.actual_qty !== undefined || item.stock_qty !== undefined
 		return !isNonStockItem && (item.is_stock_item || item.is_bundle || hasActualQty)
 	}
 
 	function getProjectedStockLimit(item, matchingLine, finalLineQty) {
 		const serverStock = getItemServerStock(item)
-		const reservedQty = stockStore.reserved.get(item.item_code) || 0
-		const currentLineReserved = matchingLine
-			? getLineQuantity(matchingLine) * getConversionFactor(matchingLine)
-			: 0
 		const projectedLineReserved = finalLineQty * getConversionFactor(item)
-		const otherReservedQty = Math.max(0, reservedQty - currentLineReserved)
+		const otherReservedQty = invoiceItems.value.reduce((total, line) => {
+			if (line.item_code !== item.item_code || line === matchingLine) return total
+			return total + (getLineQuantity(line) * getConversionFactor(line))
+		}, 0)
 		const maxLineQty = (serverStock - otherReservedQty) / getConversionFactor(item)
 
 		return {
@@ -122,7 +125,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	function validateStockLimit(item, finalLineQty, matchingLine = null) {
-		if (!shouldValidateStock(item) || !settingsStore.shouldEnforceStockValidation()) {
+		const validatesStock = shouldValidateStock(item)
+		const enforcesStock = settingsStore.shouldEnforceStockValidation()
+
+		if (!validatesStock || !enforcesStock) {
 			return
 		}
 
@@ -134,7 +140,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			throw new Error(`Only ${batchCap} available in batch ${item.batch_no}.`)
 		}
 
-		if (batchCap || item.has_serial_no || item.has_batch_no) {
+		const hasSelectedSerials = isEnabledFlag(item.has_serial_no) && Boolean(item.serial_no)
+		if (batchCap || hasSelectedSerials) {
 			return
 		}
 
