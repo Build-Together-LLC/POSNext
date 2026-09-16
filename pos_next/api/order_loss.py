@@ -196,7 +196,10 @@ def _sanitise(entry, ctx, meta, ceiling, cart_session_id, pos_profile, pos_openi
         "demanded_qty": demanded,
         "last_demanded_qty": demanded,
         "available_qty": available,
-        "sold_qty": 0,
+        # What the cart is holding for this item as the shortfall is recorded.
+        # Provisional: reconcile_invoice replaces it with what the submitted
+        # invoice actually took, which is the number that counts.
+        "sold_qty": max(flt(entry.get("sold_qty")), 0),
         "currency": ctx.get("currency"),
         "rate": rate,
         "reason": entry.get("reason") or ("Out of Stock" if not available else "Insufficient Stock"),
@@ -228,6 +231,12 @@ def _merge_into(doc, row):
     doc.last_demanded_qty = flt(doc.demanded_qty)
     doc.demanded_qty = flt(row["demanded_qty"])
     doc.available_qty = flt(row["available_qty"])
+
+    # Follows the cart too, so a line edited down after the shortfall does not
+    # leave the row claiming a bigger sale than the cart holds. A row already
+    # settled against a submitted invoice keeps that figure.
+    if not doc.sales_invoice:
+        doc.sold_qty = flt(row.get("sold_qty"))
     doc.rate = flt(doc.rate) or flt(row["rate"])
     doc.customer = doc.customer or row.get("customer")
     doc.pos_opening_shift = doc.pos_opening_shift or row.get("pos_opening_shift")

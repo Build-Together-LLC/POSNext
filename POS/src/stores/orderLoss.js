@@ -261,7 +261,25 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 
 		const cartStore = await getCartStore()
 
-		const entries = [...shortfalls.value.values()]
+		// What the cart holds for each short item right now. The customer asked
+		// for 30, took the 20 that were there - that 20 is the sale, and the row
+		// should say so while it is still on screen, not only once it is banked.
+		// Checkout overwrites this from the invoice's own lines.
+		const cartQty = (entry) => {
+			const line = (cartStore.invoiceItems || []).find(
+				(i) =>
+					i.item_code === entry.item_code &&
+					(!entry.uom || (i.uom || i.stock_uom) === entry.uom),
+			)
+
+			return Number(line?.quantity) || 0
+		}
+
+		const entries = [...shortfalls.value.values()].map((entry) => ({
+			...entry,
+			sold_qty: cartQty(entry),
+		}))
+
 		const context = {
 			pos_profile: cartStore.posProfile,
 			cart_session_id: sessionId.value,
