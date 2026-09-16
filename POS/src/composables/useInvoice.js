@@ -22,8 +22,6 @@ export function useInvoice() {
 	const taxInclusive = ref(false) // Tax inclusive setting from POS Settings
 	const disableRoundedTotal = ref(0) // 0 = rounding enabled, 1 = rounding disabled
 	const heldInvoiceName = ref(null)
-	// `modified` this till last saw; sent with every write so a stale save is refused.
-	const heldInvoiceModified = ref(null)
 
 	// Performance: Incrementally maintained aggregates (updated on add/remove/change)
 	// This avoids O(n) array reductions on every reactive change
@@ -739,11 +737,6 @@ export function useInvoice() {
 
 		if (heldInvoiceName.value) {
 			invoiceData.name = heldInvoiceName.value
-
-			// Lets the server refuse a write built on a draft that has moved on.
-			if (heldInvoiceModified.value) {
-				invoiceData.modified = heldInvoiceModified.value
-			}
 		}
 
 		if (includeSalesTeam && rawSalesTeam && rawSalesTeam.length > 0) {
@@ -764,21 +757,7 @@ export function useInvoice() {
 		const invoiceData = buildInvoicePayload()
 
 		const result = await updateInvoiceResource.submit({ data: invoiceData })
-		const saved = result?.data || result
-		trackSavedInvoice(saved)
-
-		return saved
-	}
-
-	/**
-	 * Remember the `modified` the server just wrote, so a second write from the
-	 * same cart cannot clash with our own previous one.
-	 */
-	function trackSavedInvoice(savedDoc) {
-		if (!savedDoc?.name) return
-		if (heldInvoiceName.value && savedDoc.name !== heldInvoiceName.value) return
-
-		heldInvoiceModified.value = savedDoc.modified || null
+		return result?.data || result
 	}
 
 	async function submitInvoice() {
@@ -810,9 +789,6 @@ export function useInvoice() {
 					"Failed to create draft invoice - no invoice name returned",
 				)
 			}
-
-			// Keeps the cart current for a retry after a submit that fails on stock.
-			trackSavedInvoice(invoiceDoc)
 
 			const submitData = {
 				change_amount:
@@ -934,7 +910,6 @@ export function useInvoice() {
 		additionalDiscount.value = 0
 		couponCode.value = null
 		heldInvoiceName.value = null
-		heldInvoiceModified.value = null
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0
@@ -963,7 +938,6 @@ export function useInvoice() {
 		additionalDiscount.value = 0
 		couponCode.value = null
 		heldInvoiceName.value = null
-		heldInvoiceModified.value = null
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0
@@ -1042,7 +1016,6 @@ export function useInvoice() {
 		taxRules,
 		taxInclusive,
 		heldInvoiceName,
-		heldInvoiceModified,
 
 		// Computed
 		subtotal,
