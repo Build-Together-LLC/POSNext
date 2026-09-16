@@ -52,6 +52,16 @@
 					</button>
 					<button
 						v-if="posSettingsStore.trackOrderLoss"
+						@click="handleRecordUnlisted('')"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-orange-50 flex items-center gap-3 transition-colors"
+					>
+						<svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0l-7.1 12.25A2 2 0 005 19z"/>
+						</svg>
+						<span>{{ __('Item We Do Not Carry') }}</span>
+					</button>
+					<button
+						v-if="posSettingsStore.trackOrderLoss"
 						@click="uiStore.showOrderLossDialog = true"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-orange-50 flex items-center gap-3 transition-colors"
 					>
@@ -180,6 +190,7 @@
 						:cart-items="cartStore.invoiceItems"
 						:currency="shiftStore.profileCurrency"
 						@item-selected="handleItemSelected"
+						@record-unlisted="handleRecordUnlisted"
 					/>
 				</div>
 			</keep-alive>
@@ -387,6 +398,15 @@
 			:quantity="cartStore.pendingItemQty"
 			:warehouse="shiftStore.profileWarehouse"
 			@batch-serial-selected="handleBatchSerialSelected"
+		/>
+
+		<!-- Demand for something the catalogue does not carry at all. -->
+		<UnlistedItemDialog
+			v-model="uiStore.showUnlistedItemDialog"
+			:pos-profile="shiftStore.profileName"
+			:pos-opening-shift="cartStore.posOpeningShift"
+			:customer="cartStore.customer"
+			:initial-text="unlistedItemText"
 		/>
 
 		<!-- What the till was asked for and could not sell, for the shift. -->
@@ -724,6 +744,7 @@ import ItemsSelector from "@/components/sale/ItemsSelector.vue"
 import OffersDialog from "@/components/sale/OffersDialog.vue"
 import OrderLossConfirmDialog from "@/components/sale/OrderLossConfirmDialog.vue"
 import OrderLossDialog from "@/components/sale/OrderLossDialog.vue"
+import UnlistedItemDialog from "@/components/sale/UnlistedItemDialog.vue"
 import OfflineInvoicesDialog from "@/components/sale/OfflineInvoicesDialog.vue"
 import PaymentDialog from "@/components/sale/PaymentDialog.vue"
 import PromotionManagement from "@/components/sale/PromotionManagement.vue"
@@ -763,6 +784,8 @@ const shiftStore = usePOSShiftStore()
 const uiStore = usePOSUIStore()
 const offlineStore = usePOSSyncStore()
 const draftsStore = usePOSDraftsStore()
+// Prefill for the unlisted-item form.
+const unlistedItemText = ref("")
 const orderLossStore = usePOSOrderLossStore()
 const posSettingsStore = usePOSSettingsStore()
 const itemStore = useItemSearchStore()
@@ -1843,6 +1866,13 @@ async function handleLoadDraft(draft) {
 	} catch (error) {
 		log.error("Error loading draft:", error)
 	}
+}
+
+// Opens the "we do not carry this" form, carrying over whatever the cashier had
+// typed in the search box so they do not type it twice.
+function handleRecordUnlisted(searchTerm) {
+	unlistedItemText.value = typeof searchTerm === "string" ? searchTerm : ""
+	uiStore.showUnlistedItemDialog = true
 }
 
 function handleReturnCreated(returnInvoice) {

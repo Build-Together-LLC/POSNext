@@ -266,6 +266,19 @@
 					<span v-else>{{ __('No results for {0}', [searchTerm]) }}</span>
 				</p>
 				<p v-else class="mt-2 text-xs text-gray-500">{{ __('No items available') }}</p>
+
+				<!-- Nothing matched, so the customer is asking for something the
+				     catalogue does not carry. Capture it while they are standing there. -->
+				<button
+					v-if="searchTerm && settingsStore.trackOrderLoss"
+					@click="emit('record-unlisted', searchTerm)"
+					class="mt-3 inline-flex items-center gap-2 rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-xs font-medium text-orange-700 hover:bg-orange-100 transition-colors"
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0l-7.1 12.25A2 2 0 005 19z"/>
+					</svg>
+					{{ __('We do not carry this - record it') }}
+				</button>
 			</div>
 		</div>
 
@@ -778,7 +791,7 @@ const props = defineProps({
 	},
 })
 
-const emit = defineEmits(["item-selected"])
+const emit = defineEmits(["item-selected", "record-unlisted"])
 
 // Use composables
 const { getStockStatus } = useStock()
