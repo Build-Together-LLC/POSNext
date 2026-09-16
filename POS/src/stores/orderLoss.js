@@ -50,10 +50,6 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 	// shortfall for the same item merges instead of prompting again.
 	const shortfalls = ref(new Map())
 
-	// Items the cashier answered "not a loss" for. Remembered for the sale, so
-	// they are not asked the same question twice.
-	const declined = ref(new Set())
-
 	// Shortfalls waiting to be confirmed. More than one only when a burst of
 	// refusals arrives while the dialog is open.
 	const queue = ref([])
@@ -94,7 +90,6 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 
 		sessionId.value = newSessionId()
 		shortfalls.value = new Map()
-		declined.value = new Set()
 		queue.value = []
 		persistSession(sessionId.value)
 	}
@@ -108,6 +103,41 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 
 		sessionId.value = `ol-inv-${invoiceName}`
 		persistSession(sessionId.value)
+	}
+
+	/**
+	 * Hold this cart's losses against the invoice it was just held as.
+	 *
+	 * Everything recorded before the hold is the same customer's as everything
+	 * recorded after it is resumed, so the rows move onto the invoice's session.
+	 * Without that, resuming the draft would start a second row per item instead
+	 * of updating the one already there.
+	 */
+	async function bindToInvoice(invoiceName) {
+		const target = invoiceName ? `ol-inv-${invoiceName}` : null
+		if (!target || target === sessionId.value) return
+
+		const previous = sessionId.value
+
+		// Get what is in hand onto the server first, or it would be written under
+		// the old session moments after the move.
+		await flush({ force: true }).catch(() => {})
+
+		try {
+			const cartStore = await getCartStore()
+			if (cartStore.posProfile) {
+				await call("pos_next.api.order_loss.rebind_session", {
+					old_session: previous,
+					new_session: target,
+					pos_profile: cartStore.posProfile,
+				})
+			}
+		} catch (error) {
+			console.warn("Loss of order: could not move rows onto the held invoice", error)
+		}
+
+		sessionId.value = target
+		persistSession(target)
 	}
 
 	/**
@@ -149,33 +179,27 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 
 		const key = lossKey(entry)
 
-		if (declined.value.has(key)) return
-
-		// Already confirmed for this sale: fold it in without asking again, so
-		// scanning an empty shelf five times is one prompt and one row.
-		if (shortfalls.value.has(key)) {
-			commit(entry)
+		// Every change of quantity is a new ask and gets its own prompt, so the
+		// recorded demand always matches what the customer last asked for. Only a
+		// prompt for the very same quantity is skipped - one action must not put
+		// the same question up twice.
+		if (queue.value.some((q) => lossKey(q) === key && q.demanded_qty === demanded)) {
 			return
 		}
-
-		// Don't queue the same item twice while the dialog is open.
-		if (queue.value.some((q) => lossKey(q) === key)) return
 
 		queue.value = [...queue.value, entry]
 	}
 
-	/** Fold an entry into the ledger. Largest ask wins; worst availability wins. */
+	/**
+	 * Put an entry in the ledger. The latest confirmed ask wins: 200 corrected to
+	 * 300 is a customer who wants 300, and the server updates the same row.
+	 */
 	function commit(entry) {
 		const key = lossKey(entry)
 		const existing = shortfalls.value.get(key)
 
 		const merged = existing
-			? {
-					...existing,
-					demanded_qty: Math.max(existing.demanded_qty, entry.demanded_qty),
-					available_qty: Math.min(existing.available_qty, entry.available_qty),
-					rate: existing.rate || entry.rate,
-				}
+			? { ...existing, ...entry, rate: entry.rate || existing.rate }
 			: { ...entry }
 
 		shortfalls.value.set(key, merged)
@@ -194,20 +218,24 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 		queue.value = queue.value.slice(1)
 
 		if (demanded <= entry.available_qty) {
-			// Corrected down to something the till could actually cover: nothing
-			// was lost after all.
+			// Corrected down to something the till can cover: nothing is lost any
+			// more, so stop sending it. A row already on the server is cleared up
+			// by the reconcile at checkout, which drops rows that lost nothing.
+			shortfalls.value.delete(lossKey(entry))
+			shortfalls.value = new Map(shortfalls.value)
 			return
 		}
 
 		commit({ ...entry, demanded_qty: demanded })
 	}
 
-	/** The cashier said this was not a loss. Don't ask again this sale. */
+	/**
+	 * The cashier said this ask was not a loss. Only this one: changing the
+	 * quantity again asks again, because that is a different ask.
+	 */
 	function dismissPrompt() {
-		const entry = queue.value[0]
-		if (!entry) return
+		if (!queue.value.length) return
 
-		declined.value.add(lossKey(entry))
 		queue.value = queue.value.slice(1)
 	}
 
@@ -300,5 +328,6 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 		flush,
 		startNewSession,
 		bindToDraft,
+		bindToInvoice,
 	}
 })

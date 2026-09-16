@@ -104,38 +104,60 @@ describe("loss of order ledger", () => {
 		expect(store.shortfalls.size).toBe(0)
 	})
 
-	it("does not ask twice about an item already declined", () => {
+	it("asks again when the quantity changes after a dismissal", () => {
 		const store = usePOSOrderLossStore()
 		shortfall(store, 12)
 		store.dismissPrompt()
 
-		shortfall(store, 12)
+		// A different ask is a different question.
+		shortfall(store, 30)
 
-		expect(store.pendingPrompt).toBe(null)
-		expect(store.shortfalls.size).toBe(0)
+		expect(store.pendingPrompt.demanded_qty).toBe(30)
 	})
 
-	it("folds a repeated shortfall into the row, without asking again", () => {
+	it("does not put the same ask up twice while the dialog is open", () => {
+		const store = usePOSOrderLossStore()
+		shortfall(store, 12)
+		shortfall(store, 12)
+
+		expect(store.queue).toHaveLength(1)
+	})
+
+	it("asks about a changed quantity and updates the same entry", () => {
 		const store = usePOSOrderLossStore()
 		shortfall(store, 12)
 		store.confirmPrompt(12)
 
-		shortfall(store, 3)
+		shortfall(store, 30)
+		expect(store.pendingPrompt.demanded_qty).toBe(30)
+		store.confirmPrompt(30)
 
-		expect(store.pendingPrompt).toBe(null)
 		expect(store.shortfalls.size).toBe(1)
+		expect([...store.shortfalls.values()][0].demanded_qty).toBe(30)
 	})
 
-	it("keeps the largest ask, so a repeat cannot shrink or inflate it", () => {
+	it("records the latest ask, not the largest", () => {
 		const store = usePOSOrderLossStore()
+		shortfall(store, 30)
+		store.confirmPrompt(30)
+
+		// The customer settled for less; the record follows the cart.
 		shortfall(store, 12)
 		store.confirmPrompt(12)
 
-		shortfall(store, 3)
-		shortfall(store, 20)
+		expect([...store.shortfalls.values()][0].demanded_qty).toBe(12)
+	})
 
-		const entry = [...store.shortfalls.values()][0]
-		expect(entry.demanded_qty).toBe(20)
+	it("drops the entry when the ask is corrected back within stock", () => {
+		const store = usePOSOrderLossStore()
+		shortfall(store, 12, 5)
+		store.confirmPrompt(12)
+		expect(store.shortfalls.size).toBe(1)
+
+		shortfall(store, 30, 5)
+		store.confirmPrompt(4)
+
+		expect(store.shortfalls.size).toBe(0)
 	})
 
 	it("queues a second item instead of losing it", () => {
@@ -221,5 +243,25 @@ describe("loss of order ledger", () => {
 		store.bindToDraft("SINV-26-00042")
 
 		expect(store.sessionId).toBe("ol-inv-SINV-26-00042")
+	})
+
+	it("carries the cart's rows onto the invoice it is held as", async () => {
+		const store = usePOSOrderLossStore()
+		shortfall(store, 12)
+		store.confirmPrompt(12)
+		const cartSession = store.sessionId
+
+		await store.bindToInvoice("SINV-26-00042")
+
+		expect(store.sessionId).toBe("ol-inv-SINV-26-00042")
+
+		const rebind = call.mock.calls.find(
+			([method]) => method === "pos_next.api.order_loss.rebind_session",
+		)
+		expect(rebind[1]).toMatchObject({
+			old_session: cartSession,
+			new_session: "ol-inv-SINV-26-00042",
+			pos_profile: "Main",
+		})
 	})
 })
