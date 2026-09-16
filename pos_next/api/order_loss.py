@@ -511,6 +511,117 @@ def void_loss(name, reason):
     return {"voided": doc.name}
 
 
+# ==========================================
+# Demand for items the catalogue does not carry
+# ==========================================
+
+UNLISTED_DOCTYPE = "POS Unlisted Item Demand"
+
+
+@frappe.whitelist()
+def record_unlisted_demand(
+    requested_item,
+    pos_profile,
+    qty=1,
+    uom=None,
+    item_group=None,
+    brand=None,
+    estimated_rate=0,
+    customer=None,
+    contact_no=None,
+    notes=None,
+    pos_opening_shift=None,
+):
+    """Record a customer asking for something the shop does not sell.
+
+    Deliberately not deduplicated against earlier requests: two customers
+    asking for the same thing is the whole signal. The report groups them.
+    """
+    _assert_pos_profile_access(pos_profile)
+
+    if not _is_enabled(pos_profile):
+        return {"enabled": False, "name": None}
+
+    requested_item = cstr(requested_item).strip()
+    if not requested_item:
+        frappe.throw(_("What the customer asked for is required"))
+
+    if flt(qty) <= 0:
+        frappe.throw(_("Qty Asked For must be greater than zero"))
+
+    ctx = _profile_context(pos_profile)
+
+    doc = frappe.get_doc(
+        {
+            "doctype": UNLISTED_DOCTYPE,
+            "requested_item": requested_item,
+            "item_group": item_group or None,
+            "brand": cstr(brand).strip() or None,
+            "qty": flt(qty),
+            "uom": uom or None,
+            "estimated_rate": flt(estimated_rate),
+            "currency": ctx.get("currency"),
+            "customer": customer or None,
+            "contact_no": cstr(contact_no).strip() or None,
+            "notes": cstr(notes).strip() or None,
+            "company": ctx.get("company"),
+            "pos_profile": pos_profile,
+            "pos_opening_shift": pos_opening_shift or None,
+            "cashier": frappe.session.user,
+            "status": "Open",
+        }
+    )
+    doc.flags.ignore_permissions = True
+    doc.insert()
+
+    return {"enabled": True, "name": doc.name, "requested_item": doc.requested_item}
+
+
+@frappe.whitelist()
+def get_unlisted_demand(
+    pos_profile, pos_opening_shift=None, from_date=None, to_date=None, limit=200
+):
+    """Requests for items the shop does not carry, for the till's own screen."""
+    _assert_pos_profile_access(pos_profile)
+
+    filters = {"pos_profile": pos_profile, "status": ["!=", "Discarded"]}
+
+    if pos_opening_shift:
+        filters["pos_opening_shift"] = pos_opening_shift
+
+    if from_date and to_date:
+        filters["posting_date"] = ["between", [getdate(from_date), getdate(to_date)]]
+    elif from_date:
+        filters["posting_date"] = [">=", getdate(from_date)]
+    elif not pos_opening_shift:
+        filters["posting_date"] = nowdate()
+
+    return frappe.get_all(
+        UNLISTED_DOCTYPE,
+        filters=filters,
+        fields=[
+            "name",
+            "requested_item",
+            "brand",
+            "item_group",
+            "qty",
+            "uom",
+            "estimated_rate",
+            "estimated_value",
+            "customer",
+            "customer_name",
+            "contact_no",
+            "notes",
+            "status",
+            "posting_date",
+            "posting_time",
+        ],
+        order_by="posting_date desc, posting_time desc",
+        limit_page_length=cint(limit) or 200,
+        ignore_permissions=True,
+    )
+
+
 @frappe.whitelist()
 def get_order_losses(
     pos_profile, pos_opening_shift=None, from_date=None, to_date=None, limit=200
