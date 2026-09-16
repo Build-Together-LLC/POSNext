@@ -13,6 +13,7 @@ vi.mock("@/stores/posCart", () => ({
 		posProfile: "Main",
 		posOpeningShift: "SHIFT-01",
 		customer: { name: "CUST-001" },
+		invoiceItems: [{ item_code: "WIDGET", uom: "Nos", quantity: 5 }],
 	}),
 }))
 
@@ -211,6 +212,20 @@ describe("loss of order ledger", () => {
 		expect(JSON.parse(payload.losses)).toHaveLength(1)
 		expect(payload.pos_profile).toBe("Main")
 		expect(payload.cart_session_id).toBe(store.sessionId)
+	})
+
+	it("reports what the cart is holding as the sale, not zero", async () => {
+		const store = usePOSOrderLossStore()
+		shortfall(store, 30, 5)
+		store.confirmPrompt(30)
+
+		await store.flush({ force: true })
+
+		const [, payload] = call.mock.calls[0]
+		const [sent] = JSON.parse(payload.losses)
+		expect(sent.demanded_qty).toBe(30)
+		// The 5 on the cart are being sold; only the rest is lost.
+		expect(sent.sold_qty).toBe(5)
 	})
 
 	it("keeps the sale going when the server rejects the write", async () => {
