@@ -5,7 +5,7 @@ import { isOffline } from "@/utils/offline";
 const log = logger.create("PrintInvoice");
 
 /**
- * Print a draft receipt using the server-rendered "POS Next Draft Receipt" format.
+ * Print a draft receipt using the POS Profile print format when configured.
  * Renders a transient Sales Invoice so GST/taxes/totals are real. Falls back to the
  * client-side receipt when offline or on error.
  * @param {Object} invoiceData - Draft data (customer, company, pos_profile, items)
@@ -25,6 +25,7 @@ export async function printDraftReceipt(invoiceData) {
 	);
 
 	try {
+		const resolved = await resolvePrintFormat(invoiceData);
 		const customer = invoiceData.customer?.name || invoiceData.customer;
 		const customerName =
 			invoiceData.customer_name ||
@@ -35,6 +36,8 @@ export async function printDraftReceipt(invoiceData) {
 			name: invoiceData.name,
 			company: invoiceData.company,
 			pos_profile: invoiceData.pos_profile,
+			print_format: resolved.printFormat,
+			letterhead: resolved.letterhead,
 			customer: typeof customer === "string" ? customer : "",
 			customer_name: customerName,
 			items: (invoiceData.items || []).map((item) => ({
@@ -99,7 +102,7 @@ export async function printInvoice(invoiceData, printFormat = null, letterhead =
 				(invoiceData.name.startsWith("DRAFT") || invoiceData.name === "DRAFT"));
 
 		const doctype = invoiceData.doctype || "Sales Invoice";
-		const format = isDraft ? "POS Next Draft Receipt" : printFormat || "POS Next Receipt";
+		const format = printFormat || (isDraft ? "POS Next Draft Receipt" : "POS Next Receipt");
 
 		// Build PDF print URL
 		const params = new URLSearchParams({
@@ -835,13 +838,10 @@ async function resolvePosProfileName(invoiceDoc) {
 
 /**
  * Resolve the print format and letterhead for an invoice.
- * Drafts use the draft receipt; submitted invoices use the POS Profile's print format.
+ * Uses the POS Profile print format, falling back to the draft receipt for draft invoices
+ * and the standard POS receipt for submitted invoices.
  */
 export async function resolvePrintFormat(invoiceDoc, printFormat = null, letterhead = null) {
-	if (isDraftInvoice(invoiceDoc)) {
-		return { printFormat: "POS Next Draft Receipt", letterhead };
-	}
-
 	let resolvedFormat = printFormat;
 	let resolvedLetterhead = letterhead;
 
@@ -865,7 +865,10 @@ export async function resolvePrintFormat(invoiceDoc, printFormat = null, letterh
 		}
 	}
 
-	return { printFormat: resolvedFormat, letterhead: resolvedLetterhead };
+	return {
+		printFormat: resolvedFormat || (isDraftInvoice(invoiceDoc) ? "POS Next Draft Receipt" : "POS Next Receipt"),
+		letterhead: resolvedLetterhead,
+	};
 }
 
 /**
