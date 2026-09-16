@@ -1366,14 +1366,9 @@ function handleItemSelected(item, autoAdd = false) {
 	const qty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
 
 	// Check stock availability first (before auto-add or any dialogs)
-	// Skip validation for batch/serial items - they have their own validation in the dialog
-	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
-		if (qty <= 0 && settingsStore.shouldEnforceStockValidation()) {
-			showError(item.is_bundle
-				? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
-				: __('"{0}" cannot be added to cart. Quantity reaches 0.', [item.item_name]))
-			return
-		}
+	if (shouldBlockOutOfStockItem(item, qty)) {
+		showOutOfStockError(item, qty)
+		return
 	}
 
 	// Auto-add mode
@@ -1641,6 +1636,12 @@ async function handleOptionSelected(option) {
 	try {
 		if (option.type === "variant") {
 			const variant = option.data
+			const variantQty = Math.floor(variant.actual_qty ?? variant.stock_qty ?? 0)
+
+			if (shouldBlockOutOfStockItem(variant, variantQty)) {
+				showOutOfStockError(variant, variantQty)
+				return
+			}
 
 			if (variant.item_uoms && variant.item_uoms.length > 0) {
 				cartStore.setPendingItem(variant, cartStore.pendingItemQty, "uom")
@@ -1678,6 +1679,12 @@ async function handleOptionSelected(option) {
 				rate: itemDetails.price_list_rate || itemDetails.rate,
 				price_list_rate: itemDetails.price_list_rate,
 			}
+			const itemQty = Math.floor(itemToAdd.actual_qty ?? itemToAdd.stock_qty ?? 0)
+
+			if (shouldBlockOutOfStockItem(itemToAdd, itemQty)) {
+				showOutOfStockError(itemToAdd, itemQty)
+				return
+			}
 
 			if (itemToAdd.has_batch_no || itemToAdd.has_serial_no) {
 				cartStore.setPendingItem(itemToAdd, qty)
@@ -1698,6 +1705,18 @@ async function handleOptionSelected(option) {
 		log.error("Error handling option selection:", error)
 		showError(__("Failed to process selection. Please try again."))
 	}
+}
+
+function shouldBlockOutOfStockItem(item, qty) {
+	if (!(item?.is_stock_item || item?.is_bundle)) return false
+	if (item.has_variants) return false
+	return settingsStore.shouldEnforceStockValidation() && qty <= 0
+}
+
+function showOutOfStockError(item, qty) {
+	showError(item.is_bundle
+		? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+		: __('"{0}" cannot be added to cart. Quantity reaches 0.', [item.item_name]))
 }
 
 function handleCloseShift() {
