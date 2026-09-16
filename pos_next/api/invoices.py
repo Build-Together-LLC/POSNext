@@ -886,7 +886,7 @@ def render_draft_receipt(invoice_data):
 	"""Render the draft receipt print format from cart data without saving an invoice.
 
 	Builds a transient Sales Invoice so taxes/GST/totals are computed by ERPNext,
-	then renders the "POS Next Draft Receipt" print format against it.
+	then renders the POS Profile print format against it.
 	"""
 	data = json.loads(invoice_data) if isinstance(invoice_data, str) else invoice_data
 
@@ -936,7 +936,38 @@ def render_draft_receipt(invoice_data):
 	if data.get("name"):
 		si.name = data.get("name")
 
-	return frappe.get_print(doc=si, print_format="POS Next Draft Receipt", no_letterhead=1)
+	print_format = data.get("print_format")
+	if not print_format and pos_profile_doc:
+		print_format = pos_profile_doc.print_format
+
+	if not print_format or not frappe.db.exists("Print Format", print_format):
+		print_format = "POS Next Draft Receipt"
+
+	letterhead = data.get("letterhead") or (pos_profile_doc.letter_head if pos_profile_doc else None)
+	print_format_doc = frappe.get_cached_doc("Print Format", print_format)
+
+	if print_format_doc.print_format_type == "Jinja":
+		html = frappe.render_template(print_format_doc.html or "", {"doc": si})
+		css = print_format_doc.css or ""
+		return f"""
+			<!doctype html>
+			<html>
+				<head>
+					<meta charset="utf-8">
+					<style>{css}</style>
+				</head>
+				<body>
+					<div class="print-format">{html}</div>
+				</body>
+			</html>
+		"""
+
+	return frappe.get_print(
+		doc=si,
+		print_format=print_format,
+		no_letterhead=0 if letterhead else 1,
+		letterhead=letterhead,
+	)
 
 
 @frappe.whitelist()
