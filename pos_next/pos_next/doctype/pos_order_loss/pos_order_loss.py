@@ -106,14 +106,23 @@ class POSOrderLoss(Document):
         """
         factor = flt(self.conversion_factor) or 1
 
-        self.lost_qty = max(flt(self.demanded_qty) - flt(self.sold_qty), 0)
+        # What the till could have handed over: the stock that was on the shelf,
+        # or what the sale actually took if that turned out to be more (stock
+        # arrived between the refusal and the checkout). Asking for 200 against 2
+        # on the shelf loses 198, not 200 - the 2 were never lost, whether or not
+        # the customer ended up taking them.
+        fulfillable = max(flt(self.available_qty), flt(self.sold_qty))
+
+        self.lost_qty = max(flt(self.demanded_qty) - fulfillable, 0)
 
         self.demanded_stock_qty = flt(self.demanded_qty) * factor
         self.sold_stock_qty = flt(self.sold_qty) * factor
         self.lost_stock_qty = flt(self.lost_qty) * factor
 
+        # Measured against what could be served, so it matches lost_qty rather
+        # than tracking whether the customer chose to take what was there.
         self.fill_rate = (
-            (flt(self.sold_qty) / flt(self.demanded_qty) * 100)
+            ((flt(self.demanded_qty) - flt(self.lost_qty)) / flt(self.demanded_qty) * 100)
             if flt(self.demanded_qty)
             else 0
         )
@@ -123,4 +132,5 @@ class POSOrderLoss(Document):
         # quantity and value separately.
         self.lost_value = flt(self.lost_qty) * flt(self.rate)
 
-        self.loss_type = "Partial" if flt(self.sold_qty) else "Full"
+        # Full means the shelf could not cover any of it.
+        self.loss_type = "Full" if flt(self.lost_qty) >= flt(self.demanded_qty) else "Partial"

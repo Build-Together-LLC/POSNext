@@ -217,16 +217,17 @@ def _sanitise(entry, ctx, meta, ceiling, cart_session_id, pos_profile, pos_openi
 
 
 def _merge_into(doc, row):
-    """Fold a repeated shortfall into the row that already exists.
+    """Bring the row up to date with the latest ask for this item.
 
-    Demand takes the largest ask and availability the worst sighting, which
-    makes the merge idempotent: replaying the same flush changes nothing, so a
-    retry after a timeout cannot double-count. `last_demanded_qty` keeps the
-    most recent ask, which is what gives a mistyped quantity away.
+    The cashier confirms every change of quantity, so the newest confirmed
+    number is the demand - 200 corrected to 300 is a customer who wants 300, not
+    one who wants both. Writing the value rather than accumulating also keeps the
+    upsert idempotent: replaying the same flush after a timeout lands the same
+    number. `last_demanded_qty` keeps the previous ask for comparison.
     """
-    doc.demanded_qty = max(flt(doc.demanded_qty), flt(row["demanded_qty"]))
-    doc.last_demanded_qty = flt(row["demanded_qty"])
-    doc.available_qty = min(flt(doc.available_qty), flt(row["available_qty"]))
+    doc.last_demanded_qty = flt(doc.demanded_qty)
+    doc.demanded_qty = flt(row["demanded_qty"])
+    doc.available_qty = flt(row["available_qty"])
     doc.rate = flt(doc.rate) or flt(row["rate"])
     doc.customer = doc.customer or row.get("customer")
     doc.pos_opening_shift = doc.pos_opening_shift or row.get("pos_opening_shift")
@@ -434,6 +435,51 @@ def on_invoice_cancel(doc, method=None):
 # ==========================================
 # Reading and correcting
 # ==========================================
+
+
+@frappe.whitelist()
+def rebind_session(old_session, new_session, pos_profile):
+    """Move a cart's loss rows onto the invoice its cart was just held as.
+
+    Rows recorded before the ticket was held belong to the same customer as the
+    ones recorded after it is resumed, so they have to share a session - and the
+    session is what the idempotency key is built from. Without this, resuming a
+    held draft would start recording a second row for the same item instead of
+    updating the first.
+
+    A row whose item is already recorded under the new session is left where it
+    is: the newer one is the live record, and quietly deleting the older one
+    would throw away demand somebody took the trouble to confirm.
+    """
+    _assert_pos_profile_access(pos_profile)
+
+    if not (old_session and new_session) or old_session == new_session:
+        return {"moved": 0, "skipped": 0}
+
+    names = frappe.get_all(
+        DOCTYPE, filters={"cart_session_id": old_session, "is_void": 0}, pluck="name"
+    )
+
+    moved = skipped = 0
+
+    for name in names:
+        doc = frappe.get_doc(DOCTYPE, name)
+        new_key = make_idempotency_key(
+            new_session, doc.item_code, doc.uom, doc.warehouse, doc.batch_no
+        )
+
+        clash = frappe.db.get_value(DOCTYPE, {"idempotency_key": new_key}, "name")
+        if clash and clash != doc.name:
+            skipped += 1
+            continue
+
+        doc.cart_session_id = new_session
+        doc.idempotency_key = new_key
+        doc.flags.ignore_permissions = True
+        doc.save()
+        moved += 1
+
+    return {"moved": moved, "skipped": skipped}
 
 
 @frappe.whitelist()
