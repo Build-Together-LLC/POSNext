@@ -813,6 +813,12 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
     if not frappe.has_permission("Sales Invoice", "write", invoice_name):
         frappe.throw(_("You don't have permission to add payments to this invoice"))
 
+    # Two tills settling the same partly-paid invoice at once would each read the same outstanding
+    # amount and both post against it, so hold the invoice for whoever got here first.
+    from pos_next.api.edit_lock import guard as guard_edit_lock
+
+    guard_edit_lock("Sales Invoice", invoice_name)
+
     # Validate total payment amount doesn't exceed outstanding
     try:
         invoice = frappe.get_doc("Sales Invoice", invoice_name)
