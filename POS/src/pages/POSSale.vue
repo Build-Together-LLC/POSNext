@@ -1777,9 +1777,6 @@ async function handleLoadDraft(draft) {
 		}
 
 		const draftData = await draftsStore.loadDraft(draft)
-		// Null when another till is holding this draft; loadDraft has already said so.
-		if (!draftData) return
-
 		cartStore.invoiceItems = draftData.items
 		cartStore.setCustomer(draftData.customer)
 		cartStore.currentDraftId = draft.draft_id // Set current draft ID
@@ -1787,8 +1784,6 @@ async function handleLoadDraft(draft) {
 		// resumed from one) so checkout updates and submits that same document
 		// with the values on screen at that time.
 		cartStore.heldInvoiceName = draftData.invoice_name || null
-		// Version this till is working from; a save built on a stale one is refused.
-		cartStore.heldInvoiceModified = draftData.modified || null
 		cartStore.additionalDiscount = draftData.additional_discount || 0
 		cartStore.couponCode = draftData.coupon_code || null
 
