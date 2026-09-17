@@ -19,8 +19,6 @@ from frappe.utils import (
 from erpnext.stock.doctype.batch.batch import get_batch_qty, get_batch_no
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 
-from pos_next.api.edit_lock import guard as guard_edit_lock
-
 try:
     from erpnext.accounts.doctype.pricing_rule.pricing_rule import (
         apply_pricing_rule as erpnext_apply_pricing_rule,
@@ -375,9 +373,9 @@ def _assert_not_stale(doctype, name, client_modified):
 
     Every POS write posts the whole cart, so the last save wins outright. The
     desk gets this from Document.check_if_latest; nothing in the POS carried
-    `modified` to the server, so there was never anything to compare. The edit
-    lock only covers the window where both tills are active - this still holds
-    once it lapses. No timestamp (offline flush, older client) is let through.
+    `modified` to the server, so there was never anything to compare. This is
+    the only thing standing between two tills on the same draft - there is no
+    claim to wait out. No timestamp (offline flush, older client) is let through.
     """
     if not (name and client_modified):
         return
@@ -474,11 +472,7 @@ def update_invoice(data):
 
         invoice_name = data.get("name")
 
-        # Turn the write away if another cashier is working on this draft, and hold the claim for
-        # us while we are. A new sale has no name yet, so there is nothing to contend over.
-        guard_edit_lock(doctype, invoice_name)
-
-        # And once the lock has lapsed and they saved in the meantime.
+        # Turn the write away if another till has saved this draft since it was loaded here.
         _assert_not_stale(doctype, invoice_name, client_modified)
 
         # Throws if the name belongs to an invoice that is no longer a draft.
@@ -747,12 +741,7 @@ def submit_invoice(invoice=None, data=None):
 
         invoice_name = invoice.get("name")
 
-        # Banking a draft while another till is still adding to it would submit their
-        # half-finished cart, so turn the submit away before anything is booked. The
-        # already-submitted case is a different failure and is handled just below.
-        guard_edit_lock(doctype, invoice_name)
-
-        # Banking someone else's changes under this cart's totals is the same loss.
+        # Banking someone else's later changes under this cart's totals would lose them.
         _assert_not_stale(doctype, invoice_name, client_modified)
 
         # Throws if this sale was already submitted (or cancelled) elsewhere,
@@ -1133,9 +1122,6 @@ def delete_invoice(invoice):
     # Check if it's a draft
     if frappe.db.get_value(doctype, invoice, "docstatus") != 0:
         frappe.throw(_("Cannot delete submitted invoice {0}").format(invoice))
-
-    # Never delete a draft out from under the cashier who is editing it.
-    guard_edit_lock(doctype, invoice)
 
     frappe.delete_doc(doctype, invoice, force=1)
     return _("Invoice {0} Deleted").format(invoice)
@@ -1657,10 +1643,6 @@ def get_pos_draft_states(invoice_names):
 def delete_pos_draft(invoice_name):
     """Delete a single held draft."""
     doc = _get_pos_draft_doc(invoice_name, ptype="delete")
-
-    # Held drafts are shared, so this is reachable while a colleague has the ticket open on
-    # another till. Deleting it under them would lose the cart they are still building.
-    guard_edit_lock("Sales Invoice", doc.name)
 
     frappe.delete_doc("Sales Invoice", doc.name, force=1)
     frappe.db.commit()
