@@ -15,8 +15,10 @@ import {
 	getServerDraftStates,
 	saveServerDraft,
 } from "@/utils/serverDraftManager"
+import { isStaleDocumentError, parseError } from "@/utils/errorHandler"
 import { isOffline } from "@/utils/offline"
 import { offlineState } from "@/utils/offline/offlineState"
+import { useEditLock } from "@/composables/useEditLock"
 import { useToast } from "@/composables/useToast"
 import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSOffersStore } from "@/stores/posOffers"
@@ -41,6 +43,12 @@ import { computed, ref } from "vue"
 export const usePOSDraftsStore = defineStore("posDrafts", () => {
 	// Use custom toast
 	const { showSuccess, showError, showWarning } = useToast()
+	// Held server drafts are shared across tills, so one has to be claimed while it is resumed.
+	const {
+		acquire: acquireDraftLock,
+		release: releaseDraftLock,
+		lockedBy: draftLockedBy,
+	} = useEditLock()
 
 	const settingsStore = usePOSSettingsStore()
 	const cartStore = usePOSCartStore()
@@ -364,6 +372,11 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 				savedDraft = await saveServerDraft(payload)
 
+				// Keep the cart on the version we just wrote, so it cannot clash with it.
+				if (cartStore.heldInvoiceName === savedDraft?.invoice_name) {
+					cartStore.heldInvoiceModified = savedDraft?.modified || null
+				}
+
 				// Promoted out of the cache - drop the copy left behind. Keyed off
 				// `existing`, not `draftId`: an id that resolved to nothing is a
 				// server draft, and there is no cached copy to remove.
@@ -406,6 +419,19 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			return savedDraft
 		} catch (error) {
 			console.error("Error saving draft:", error)
+
+			if (isStaleDocumentError(error)) {
+				// Nothing was written, so the cart is left alone for the cashier to copy from.
+				showError(
+					parseError(error).message ||
+						__(
+							"This draft was changed on another till. Open it again from Drafts to get the latest version.",
+						),
+				)
+				await loadDrafts()
+				return null
+			}
+
 			showError(__("Failed to save draft"))
 			return null
 		} finally {
@@ -415,6 +441,23 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 	async function loadDraft(draft) {
 		try {
+			// A server hold is shared: every cashier on the profile sees it and can resume it.
+			// Claim it before loading so two tills cannot build the same ticket at once. A
+			// cached hold lives on this device only, so there is nothing to contend over.
+			if (isServerDraft(draft)) {
+				const name = draft.invoice_name || draft.draft_id
+				const mine = await acquireDraftLock("Sales Invoice", name)
+				if (!mine) {
+					showError(
+						draftLockedBy.value?.message ||
+							__(
+								"This draft is being edited on another till. Please try again in a moment.",
+							),
+					)
+					return null
+				}
+			}
+
 			const source = isServerDraft(draft)
 				? await getServerDraftById(draft.invoice_name || draft.draft_id)
 				: draft
@@ -428,6 +471,8 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 					? buildAppliedOffersFromRules(source.applied_pricing_rules)
 					: source.applied_offers || [], // Restore applied offers
 				invoice_name: boundInvoiceName(source),
+				// Version being resumed; sent back on the next write to catch a clash.
+				modified: source.modified || null,
 				additional_discount: source.additional_discount || 0,
 				coupon_code: source.coupon_code || null,
 			}
@@ -565,6 +610,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 					if (cartStore.currentDraftId === draft.draft_id) {
 						cartStore.currentDraftId = savedDraft?.draft_id || null
 						cartStore.heldInvoiceName = savedDraft?.invoice_name || null
+						cartStore.heldInvoiceModified = savedDraft?.modified || null
 					}
 
 					await deleteDraft(draft.draft_id)
@@ -704,6 +750,10 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 	async function discardDraftAfterSubmit(draftId) {
 		if (!draftId) return
 
+		// The sale is banked, so let go of the hold straight away rather than making the next
+		// cashier wait out the server's TTL.
+		await releaseDraftLock()
+
 		// Only a cached draft has anything to clean up, and only a deep resolve
 		// can tell one apart from a server draft when the list has not loaded.
 		const draft = await resolveDraftDeep(draftId)
@@ -786,5 +836,6 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		deleteAllDrafts,
 		discardDraftAfterSubmit,
 		discardDraftAfterOfflineSave,
+		releaseDraftLock,
 	}
 })
