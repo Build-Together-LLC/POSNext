@@ -1869,3 +1869,192 @@ def get_product_bundle_availability(item_code, warehouse):
 			f"Bundle Availability Error: {item_code} in {warehouse}"
 		)
 		frappe.throw(_("Error fetching bundle availability for {0}: {1}").format(item_code, str(e)))
+
+
+def _mrp_settings(pos_profile):
+	"""Return (enabled, price_list) for the multiple-MRP picker.
+
+	The columns are absent until this app's migration has run on the site, so
+	an un-migrated site simply reads as "feature off" rather than erroring.
+	"""
+	if not pos_profile:
+		return False, None
+
+	for field in ("allow_multiple_mrp", "mrp_price_list"):
+		if not frappe.db.has_column("POS Settings", field):
+			return False, None
+
+	row = frappe.db.get_value(
+		"POS Settings",
+		{"pos_profile": pos_profile},
+		["allow_multiple_mrp", "mrp_price_list"],
+		as_dict=True,
+	)
+	if not row:
+		return False, None
+
+	return bool(cint(row.allow_multiple_mrp)), (row.mrp_price_list or None)
+
+
+def _uom_conversion_factors(item_code):
+	"""{uom: conversion_factor} for an item, including its stock UOM at 1."""
+	factors = {
+		row.uom: flt(row.conversion_factor)
+		for row in frappe.get_all(
+			"UOM Conversion Detail",
+			filters={"parent": item_code, "parenttype": "Item"},
+			fields=["uom", "conversion_factor"],
+		)
+		if flt(row.conversion_factor)
+	}
+
+	stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
+	if stock_uom:
+		factors.setdefault(stock_uom, 1.0)
+
+	return factors, stock_uom
+
+
+@frappe.whitelist()
+def get_item_mrp_options(item_code, pos_profile, uom=None, current_rate=None):
+	"""Every rate this item may be sold at, for the multiple-MRP picker.
+
+	A shop that re-prices stock keeps selling the older packs at the MRP printed
+	on them, so one item can sit on the shelf under two or three different MRPs
+	at once. Each is an Item Price row on the MRP price list; this returns them
+	all, converted to the UOM being sold, to fill the picker the cashier opens
+	from a cart line when the pack in front of them is priced differently.
+
+	Batch-specific rows are left out: the batch a line carries is chosen in the
+	batch dialog, and offering a batch's price here would put a rate on the line
+	that its batch does not back.
+
+	Args:
+		item_code (str): Item being added to the cart.
+		pos_profile (str): POS Profile, for the selling price list and settings.
+		uom (str, optional): UOM the line is being sold in. Defaults to stock UOM.
+		current_rate (float, optional): Rate the cart would otherwise use. Always
+			offered, even when no Item Price row backs it (a pricing rule, a
+			manually edited line).
+
+	Returns:
+		dict: {
+			"enabled": bool,          # multiple MRP turned on for this profile
+			"price_list": str,        # where the choices were read from
+			"uom": str,               # UOM the rates are expressed in
+			"options": [{rate, price_list, valid_from, is_default}],
+		}
+	"""
+	if isinstance(pos_profile, str):
+		try:
+			pos_profile = json.loads(pos_profile)
+		except (json.JSONDecodeError, ValueError):
+			pass
+
+	if isinstance(pos_profile, dict):
+		pos_profile = pos_profile.get("name") or pos_profile.get("pos_profile")
+
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required"))
+
+	enabled, mrp_price_list = _mrp_settings(pos_profile)
+
+	pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
+	selling_price_list = pos_profile_doc.selling_price_list
+	source_price_list = mrp_price_list or selling_price_list
+
+	factors, stock_uom = _uom_conversion_factors(item_code)
+	target_uom = uom or stock_uom
+	target_factor = flt(factors.get(target_uom)) or 1.0
+
+	current_rate = flt(current_rate)
+	result = {
+		"enabled": enabled,
+		"price_list": source_price_list,
+		"uom": target_uom,
+		"options": [],
+	}
+
+	if not enabled:
+		return result
+
+	# Only the MRP list is read. Adding the selling list as well would put a
+	# second rate against every item whose selling price sits below its MRP, and
+	# a shop that gives one discount is not a shop with two MRPs.
+	rows = (
+		frappe.get_all(
+			"Item Price",
+			filters={
+				"item_code": item_code,
+				"price_list": source_price_list,
+				"selling": 1,
+			},
+			fields=[
+				"price_list",
+				"price_list_rate",
+				"uom",
+				"valid_from",
+				"valid_upto",
+				"customer",
+				"batch_no",
+			],
+		)
+		if source_price_list
+		else []
+	)
+
+	today = nowdate()
+	# Keyed by rate so the same MRP reached through two price lists, or through
+	# two rows of one list, is offered once.
+	by_rate = {}
+
+	def offer(rate, price_list=None, valid_from=None):
+		rate = flt(rate)
+		if rate <= 0:
+			return
+
+		key = round(rate, 6)
+		existing = by_rate.get(key)
+		if existing:
+			# Keep the row that came into force most recently - that is the MRP
+			# the newest stock on the shelf carries.
+			if str(existing.get("valid_from") or "") >= str(valid_from or ""):
+				return
+
+		by_rate[key] = {
+			"rate": rate,
+			"price_list": price_list,
+			"valid_from": valid_from,
+			"is_default": abs(rate - current_rate) < 0.005 if current_rate else False,
+		}
+
+	for row in rows:
+		if row.customer or row.batch_no:
+			continue
+		if row.valid_from and str(row.valid_from) > today:
+			continue
+		if row.valid_upto and str(row.valid_upto) < today:
+			continue
+
+		row_uom = row.uom or stock_uom
+		rate = flt(row.price_list_rate)
+		if row_uom != target_uom:
+			# Rates are quoted per their own UOM; carry them across through the
+			# item's conversion factors, and drop the row when it has none.
+			row_factor = flt(factors.get(row_uom))
+			if not row_factor:
+				continue
+			rate = rate / row_factor * target_factor
+
+		offer(rate, row.price_list, row.valid_from)
+
+	# The rate the cart already holds is always on offer, so the picker can
+	# never take away the price the cashier would have charged anyway.
+	offer(current_rate, selling_price_list)
+
+	options = sorted(by_rate.values(), key=lambda o: o["rate"])
+	for option in options:
+		option["valid_from"] = str(option["valid_from"]) if option.get("valid_from") else None
+
+	result["options"] = options
+	return result
