@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Multiple MRP Per Item**
+  - One item can be billed more than once on the same invoice, once per MRP it is
+    stocked under, each line at its own rate
+  - "+ MRP" on a cart line bills that item again at a different price: the
+    cashier picks one of the MRPs on the price list, or types the one printed on
+    the pack in front of them
+  - Adding an item is unchanged - it never stops to ask, however many MRPs the
+    item carries
+  - New POS Settings: *Allow Multiple MRP Per Item* (off by default) and
+    *MRP Price List*, which defaults to the profile's own selling price list
+
+### Fixed
+- Returnable quantity no longer takes an item's returned quantity off every line
+  that sells that item, which hid stock that was still returnable on invoices
+  carrying the same item more than once
+
 ## [1.11.0] - 2025-12-07
 
 ### Added

@@ -193,7 +193,11 @@ doc_events = {
 		"validate": "pos_next.api.sales_invoice_hooks.validate",
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": "pos_next.realtime_events.emit_stock_update_event",
-		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
+		"on_cancel": [
+			"pos_next.realtime_events.emit_stock_update_event",
+			# A cancelled sale un-happened, so the demand behind it is lost again.
+			"pos_next.api.order_loss.on_invoice_cancel",
+		],
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event"
 	},
 	"POS Profile": {
@@ -211,6 +215,7 @@ scheduler_events = {
 	"daily": [
 		"pos_next.tasks.cleanup_expired_promotions.cleanup_expired_promotions",
 		"pos_next.tasks.branding_monitor.validate_all_active_sessions",
+		"pos_next.tasks.order_loss_cleanup.cleanup_voided_losses",
 	],
 	"monthly": [
 		"pos_next.tasks.branding_monitor.reset_tampering_counter",

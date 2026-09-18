@@ -873,6 +873,23 @@ def submit_invoice(invoice=None, data=None):
             # Re-raise the original submission error
             raise submit_error
 
+        # Settle what this cart could not sell against the sale that came out of
+        # it. Only now the invoice has actually committed - the failure branch
+        # above deletes it, and a loss row pointing at a deleted invoice would be
+        # worse than no link at all. Never allowed to fail a banked sale.
+        order_loss_session = data.get("order_loss_session") or invoice.get(
+            "order_loss_session"
+        )
+        if order_loss_session:
+            try:
+                from pos_next.api.order_loss import reconcile_invoice
+
+                reconcile_invoice(invoice_doc.name, order_loss_session)
+            except Exception:
+                frappe.log_error(
+                    frappe.get_traceback(), "POS Order Loss Reconcile Error"
+                )
+
         # Handle credit redemption after successful submission
         customer_credit_dict = data.get("customer_credit_dict") or invoice.get("customer_credit_dict")
         redeemed_customer_credit = data.get("redeemed_customer_credit") or invoice.get("redeemed_customer_credit")
@@ -1909,37 +1926,62 @@ def search_invoices_for_return(
         SELECT
             ret_si.return_against as invoice_name,
             ret_item.item_code,
+            ret_item.sales_invoice_item,
             SUM(ABS(ret_item.qty)) as returned_qty
         FROM `tabSales Invoice` ret_si
         INNER JOIN `tabSales Invoice Item` ret_item ON ret_item.parent = ret_si.name
         WHERE ret_si.return_against IN %s
             AND ret_si.docstatus = 1
             AND ret_si.is_return = 1
-        GROUP BY ret_si.return_against, ret_item.item_code
+        GROUP BY ret_si.return_against, ret_item.item_code, ret_item.sales_invoice_item
     """
 
     returned_qty_results = frappe.db.sql(returned_qty_query, [invoice_names], as_dict=1)
 
-    # Build a map of invoice_name -> {item_code: returned_qty}
-    returned_qty_map = {}
+    # Returns that name the row they came back from are settled against that row.
+    # The rest become a per-item pool, drawn down line by line below - an item can
+    # be on the invoice more than once, one line per MRP it was sold at, and
+    # taking the whole returned quantity off each of them would hide stock that
+    # is still returnable.
+    returned_by_row = {}
+    returned_pool = {}
     for row in returned_qty_results:
         inv_name = row["invoice_name"]
-        if inv_name not in returned_qty_map:
-            returned_qty_map[inv_name] = {}
-        returned_qty_map[inv_name][row["item_code"]] = row["returned_qty"]
+        if row.get("sales_invoice_item"):
+            returned_by_row[row["sales_invoice_item"]] = row["returned_qty"]
+        else:
+            returned_pool.setdefault(inv_name, {})
+            returned_pool[inv_name][row["item_code"]] = (
+                returned_pool[inv_name].get(row["item_code"], 0) + row["returned_qty"]
+            )
+
+    # Invoices with nothing returned against them at all skip the filtering below.
+    returned_qty_map = {}
+    for row in returned_qty_results:
+        returned_qty_map.setdefault(row["invoice_name"], True)
 
     # Process and return results
     data = []
 
     for invoice in invoices_list:
         invoice_doc = frappe.get_doc(doctype, invoice.name)
-        returned_qty = returned_qty_map.get(invoice.name, {})
+        has_returns = returned_qty_map.get(invoice.name)
 
-        if returned_qty:
+        if has_returns:
             # Filter items with remaining qty
+            pool = dict(returned_pool.get(invoice.name) or {})
             filtered_items = []
             for item in invoice_doc.items:
-                already_returned = returned_qty.get(item.item_code, 0)
+                already_returned = flt(returned_by_row.get(item.name, 0))
+
+                # Draw the rest from the item's pool, but never more than this
+                # line sold: what is left stays for the item's other lines.
+                unsettled = flt(pool.get(item.item_code, 0))
+                if unsettled > 0:
+                    taken = min(unsettled, max(flt(item.qty) - already_returned, 0))
+                    already_returned += taken
+                    pool[item.item_code] = unsettled - taken
+
                 remaining_qty = item.qty - already_returned
 
                 if remaining_qty > 0:

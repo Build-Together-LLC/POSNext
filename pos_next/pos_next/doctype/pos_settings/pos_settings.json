@@ -39,6 +39,8 @@
   "section_break_pricing",
   "decimal_precision",
   "tax_inclusive",
+  "allow_multiple_mrp",
+  "mrp_price_list",
   "section_break_customer",
   "allow_customer_purchase_order",
   "allow_duplicate_customer_names",
@@ -62,7 +64,10 @@
   "auto_select_single_batch",
   "section_break_misc",
   "input_qty",
-  "allow_negative_stock"
+  "allow_negative_stock",
+  "section_break_order_loss",
+  "track_order_loss",
+  "order_loss_max_demand_qty"
  ],
  "fields": [
   {
@@ -295,6 +300,21 @@
    "label": "Tax Inclusive"
   },
   {
+   "default": "0",
+   "description": "Let the same item be billed more than once in one invoice at different MRPs. Each MRP becomes its own line, at its own rate.",
+   "fieldname": "allow_multiple_mrp",
+   "fieldtype": "Check",
+   "label": "Allow Multiple MRP Per Item"
+  },
+  {
+   "depends_on": "eval:doc.allow_multiple_mrp",
+   "description": "Price List the MRP choices are read from. Leave blank to offer the POS Profile's own selling price list.",
+   "fieldname": "mrp_price_list",
+   "fieldtype": "Link",
+   "label": "MRP Price List",
+   "options": "Price List"
+  },
+  {
    "collapsible": 1,
    "fieldname": "section_break_customer",
    "fieldtype": "Section Break",
@@ -459,11 +479,33 @@
    "fieldname": "allow_server_side_draft_invoice",
    "fieldtype": "Check",
    "label": "Allow Server Side Draft Invoice"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_order_loss",
+   "fieldtype": "Section Break",
+   "label": "Loss of Order"
+  },
+  {
+   "default": "0",
+   "description": "Record what customers asked for but could not be sold, when the till refuses or clamps a quantity for lack of stock. Has no effect while Allow Negative Stock is on, because nothing is ever refused.",
+   "fieldname": "track_order_loss",
+   "fieldtype": "Check",
+   "label": "Track Loss of Order"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.track_order_loss",
+   "description": "Ignore recorded demand above this quantity (0 = no limit). Guards against a mistyped quantity.",
+   "fieldname": "order_loss_max_demand_qty",
+   "fieldtype": "Float",
+   "label": "Ignore Demand Above Qty",
+   "precision": "4"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-01 00:00:00.000000",
+ "modified": "2026-09-16 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

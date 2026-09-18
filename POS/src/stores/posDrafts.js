@@ -20,6 +20,7 @@ import { isOffline } from "@/utils/offline"
 import { offlineState } from "@/utils/offline/offlineState"
 import { useToast } from "@/composables/useToast"
 import { usePOSCartStore } from "@/stores/posCart"
+import { usePOSOrderLossStore } from "@/stores/orderLoss"
 import { usePOSOffersStore } from "@/stores/posOffers"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { defineStore } from "pinia"
@@ -45,6 +46,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 	const settingsStore = usePOSSettingsStore()
 	const cartStore = usePOSCartStore()
+	const orderLossStore = usePOSOrderLossStore()
 	const offersStore = usePOSOffersStore()
 
 	// State
@@ -364,6 +366,11 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 				}
 
 				savedDraft = await saveServerDraft(payload)
+
+				// The lost demand recorded so far belongs to this ticket, so it
+				// travels with it - resuming the draft then updates those same rows
+				// rather than starting new ones.
+				await orderLossStore.bindToInvoice(savedDraft?.invoice_name)
 
 				// Keep the cart on the version we just wrote, so it cannot clash with it.
 				if (cartStore.heldInvoiceName === savedDraft?.invoice_name) {
