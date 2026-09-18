@@ -6,11 +6,18 @@ from __future__ import unicode_literals
 import json
 import frappe
 from frappe import _
-from frappe.utils import flt, cint, nowdate, nowtime, get_datetime, cstr
+from frappe.utils import (
+    flt,
+    cint,
+    nowdate,
+    nowtime,
+    get_datetime,
+    cstr,
+    format_datetime,
+    get_fullname,
+)
 from erpnext.stock.doctype.batch.batch import get_batch_qty, get_batch_no
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
-
-from pos_next.api.edit_lock import guard as guard_edit_lock
 
 try:
     from erpnext.accounts.doctype.pricing_rule.pricing_rule import (
@@ -353,6 +360,99 @@ def _get_editable_invoice(doctype, invoice_name):
     return frappe.get_doc(doctype, invoice_name)
 
 
+def _same_timestamp(left, right):
+    """Compare two `modified` values, whatever shape they arrive in."""
+    try:
+        return get_datetime(left) == get_datetime(right)
+    except Exception:
+        return cstr(left) == cstr(right)
+
+
+def _assert_not_stale(doctype, name, client_modified):
+    """Refuse a write built from a copy of the document someone has since changed.
+
+    Every POS write posts the whole cart, so the last save wins outright. The
+    desk gets this from Document.check_if_latest; nothing in the POS carried
+    `modified` to the server, so there was never anything to compare. This is
+    the only thing standing between two tills on the same draft - there is no
+    claim to wait out. No timestamp (offline flush, older client) is let through.
+    """
+    if not (name and client_modified):
+        return
+
+    current = frappe.db.get_value(
+        doctype, name, ["modified", "modified_by"], as_dict=True
+    )
+
+    # No row yet: a new sale, or an offline draft the server has not seen.
+    if not current:
+        return
+
+    if _same_timestamp(current.modified, client_modified):
+        return
+
+    frappe.throw(
+        _(
+            "{0} was changed by {1} at {2}, after this till loaded it. Saving now "
+            "would overwrite those changes - reload the draft to pick them up first."
+        ).format(
+            name,
+            get_fullname(current.modified_by),
+            format_datetime(current.modified),
+        ),
+        frappe.TimestampMismatchError,
+        title=_("Draft Changed Elsewhere"),
+    )
+
+
+# Fields the server fetched from whoever the invoice was last saved for. Frappe
+# refreshes customer_name, tax_id and loyalty_program itself on every save
+# (fetch_from without fetch_if_empty), but these are only ever *filled in* -
+# ERPNext's set_missing_values uses update_if_missing - so they survive a change
+# of customer. Left behind they are at best wrong on the print (another
+# customer's address and contact) and at worst booked wrong (debit_to is the
+# previous customer's receivable account); the billing address also fails
+# validate_party_address outright with "Billing Address does not belong to ...".
+PARTY_FETCHED_FIELDS = (
+    "customer_address",
+    "address_display",
+    "shipping_address_name",
+    "shipping_address",
+    "dispatch_address_name",
+    "dispatch_address",
+    "contact_person",
+    "contact_display",
+    "contact_mobile",
+    "contact_phone",
+    "contact_email",
+    "customer_group",
+    "territory",
+    "tax_withholding_category",
+    "language",
+    "debit_to",
+    "party_account_currency",
+)
+
+
+def _clear_stale_party_details(invoice_doc, previous_customer, data=None):
+    """Drop the previous customer's fetched details when a draft changes hands.
+
+    Clearing them is what makes ERPNext re-fetch: set_missing_values only fills
+    blanks. Anything the caller sent explicitly is left alone - the POS is
+    allowed to pick an address itself.
+    """
+    if not previous_customer or previous_customer == invoice_doc.get("customer"):
+        return
+
+    data = data or {}
+
+    for fieldname in PARTY_FETCHED_FIELDS:
+        if data.get(fieldname):
+            continue
+        if invoice_doc.meta.has_field(fieldname):
+            invoice_doc.set(fieldname, None)
+
+
 @frappe.whitelist()
 def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
@@ -364,20 +464,24 @@ def update_invoice(data):
 
         applied_pricing_rules = data.pop("applied_pricing_rules", None)
 
+        # Popped, never applied: it only decides the clash (see _assert_not_stale).
+        client_modified = data.pop("modified", None)
+
         # Ensure the document type is set
         data.setdefault("doctype", doctype)
 
         invoice_name = data.get("name")
 
-        # Turn the write away if another cashier is working on this draft, and hold the claim for
-        # us while we are. A new sale has no name yet, so there is nothing to contend over.
-        guard_edit_lock(doctype, invoice_name)
+        # Turn the write away if another till has saved this draft since it was loaded here.
+        _assert_not_stale(doctype, invoice_name, client_modified)
 
         # Throws if the name belongs to an invoice that is no longer a draft.
         invoice_doc = _get_editable_invoice(doctype, invoice_name)
 
         if invoice_doc:
+            previous_customer = invoice_doc.get("customer")
             invoice_doc.update(data)
+            _clear_stale_party_details(invoice_doc, previous_customer, data)
         else:
             data.pop("name", None)
             invoice_doc = frappe.get_doc(data)
@@ -629,22 +733,25 @@ def submit_invoice(invoice=None, data=None):
         # Not a Sales Invoice field: strip so invoice_doc.update(invoice) ignores it.
         invoice.pop("applied_pricing_rules", None)
 
+        # As in update_invoice; step 1 returns the fresh value, so a checkout has it.
+        client_modified = invoice.pop("modified", None)
+
         pos_profile = invoice.get("pos_profile")
         doctype = "Sales Invoice"
 
         invoice_name = invoice.get("name")
 
-        # Banking a draft while another till is still adding to it would submit their
-        # half-finished cart, so turn the submit away before anything is booked. The
-        # already-submitted case is a different failure and is handled just below.
-        guard_edit_lock(doctype, invoice_name)
+        # Banking someone else's later changes under this cart's totals would lose them.
+        _assert_not_stale(doctype, invoice_name, client_modified)
 
         # Throws if this sale was already submitted (or cancelled) elsewhere,
         # rather than booking a duplicate for the same cart.
         invoice_doc = _get_editable_invoice(doctype, invoice_name)
 
         if invoice_doc:
+            previous_customer = invoice_doc.get("customer")
             invoice_doc.update(invoice)
+            _clear_stale_party_details(invoice_doc, previous_customer, invoice)
         else:
             invoice.pop("name", None)
             created = update_invoice(json.dumps(invoice, default=str))
@@ -1033,9 +1140,6 @@ def delete_invoice(invoice):
     if frappe.db.get_value(doctype, invoice, "docstatus") != 0:
         frappe.throw(_("Cannot delete submitted invoice {0}").format(invoice))
 
-    # Never delete a draft out from under the cashier who is editing it.
-    guard_edit_lock(doctype, invoice)
-
     frappe.delete_doc(doctype, invoice, force=1)
     return _("Invoice {0} Deleted").format(invoice)
 
@@ -1257,6 +1361,8 @@ def _serialize_pos_draft(doc):
         "grand_total": flt(doc.grand_total),
         "created_at": cstr(doc.creation),
         "updated_at": cstr(doc.modified),
+        # Sent back on the next write (see _assert_not_stale).
+        "modified": cstr(doc.modified),
         "owner": doc.owner,
     }
 
@@ -1554,10 +1660,6 @@ def get_pos_draft_states(invoice_names):
 def delete_pos_draft(invoice_name):
     """Delete a single held draft."""
     doc = _get_pos_draft_doc(invoice_name, ptype="delete")
-
-    # Held drafts are shared, so this is reachable while a colleague has the ticket open on
-    # another till. Deleting it under them would lose the cart they are still building.
-    guard_edit_lock("Sales Invoice", doc.name)
 
     frappe.delete_doc("Sales Invoice", doc.name, force=1)
     frappe.db.commit()

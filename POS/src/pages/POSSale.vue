@@ -1846,6 +1846,8 @@ async function handleLoadDraft(draft) {
 		if (draftData.invoice_name) {
 			orderLossStore.bindToDraft(draftData.invoice_name)
 		}
+		// Version this till is working from; a save built on a stale one is refused.
+		cartStore.heldInvoiceModified = draftData.modified || null
 		cartStore.additionalDiscount = draftData.additional_discount || 0
 		cartStore.couponCode = draftData.coupon_code || null
 
