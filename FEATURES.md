@@ -54,6 +54,15 @@ Stock levels and prices update instantly across all your devices. No manual refr
 - Track batch numbers (expiry dates)
 - Track serial numbers (warranties)
 
+**Multiple MRP Per Item** *(optional, off by default)*
+- For stock sitting on the shelf under more than one printed price
+- "+ MRP" on a cart line bills that item again at another price - pick an MRP
+  from the price list, or type the one on the pack
+- Adding items is unchanged: nothing pops up until you ask for it
+- Each MRP is its own invoice line, at its own rate, on the receipt and in ERPNext
+- Turn it on in POS Settings → Pricing & Discounts, and point it at the price
+  list your MRPs live in
+
 ---
 
 ### 📦 Inventory Management

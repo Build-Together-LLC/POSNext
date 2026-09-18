@@ -129,6 +129,79 @@
 					</div>
 				</div>
 
+				<!-- MRP Options: one item, several printed prices -->
+				<div v-else-if="mode === 'mrp'">
+					<div class="mb-4">
+						<label class="block text-sm font-medium text-gray-700 mb-1">{{ __('Quantity') }}</label>
+						<input
+							type="number"
+							v-model.number="quantity"
+							min="1"
+							class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 transition-colors"
+							@keydown.enter="confirm"
+							@blur="validateQuantity"
+						/>
+					</div>
+
+					<div class="flex flex-col gap-2 max-h-80 overflow-y-auto">
+						<button
+							v-for="(option, index) in options"
+							:key="index"
+							@click="selectOption(option)"
+							:class="[
+								'w-full text-start p-3 rounded-lg border-2 transition-all',
+								selectedOption === option
+									? 'border-blue-500 bg-blue-50'
+									: 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+							]"
+						>
+							<div class="flex items-center justify-between">
+								<div class="flex-1">
+									<p class="text-sm font-semibold text-gray-900">
+										{{ formatCurrency(option.rate || 0) }}
+									</p>
+									<p class="text-xs text-gray-500">
+										{{ option.valid_from
+											? __('In force from {0}', [option.valid_from])
+											: option.price_list }}
+									</p>
+								</div>
+								<span
+									v-if="option.is_default"
+									class="text-xs font-medium text-green-700 bg-green-100 rounded-full px-2 py-0.5 ms-3"
+								>
+									{{ __('Current') }}
+								</span>
+							</div>
+						</button>
+
+						<!-- An MRP the price list does not carry yet: the pack in hand wins -->
+						<button
+							@click="selectOption(customOption)"
+							:class="[
+								'w-full text-start p-3 rounded-lg border-2 transition-all',
+								selectedOption === customOption
+									? 'border-blue-500 bg-blue-50'
+									: 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+							]"
+						>
+							<p class="text-sm font-semibold text-gray-900">{{ __('Other MRP') }}</p>
+							<p class="text-xs text-gray-500 mb-2">{{ __('Bill this line at the price printed on the pack') }}</p>
+							<input
+								type="number"
+								v-model.number="customOption.rate"
+								min="0"
+								step="0.01"
+								:placeholder="__('Enter MRP')"
+								class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 transition-colors"
+								@focus="selectOption(customOption)"
+								@keydown.enter="confirm"
+								@click.stop
+							/>
+						</button>
+					</div>
+				</div>
+
 				<!-- No Options -->
 				<div v-else class="text-center py-8">
 					<div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-orange-100 mb-3">
@@ -177,7 +250,7 @@
 				<Button class="flex-1" variant="subtle" @click="cancel">
 					{{ __('Cancel') }}
 				</Button>
-				<Button class="flex-1" variant="solid" theme="blue" @click="confirm" :disabled="!selectedOption">
+				<Button class="flex-1" variant="solid" theme="blue" @click="confirm" :disabled="!canConfirm">
 					{{ confirmButtonText }}
 				</Button>
 			</div>
@@ -196,8 +269,20 @@ const props = defineProps({
 	modelValue: Boolean,
 	item: Object,
 	mode: {
-		type: String, // 'uom' or 'variant'
+		type: String, // 'uom', 'variant' or 'mrp'
 		default: "uom",
+	},
+	// MRP choices for 'mrp' mode, already fetched by the parent (which needed
+	// them to know whether this dialog was worth opening at all).
+	mrpOptions: {
+		type: Array,
+		default: () => [],
+	},
+	// Quantity the item is being added in. Matters when the dialog is reached
+	// through the UOM step, which is where the cashier typed it.
+	initialQuantity: {
+		type: Number,
+		default: 1,
 	},
 	posProfile: String,
 	currency: {
@@ -218,22 +303,36 @@ const options = ref([])
 const selectedOption = ref(null)
 const quantity = ref(1)
 const selectedAttributes = ref({}) // For variant attribute selection
+// The typed-in MRP. Kept as one stable object so selecting it and editing it
+// are the same thing to the list above.
+const customOption = ref({ type: "mrp", isCustom: true, rate: null })
 
 // Computed properties for dialog customization
 const dialogTitle = computed(() => {
-	return props.mode === "variant"
-		? __("Select Item Variant")
-		: __("Select Unit of Measure")
+	if (props.mode === "variant") return __("Select Item Variant")
+	if (props.mode === "mrp") return __("Select MRP")
+	return __("Select Unit of Measure")
 })
 
 const dialogDescription = computed(() => {
-	return props.mode === "variant"
-		? __("Choose a variant of this item:")
-		: __("Select the unit of measure for this item:")
+	if (props.mode === "variant") return __("Choose a variant of this item:")
+	if (props.mode === "mrp") {
+		return __("This item is stocked at more than one MRP. Bill it at:")
+	}
+	return __("Select the unit of measure for this item:")
 })
 
 const confirmButtonText = computed(() => {
-	return props.mode === "variant" ? __("Add to Cart") : __("Add to Cart")
+	return __("Add to Cart")
+})
+
+// An MRP still has to be worth something before it can be billed.
+const canConfirm = computed(() => {
+	if (!selectedOption.value) return false
+	if (props.mode === "mrp") {
+		return (Number.parseFloat(selectedOption.value.rate) || 0) > 0
+	}
+	return true
 })
 
 // Computed: Stock warning when quantity exceeds available stock
@@ -357,11 +456,25 @@ function loadOptions() {
 	selectedOption.value = null
 	quantity.value = 1
 	selectedAttributes.value = {} // Reset attribute selection
+	customOption.value = { type: "mrp", isCustom: true, rate: null }
 
 	if (props.mode === "variant") {
 		// Load variants from API
 		loading.value = true
 		variantsResource.reload()
+	} else if (props.mode === "mrp") {
+		quantity.value = props.initialQuantity > 0 ? props.initialQuantity : 1
+		options.value = props.mrpOptions.map((option) => ({
+			type: "mrp",
+			rate: option.rate,
+			price_list: option.price_list,
+			valid_from: option.valid_from,
+			is_default: option.is_default,
+		}))
+		// Start on the rate the cart would have used, so confirming straight
+		// away bills exactly what adding the item normally would.
+		selectedOption.value = options.value.find((o) => o.is_default) || null
+		loading.value = false
 	} else {
 		// Load UOM options
 		options.value = buildUomOptions()
@@ -441,8 +554,12 @@ function confirm() {
 		// Emit first, let parent decide if dialog should close
 		// Parent can keep dialog open by switching mode (variant → UOM)
 		const option = { ...selectedOption.value }
-		if (props.mode === "uom") {
+		if (props.mode === "uom" || props.mode === "mrp") {
 			option.quantity = quantity.value
+		}
+		if (props.mode === "mrp") {
+			option.rate = Number.parseFloat(option.rate) || 0
+			if (option.rate <= 0) return
 		}
 		emit("option-selected", option)
 	}
@@ -451,6 +568,7 @@ function confirm() {
 function cancel() {
 	selectedOption.value = null
 	selectedAttributes.value = {}
+	customOption.value = { type: "mrp", isCustom: true, rate: null }
 	isOpen.value = false
 }
 

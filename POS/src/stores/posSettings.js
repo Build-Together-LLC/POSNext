@@ -59,6 +59,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Loss of Order
 		track_order_loss: 0,
 		order_loss_max_demand_qty: 0,
+		// Multiple MRP
+		allow_multiple_mrp: 0,
+		mrp_price_list: null,
 		filter_batches_by_pos_warehouse: 1,
 		auto_select_single_batch: 1,
 		// Sales Persons
@@ -202,6 +205,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		Boolean(settings.value.track_order_loss),
 	)
 
+	// Computed - Multiple MRP
+	const allowMultipleMrp = computed(() =>
+		Boolean(settings.value.allow_multiple_mrp),
+	)
+
 	const filterBatchesByPosWarehouse = computed(() =>
 		Boolean(settings.value.filter_batches_by_pos_warehouse),
 	)
@@ -332,6 +340,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_negative_stock: 0,
 			track_order_loss: 0,
 			order_loss_max_demand_qty: 0,
+			allow_multiple_mrp: 0,
+			mrp_price_list: null,
 			enable_sales_persons: "Disabled",
 		}
 		isLoaded.value = false
@@ -389,6 +399,18 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	 */
 	function orderLossMaxDemandQty() {
 		return Number(settings.value.order_loss_max_demand_qty) || 0
+	}
+
+	/**
+	 * Whether one item may be billed at more than one MRP on the same invoice.
+	 *
+	 * Off by default: without it, re-adding an item is meant to raise the
+	 * quantity of the line already in the cart, not start a second one.
+	 *
+	 * @returns {boolean}
+	 */
+	function allowsMultipleMrp() {
+		return isEnabled.value && Boolean(settings.value.allow_multiple_mrp)
 	}
 
 	/**
@@ -457,6 +479,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 
 		// Computed - Pricing & Display
 		decimalPrecision,
+		allowMultipleMrp,
 
 		// Computed - Customer Settings
 		allowCustomerPurchaseOrder,
@@ -502,5 +525,6 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		trackOrderLoss,
 		shouldRecordOrderLoss,
 		orderLossMaxDemandQty,
+		allowsMultipleMrp,
 	}
 })

@@ -7,6 +7,9 @@ import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useStockStore } from "@/stores/stock"
 import { useToast } from "@/composables/useToast"
 
+// Monotonic within the tab; line ids only have to be unique inside one cart.
+let lineIdCounter = 0
+
 export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
 	const serialStore = useSerialNumberStore()
@@ -94,6 +97,12 @@ export function useInvoice() {
 		auto: false,
 	})
 
+	// Every rate an item may be sold at, for the multiple-MRP picker.
+	const getItemMrpOptionsResource = createResource({
+		url: "pos_next.api.items.get_item_mrp_options",
+		auto: false,
+	})
+
 	const getTaxesResource = createResource({
 		url: "pos_next.api.pos_profile.get_taxes",
 		auto: false,
@@ -158,11 +167,97 @@ export function useInvoice() {
 	})
 
 	// Actions
-	function addItem(item, quantity = 1) {
-		const itemUom = item.uom || item.stock_uom
-		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom,
+
+	/**
+	 * A cart line's own identity, independent of what it sells.
+	 *
+	 * The same item can sit on the invoice twice - once per MRP it is stocked
+	 * under - so item_code no longer picks out a line on its own.
+	 */
+	function nextLineId() {
+		lineIdCounter += 1
+		return `line-${Date.now().toString(36)}-${lineIdCounter}`
+	}
+
+	/**
+	 * Finds the cart line a caller means.
+	 *
+	 * Accepts a line_id (exact, and the only way to reach one of several lines
+	 * for the same item) or an item_code, optionally narrowed by UOM. The
+	 * item_code form is kept so every existing caller keeps working: it lands on
+	 * the first line for that item, which is the only line unless the cashier
+	 * has billed it at a second MRP.
+	 *
+	 * @param {string} ref - line_id or item_code
+	 * @param {string|null} uom - Only for the item_code form
+	 * @returns {Object|undefined}
+	 */
+	function findLine(ref, uom = null) {
+		if (!ref) return undefined
+
+		const byLineId = invoiceItems.value.find((i) => i.line_id === ref)
+		if (byLineId) return byLineId
+
+		return invoiceItems.value.find(
+			(i) => i.item_code === ref && (!uom || i.uom === uom),
 		)
+	}
+
+	/**
+	 * Gives every line an id, for carts that arrived from somewhere without one
+	 * (a resumed draft, an offline invoice stored before this existed).
+	 */
+	function ensureLineIds() {
+		for (const item of invoiceItems.value) {
+			if (!item.line_id) {
+				item.line_id = nextLineId()
+			}
+		}
+	}
+
+	/**
+	 * Adds an item to the cart, or adds to the line already holding it.
+	 *
+	 * @param {Object} item - Item to sell
+	 * @param {number} quantity
+	 * @param {Object} [options]
+	 * @param {number} [options.rate] - Rate (MRP) this line sells at, overriding
+	 *   the item's own. A rate that no line carries yet opens a new line.
+	 * @param {boolean} [options.forceNewLine] - Bill this as its own line even at
+	 *   a rate already in the cart (the cashier asked for a second MRP line).
+	 */
+	function addItem(item, quantity = 1, options = {}) {
+		const itemUom = item.uom || item.stock_uom
+		const settingsStore = usePOSSettingsStore()
+		const multipleMrp = settingsStore.allowsMultipleMrp()
+
+		const requestedRate =
+			options.rate !== undefined && options.rate !== null
+				? Number.parseFloat(options.rate)
+				: null
+		const hasRequestedRate =
+			requestedRate !== null && !Number.isNaN(requestedRate) && requestedRate >= 0
+
+		// A chosen MRP is the line's price, so it has to reach both fields the
+		// rest of the cart reads from (totals come off price_list_rate).
+		const sourceItem = hasRequestedRate
+			? { ...item, rate: requestedRate, price_list_rate: requestedRate }
+			: item
+
+		// With multiple MRP off, an item merges into its existing line whatever
+		// it costs today - the long-standing behaviour. With it on, a different
+		// MRP is a different line, because that is the whole point of it.
+		const lineRate = sourceItem.price_list_rate || sourceItem.rate || 0
+		const existingItem =
+			multipleMrp && options.forceNewLine
+				? undefined
+				: invoiceItems.value.find(
+						(i) =>
+							i.item_code === sourceItem.item_code &&
+							i.uom === itemUom &&
+							(!multipleMrp ||
+								Math.abs((i.price_list_rate || i.rate || 0) - lineRate) < 0.005),
+					)
 
 		if (existingItem) {
 			// Store old values before update for incremental cache adjustment
@@ -198,15 +293,16 @@ export function useInvoice() {
 				(existingItem.discount_amount || 0) - oldDiscount
 		} else {
 			const newItem = {
+				line_id: nextLineId(),
 				item_code: item.item_code,
 				item_name: item.item_name,
-				rate: item.rate || item.price_list_rate || 0,
-				price_list_rate: item.price_list_rate || item.rate || 0,
+				rate: sourceItem.rate || sourceItem.price_list_rate || 0,
+				price_list_rate: sourceItem.price_list_rate || sourceItem.rate || 0,
 				quantity: quantity,
 				discount_amount: 0,
 				discount_percentage: 0,
 				tax_amount: 0,
-				amount: quantity * (item.rate || item.price_list_rate || 0),
+				amount: quantity * (sourceItem.rate || sourceItem.price_list_rate || 0),
 				stock_qty: item.stock_qty || 0,
 				image: item.image,
 				uom: item.uom || item.stock_uom,
@@ -240,66 +336,46 @@ export function useInvoice() {
 	}
 
 	/**
-	 * Removes an item from the invoice
-	 * @param {string} itemCode - The item code to remove
-	 * @param {string|null} uom - Optional UOM to match when same item exists with different UOMs.
-	 *                            If provided, only removes the item with matching item_code AND uom.
-	 *                            If null, removes the first item matching item_code.
+	 * Removes a line from the invoice
+	 * @param {string} lineRef - line_id of the line, or an item_code (removes the
+	 *                           first line for that item)
+	 * @param {string|null} uom - Optional UOM to match when the same item exists
+	 *                            under different UOMs. Ignored for a line_id.
 	 */
-	function removeItem(itemCode, uom = null) {
-		let itemToRemove
-		if (uom) {
-			itemToRemove = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom,
-			)
-		} else {
-			itemToRemove = invoiceItems.value.find((i) => i.item_code === itemCode)
+	function removeItem(lineRef, uom = null) {
+		const itemToRemove = findLine(lineRef, uom)
+		if (!itemToRemove) return
+
+		// Update cache incrementally (subtract removed item values)
+		// Use price_list_rate for subtotal (before discount)
+		const priceListRate = itemToRemove.price_list_rate || itemToRemove.rate
+		_cachedSubtotal.value -= itemToRemove.quantity * priceListRate
+		_cachedTotalTax.value -= itemToRemove.tax_amount || 0
+		_cachedTotalDiscount.value -= itemToRemove.discount_amount || 0
+
+		// Return serial numbers back to cache if item has serials
+		if (itemToRemove.serial_no && itemToRemove.has_serial_no) {
+			serialStore.returnSerials(itemToRemove.item_code, itemToRemove.serial_no)
 		}
 
-		if (itemToRemove) {
-			// Update cache incrementally (subtract removed item values)
-			// Use price_list_rate for subtotal (before discount)
-			const priceListRate = itemToRemove.price_list_rate || itemToRemove.rate
-			_cachedSubtotal.value -= itemToRemove.quantity * priceListRate
-			_cachedTotalTax.value -= itemToRemove.tax_amount || 0
-			_cachedTotalDiscount.value -= itemToRemove.discount_amount || 0
-
-			// Return serial numbers back to cache if item has serials
-			if (itemToRemove.serial_no && itemToRemove.has_serial_no) {
-				serialStore.returnSerials(itemCode, itemToRemove.serial_no)
-			}
-		}
-
-		if (uom) {
-			invoiceItems.value = invoiceItems.value.filter(
-				(i) => !(i.item_code === itemCode && i.uom === uom),
-			)
-		} else {
-			invoiceItems.value = invoiceItems.value.filter(
-				(i) => i.item_code !== itemCode,
-			)
-		}
+		// Only the line that was found goes: an item billed at two MRPs has a
+		// second line that the cashier did not ask to remove.
+		invoiceItems.value = invoiceItems.value.filter((i) => i !== itemToRemove)
 	}
 
 	/**
-	 * Updates the quantity of an item in the invoice
-	 * @param {string} itemCode - The item code to update
+	 * Updates the quantity of a line in the invoice
+	 * @param {string} lineRef - line_id of the line, or an item_code (updates the
+	 *                           first line for that item)
 	 * @param {number} quantity - The new quantity value
-	 * @param {string|null} uom - Optional UOM to match when same item exists with different UOMs.
-	 *                            If provided, only updates the item with matching item_code AND uom.
-	 *                            If null, updates the first item matching item_code.
+	 * @param {string|null} uom - Optional UOM to match when the same item exists
+	 *                            under different UOMs. Ignored for a line_id.
 	 */
-	function updateItemQuantity(itemCode, quantity, uom = null) {
-		let item
-		if (uom) {
-			item = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom,
-			)
-		} else {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode)
-		}
+	function updateItemQuantity(lineRef, quantity, uom = null) {
+		const item = findLine(lineRef, uom)
 
 		if (item) {
+			const itemCode = item.item_code
 			const settingsStore = usePOSSettingsStore()
 			const stockStore = useStockStore()
 			const isStockItem = item.is_stock_item !== false
@@ -368,8 +444,13 @@ export function useInvoice() {
 		}
 	}
 
-	function updateItemRate(itemCode, rate) {
-		const item = invoiceItems.value.find((i) => i.item_code === itemCode)
+	/**
+	 * Sets a line's rate - the MRP it is being sold at.
+	 * @param {string} lineRef - line_id, or an item_code for the first such line
+	 * @param {number} rate
+	 */
+	function updateItemRate(lineRef, rate) {
+		const item = findLine(lineRef)
 		if (item) {
 			// Store old values before update for incremental cache adjustment
 			// Use price_list_rate for subtotal calculations (before discount)
@@ -390,8 +471,13 @@ export function useInvoice() {
 		}
 	}
 
-	function updateItemDiscount(itemCode, discountPercentage) {
-		const item = invoiceItems.value.find((i) => i.item_code === itemCode)
+	/**
+	 * Sets a line's discount percentage.
+	 * @param {string} lineRef - line_id, or an item_code for the first such line
+	 * @param {number} discountPercentage
+	 */
+	function updateItemDiscount(lineRef, discountPercentage) {
+		const item = findLine(lineRef)
 		if (item) {
 			// Validate discount percentage (0-100)
 			let validDiscount = Number.parseFloat(discountPercentage) || 0
@@ -541,6 +627,11 @@ export function useInvoice() {
 		_cachedSubtotal.value = 0
 		_cachedTotalTax.value = 0
 		_cachedTotalDiscount.value = 0
+
+		// Carts that arrive whole - a resumed draft, an offline invoice - have
+		// no line ids of their own; this is the one point every such load passes
+		// through before the cart is touched.
+		ensureLineIds()
 
 		for (const item of invoiceItems.value) {
 			// Use price_list_rate for subtotal (before discount)
@@ -1051,6 +1142,8 @@ export function useInvoice() {
 
 		// Actions
 		addItem,
+		findLine,
+		ensureLineIds,
 		removeItem,
 		updateItemQuantity,
 		updateItemRate,
@@ -1079,6 +1172,7 @@ export function useInvoice() {
 		validateCartItemsResource,
 		applyOffersResource,
 		getItemDetailsResource,
+		getItemMrpOptionsResource,
 		getTaxesResource,
 	}
 }
