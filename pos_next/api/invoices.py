@@ -751,6 +751,9 @@ def submit_invoice(invoice=None, data=None):
 
         # Auto-set batch numbers for returns
         _auto_set_return_batches(invoice_doc)
+        for item in invoice_doc.items:
+            if item.batch_no or item.serial_no:
+                item.use_serial_batch_fields = 1
 
         # Check if POS Settings allows negative stock
         pos_settings_allow_negative = False
