@@ -110,21 +110,13 @@ export function useInvoice() {
 	})
 
 	// ========================================================================
-	// COMPUTED TOTALS - IMPORTANT: Subtotal uses price_list_rate (original price)
+	// COMPUTED TOTALS - the cart reads like the Sales Invoice it will become
 	// ========================================================================
-	// Formula depends on tax_inclusive mode:
-	//
-	// TAX EXCLUSIVE (default):
-	// - Subtotal: Sum of (price_list_rate × quantity) = net amounts
-	// - Tax: Calculated and added on top
-	// - Grand Total = Subtotal - Discount + Tax
-	//
-	// TAX INCLUSIVE:
-	// - Subtotal: Sum of (price_list_rate × quantity) = gross amounts (includes tax)
-	// - Tax: Extracted from prices (for display only)
-	// - Grand Total = Subtotal - Discount (tax already included!)
-	//
-	// This ensures tax is not double-counted in inclusive mode!
+	// - Subtotal: taxable value, i.e. sum of line amounts after the line discount, and
+	//   net of tax when prices are tax inclusive (back-calculated per item).
+	// - Tax: sum of the tax on each line, at that item's own rate.
+	// - Grand Total = Subtotal + Tax - any discount applied to the whole bill.
+	// - Rounded Total: Grand Total rounded, with Round Off showing the difference.
 	// ========================================================================
 	const subtotal = computed(() => _cachedSubtotal.value)
 	const totalTax = computed(() => _cachedTotalTax.value)
@@ -132,16 +124,14 @@ export function useInvoice() {
 		() => _cachedTotalDiscount.value + (additionalDiscount.value || 0),
 	)
 	const grandTotal = computed(() => {
-		const discount = _cachedTotalDiscount.value + (additionalDiscount.value || 0)
-
-		if (taxInclusive.value) {
-			// Tax inclusive: Subtotal already includes tax, so don't add it again
-			return _cachedSubtotal.value - discount
-		} else {
-			// Tax exclusive: Add tax on top of subtotal
-			return _cachedSubtotal.value + _cachedTotalTax.value - discount
-		}
+		// Subtotal is the taxable value and already excludes the line discounts, so only a
+		// discount applied to the whole bill is taken off here.
+		return (
+			_cachedSubtotal.value + _cachedTotalTax.value - (additionalDiscount.value || 0)
+		)
 	})
+	const roundedTotal = computed(() => Math.round(grandTotal.value))
+	const roundOff = computed(() => roundedTotal.value - grandTotal.value)
 	const totalPaid = computed(() => _cachedTotalPaid.value)
 
 	const remainingAmount = computed(() => {
@@ -173,13 +163,6 @@ export function useInvoice() {
 		)
 
 		if (existingItem) {
-			// Store old values before update for incremental cache adjustment
-			// Use price_list_rate for subtotal calculations (before discount)
-			const oldPriceListRate = existingItem.price_list_rate || existingItem.rate
-			const oldAmount = existingItem.quantity * oldPriceListRate
-			const oldTax = existingItem.tax_amount || 0
-			const oldDiscount = existingItem.discount_amount || 0
-
 			// For serial items, merge the serial numbers
 			if (existingItem.has_serial_no && item.serial_no) {
 				const existingSerials = existingItem.serial_no
@@ -196,14 +179,7 @@ export function useInvoice() {
 			}
 			recalculateItem(existingItem)
 
-			// Update cache incrementally (new values - old values)
-			// Use price_list_rate for subtotal (before discount)
-			const priceListRate = existingItem.price_list_rate || existingItem.rate
-			_cachedSubtotal.value +=
-				existingItem.quantity * priceListRate - oldAmount
-			_cachedTotalTax.value += (existingItem.tax_amount || 0) - oldTax
-			_cachedTotalDiscount.value +=
-				(existingItem.discount_amount || 0) - oldDiscount
+			rebuildIncrementalCache()
 		} else {
 			const newItem = {
 				item_code: item.item_code,
@@ -233,17 +209,13 @@ export function useInvoice() {
 				brand: item.brand,
 				custom_sub_brand: item.custom_sub_brand,
 				custom_rack_identifier: item.custom_rack_identifier,
+				item_tax_rate_total: item.item_tax_rate_total || 0,
 			}
 			invoiceItems.value.push(newItem)
 			// Recalculate the newly added item to apply taxes
 			recalculateItem(newItem)
 
-			// Update cache incrementally (add new item values)
-			// Use price_list_rate for subtotal (before discount)
-			const priceListRate = newItem.price_list_rate || newItem.rate
-			_cachedSubtotal.value += newItem.quantity * priceListRate
-			_cachedTotalTax.value += newItem.tax_amount || 0
-			_cachedTotalDiscount.value += newItem.discount_amount || 0
+			rebuildIncrementalCache()
 		}
 	}
 
@@ -265,9 +237,7 @@ export function useInvoice() {
 			// Update cache incrementally (subtract removed item values)
 			// Use price_list_rate for subtotal (before discount)
 			const priceListRate = itemToRemove.price_list_rate || itemToRemove.rate
-			_cachedSubtotal.value -= itemToRemove.quantity * priceListRate
-			_cachedTotalTax.value -= itemToRemove.tax_amount || 0
-			_cachedTotalDiscount.value -= itemToRemove.discount_amount || 0
+			rebuildIncrementalCache()
 
 			// Return serial numbers back to cache if item has serials
 			if (itemToRemove.serial_no && itemToRemove.has_serial_no) {
@@ -320,11 +290,6 @@ export function useInvoice() {
 			}
 
 			// Store old values before update for incremental cache adjustment
-			// Use price_list_rate for subtotal calculations (before discount)
-			const oldPriceListRate = item.price_list_rate || item.rate
-			const oldAmount = item.quantity * oldPriceListRate
-			const oldTax = item.tax_amount || 0
-			const oldDiscount = item.discount_amount || 0
 			const oldQuantity = item.quantity
 
 			// Handle serial number items - adjust serials when quantity changes
@@ -351,9 +316,7 @@ export function useInvoice() {
 			// Update cache incrementally (new values - old values)
 			// Use price_list_rate for subtotal (before discount)
 			const priceListRate = item.price_list_rate || item.rate
-			_cachedSubtotal.value += item.quantity * priceListRate - oldAmount
-			_cachedTotalTax.value += (item.tax_amount || 0) - oldTax
-			_cachedTotalDiscount.value += (item.discount_amount || 0) - oldDiscount
+			rebuildIncrementalCache()
 		}
 	}
 
@@ -361,11 +324,6 @@ export function useInvoice() {
 		const item = invoiceItems.value.find((i) => i.item_code === itemCode)
 		if (item) {
 			// Store old values before update for incremental cache adjustment
-			// Use price_list_rate for subtotal calculations (before discount)
-			const oldPriceListRate = item.price_list_rate || item.rate
-			const oldAmount = item.quantity * oldPriceListRate
-			const oldTax = item.tax_amount || 0
-			const oldDiscount = item.discount_amount || 0
 
 			item.rate = Number.parseFloat(rate) || 0
 			recalculateItem(item)
@@ -373,9 +331,7 @@ export function useInvoice() {
 			// Update cache incrementally (new values - old values)
 			// Use price_list_rate for subtotal (before discount)
 			const priceListRate = item.price_list_rate || item.rate
-			_cachedSubtotal.value += item.quantity * priceListRate - oldAmount
-			_cachedTotalTax.value += (item.tax_amount || 0) - oldTax
-			_cachedTotalDiscount.value += (item.discount_amount || 0) - oldDiscount
+			rebuildIncrementalCache()
 		}
 	}
 
@@ -388,11 +344,6 @@ export function useInvoice() {
 			if (validDiscount > 100) validDiscount = 100
 
 			// Store old values before update for incremental cache adjustment
-			// Use price_list_rate for subtotal calculations (before discount)
-			const oldPriceListRate = item.price_list_rate || item.rate
-			const oldAmount = item.quantity * oldPriceListRate
-			const oldTax = item.tax_amount || 0
-			const oldDiscount = item.discount_amount || 0
 
 			item.discount_percentage = validDiscount
 			item.discount_amount = 0 // Let recalculateItem compute it
@@ -401,9 +352,7 @@ export function useInvoice() {
 			// Update cache incrementally (new values - old values)
 			// Use price_list_rate for subtotal (before discount)
 			const priceListRate = item.price_list_rate || item.rate
-			_cachedSubtotal.value += item.quantity * priceListRate - oldAmount
-			_cachedTotalTax.value += (item.tax_amount || 0) - oldTax
-			_cachedTotalDiscount.value += (item.discount_amount || 0) - oldDiscount
+			rebuildIncrementalCache()
 		}
 	}
 
@@ -522,6 +471,16 @@ export function useInvoice() {
 		return totalRate
 	}
 
+	function getItemTaxRate(item) {
+		/**
+		 * Rate charged on this line. Sites that tax per item keep the account-head rows at 0
+		 * and carry the real rate on the item's Item Tax Template, so that rate wins whenever
+		 * the server sent one; the account-head total stays as the fallback.
+		 */
+		const itemRate = Number.parseFloat(item?.item_tax_rate_total) || 0
+		return itemRate || calculateTotalTaxRate()
+	}
+
 	function rebuildIncrementalCache() {
 		/**
 		 * Rebuild cache from scratch - used when bulk operations modify all items
@@ -532,9 +491,9 @@ export function useInvoice() {
 		_cachedTotalDiscount.value = 0
 
 		for (const item of invoiceItems.value) {
-			// Use price_list_rate for subtotal (before discount)
-			const priceListRate = item.price_list_rate || item.rate
-			_cachedSubtotal.value += item.quantity * priceListRate
+			// Subtotal is the taxable value, matching the Sales Invoice: item.amount is net of
+			// the line discount, and net of tax when prices are tax inclusive.
+			_cachedSubtotal.value += item.amount || 0
 			_cachedTotalTax.value += item.tax_amount || 0
 			_cachedTotalDiscount.value += item.discount_amount || 0
 		}
@@ -588,7 +547,7 @@ export function useInvoice() {
 		item.discount_amount = discountAmount
 
 		// Calculate tax based on inclusive/exclusive mode
-		const totalTaxRate = calculateTotalTaxRate()
+		const totalTaxRate = getItemTaxRate(item)
 		let netAmount = 0
 		let taxAmount = 0
 
@@ -1027,6 +986,8 @@ export function useInvoice() {
 		totalTax,
 		totalDiscount,
 		grandTotal,
+		roundedTotal,
+		roundOff,
 		totalPaid,
 		remainingAmount,
 		canSubmit,
