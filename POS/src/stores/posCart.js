@@ -79,15 +79,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const hasCustomer = computed(() => !!customer.value)
 
 	// Actions
-	/**
-	 * @param {Object} item - Item to sell
-	 * @param {number} qty
-	 * @param {boolean} autoAdd
-	 * @param {Object|null} currentProfile
-	 * @param {Object} [options] - Line options passed through to the invoice:
-	 *   `rate` to bill this line at a chosen MRP, `forceNewLine` to keep it
-	 *   apart from a line already holding the same item at that rate.
-	 */
+	// `options` goes straight to the invoice: `rate` bills this line at a chosen
+	// MRP, `forceNewLine` keeps it apart from a line already at that rate.
 	function addItem(item, qty = 1, autoAdd = false, currentProfile = null, options = {}) {
 		// Check stock availability before adding to cart
 		// Skip validation for batch/serial items - they have their own validation in the dialog
@@ -126,17 +119,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		addItemToInvoice(item, qty, options)
 	}
 
-	/**
-	 * The MRPs this item is stocked under, to fill the picker.
-	 *
-	 * Only ever asked for once the cashier has opened the picker themselves, so
-	 * an empty list is not a dead end: they can still type the MRP printed on
-	 * the pack. That is also what a failed lookup leaves them with.
-	 *
-	 * @param {Object} item - Item being billed again
-	 * @param {string|null} uom - UOM the line will be sold in
-	 * @returns {Promise<Array>} [{rate, price_list, valid_from, is_default}]
-	 */
+	// Only asked for once the cashier opens the picker, so an empty list (or a
+	// failed lookup) is not a dead end - they can still type the MRP off the pack.
 	async function fetchMrpOptions(item, uom = null) {
 		if (!item?.item_code || !posProfile.value) return []
 		if (!settingsStore.allowsMultipleMrp()) return []

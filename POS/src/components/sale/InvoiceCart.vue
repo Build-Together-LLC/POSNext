@@ -1427,12 +1427,8 @@ const requireCartItemReview = computed(
 /** POS Setting "Allow Multiple MRP Per Item". */
 const allowMultipleMrp = computed(() => settingsStore.allowsMultipleMrp())
 
-/**
- * Item codes sitting on the invoice under more than one line.
- *
- * Only then does a line's price need to announce itself as an MRP: with one
- * line there is nothing to tell it apart from.
- */
+// A line's price only needs to announce itself as an MRP when the item is on
+// more than one line.
 const multiLineItemCodes = computed(() => {
 	const seen = new Map()
 	for (const item of props.items) {
@@ -1447,14 +1443,7 @@ const multiLineItemCodes = computed(() => {
 const hasMultipleMrpLines = (item) =>
 	multiLineItemCodes.value.has(item.item_code)
 
-/**
- * How a line is named to the cart store.
- *
- * The line's own id, which is the only thing that tells apart two lines of the
- * same item billed at different MRPs. Lines that predate line ids - a draft
- * held by an older build - fall back to item_code, which the store still
- * understands.
- */
+// The line's own id, falling back to item_code for lines held by an older build.
 const lineRef = (item) => item.line_id || item.item_code
 
 /**
@@ -1924,11 +1913,8 @@ async function handleUomChange(item, newUom) {
 }
 
 /**
- * Toggle UOM dropdown visibility for a line.
- * Only one dropdown can be open at a time - and it has to be keyed by the line,
- * or an item billed at two MRPs opens both of its dropdowns at once.
- *
- * @param {String} ref - Line reference to toggle the dropdown for
+ * Toggle UOM dropdown visibility. Keyed by line, or an item billed at two MRPs
+ * opens both of its dropdowns at once.
  */
 function toggleUomDropdown(ref) {
 	openUomDropdown.value = openUomDropdown.value === ref ? null : ref
