@@ -44,6 +44,7 @@ def get_initial_data():
 	result = {
 		"success": True,
 		"locale": get_user_language(),
+		"user_roles": frappe.get_roles(frappe.session.user),
 		"shift": None,
 		"pos_profile": None,
 		"pos_settings": None,

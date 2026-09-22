@@ -304,7 +304,7 @@
 				</div>
 
 				<!-- Additional Discount Section (Compact) -->
-				<div v-if="settingsStore.allowAdditionalDiscount" class="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-300 rounded-lg p-2">
+				<div v-if="canEditAdditionalDiscount" class="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-300 rounded-lg p-2">
 					<div class="flex items-center justify-between mb-1.5">
 						<div class="flex items-center gap-1.5">
 							<div class="w-5 h-5 rounded-full bg-orange-200 flex items-center justify-center">
@@ -679,6 +679,7 @@
 
 <script setup>
 import { usePOSSettingsStore } from "@/stores/posSettings"
+import { userData } from "@/data/user"
 import { formatCurrency as formatCurrencyUtil, getCurrencySymbol } from "@/utils/currency"
 import { getPaymentIcon } from "@/utils/payment"
 import { offlineWorker } from "@/utils/offline/workerClient"
@@ -975,6 +976,10 @@ async function loadPaymentMethods() {
 
 // Currency symbol for display
 const currencySymbol = computed(() => getCurrencySymbol(props.currency))
+const canEditDiscount = computed(() => userData.hasRole("Price Manager"))
+const canEditAdditionalDiscount = computed(() =>
+	settingsStore.allowAdditionalDiscount && canEditDiscount.value,
+)
 
 // Helper to round to 2 decimal places (handles floating-point precision)
 const round2 = (val) => Number(Number(val).toFixed(2))
@@ -1331,6 +1336,11 @@ function getMethodTotal(methodName) {
 
 // Additional discount handlers
 function handleAdditionalDiscountChange() {
+	if (!canEditAdditionalDiscount.value) {
+		localAdditionalDiscount.value = props.additionalDiscount || 0
+		return
+	}
+
 	let discountValue = localAdditionalDiscount.value
 	let discountAmount = 0
 
@@ -1388,12 +1398,14 @@ function handleAdditionalDiscountChange() {
 }
 
 function handleAdditionalDiscountTypeChange() {
+	if (!canEditAdditionalDiscount.value) return
 	// Don't reset - preserve last value when toggling type
 	// Just recalculate to ensure it's within limits
 	handleAdditionalDiscountChange()
 }
 
 function clearAdditionalDiscount() {
+	if (!canEditAdditionalDiscount.value) return
 	localAdditionalDiscount.value = 0
 	emit("update-additional-discount", 0)
 }

@@ -25,6 +25,7 @@ except Exception:  # pragma: no cover - ERPNext not installed in some environmen
 # Roles allowed to clear held POS drafts that belong to another cashier
 # (see delete_all_pos_drafts).
 POS_DRAFT_MANAGER_ROLES = ("System Manager", "Sales Manager", "Accounts Manager")
+PRICE_MANAGER_ROLE = "Price Manager"
 
 
 # ==========================================
@@ -91,6 +92,66 @@ def get_payment_account(mode_of_payment, company):
         ).format(mode_of_payment, company),
         title=_("Missing Account"),
     )
+
+
+def _has_price_manager_role():
+    return PRICE_MANAGER_ROLE in frappe.get_roles(frappe.session.user)
+
+
+def _normalize_applied_pricing_rules(applied_pricing_rules, item_count=0):
+    if isinstance(applied_pricing_rules, str):
+        applied_pricing_rules = json.loads(applied_pricing_rules or "[]")
+
+    if not isinstance(applied_pricing_rules, list):
+        applied_pricing_rules = []
+
+    rows = []
+    for row in applied_pricing_rules:
+        if isinstance(row, str):
+            row = [row]
+        if isinstance(row, (list, tuple, set)):
+            rows.append([rule for rule in row if rule])
+        else:
+            rows.append([])
+
+    while len(rows) < item_count:
+        rows.append([])
+
+    return rows
+
+
+def _validate_discount_edit_permission(invoice_doc, applied_pricing_rules=None):
+    """Restrict cashier-entered discounts to users with Price Manager role.
+
+    Pricing-rule item discounts and coupon invoice discounts are system-driven
+    POS discounts, so they stay allowed for regular cashiers.
+    """
+    if _has_price_manager_role():
+        return
+
+    if flt(invoice_doc.get("discount_amount") or 0) and not invoice_doc.get("coupon_code"):
+        frappe.throw(
+            _("Only users with the Price Manager role can edit discounts in POSNext."),
+            frappe.PermissionError,
+        )
+
+    items = invoice_doc.get("items", [])
+    rule_rows = _normalize_applied_pricing_rules(applied_pricing_rules, len(items))
+
+    for index, item in enumerate(items):
+        has_discount = flt(item.get("discount_percentage") or 0) or flt(
+            item.get("discount_amount") or 0
+        )
+        if not has_discount:
+            continue
+
+        if rule_rows[index]:
+            continue
+
+        frappe.throw(
+            _("Only users with the Price Manager role can edit item discounts in POSNext."),
+            frappe.PermissionError,
+        )
 
 
 # ==========================================
@@ -485,6 +546,8 @@ def update_invoice(data):
         invoice_doc.ignore_pricing_rule = 1
         invoice_doc.flags.ignore_pricing_rule = True
 
+        _validate_discount_edit_permission(invoice_doc, applied_pricing_rules)
+
         # ========================================================================
         # DISCOUNT CALCULATION - CRITICAL LOGIC
         # ========================================================================
@@ -754,6 +817,8 @@ def submit_invoice(invoice=None, data=None):
         for item in invoice_doc.items:
             if item.batch_no or item.serial_no:
                 item.use_serial_batch_fields = 1
+
+        _validate_discount_edit_permission(invoice_doc, applied_pricing_rules)
 
         # Check if POS Settings allows negative stock
         pos_settings_allow_negative = False

@@ -755,7 +755,7 @@ const { showSuccess, showError, showWarning } = useToast()
 const log = logger.create('POSSale')
 
 // User data composable
-const { userName, userImage } = useUserData()
+const { userName, userImage, hasRole } = useUserData()
 
 // Locale composable for RTL support
 const { isRTL } = useLocale()
@@ -1415,6 +1415,11 @@ async function handleEditItem(updatedItem) {
 }
 
 function handleAdditionalDiscountUpdate(discountAmount) {
+	if (!hasRole("Price Manager")) {
+		showWarning(__("Only users with the Price Manager role can edit discounts."))
+		return
+	}
+
 	// Update the additional discount value in the cart store
 	cartStore.additionalDiscount = discountAmount
 
