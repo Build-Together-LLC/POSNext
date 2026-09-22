@@ -478,7 +478,7 @@
 				<div
 					v-for="item in displayedItems"
 					v-show="itemMatchesSearch(item)"
-					:key="`${item.item_code}-${item.uom}`"
+					:key="lineRef(item)"
 					data-test="cart-line"
 					@click="openEditDialog(item)"
 					class="border rounded-md p-1.5 sm:p-2 hover:border-blue-300 hover:shadow-md transition-all duration-200 active:scale-[0.99] cursor-pointer group"
@@ -576,7 +576,7 @@
 								</div>
 								<button
 									type="button"
-									@click.stop="$emit('remove-item', item.item_code, item.uom)"
+									@click.stop="$emit('remove-item', lineRef(item), item.uom)"
 									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
 									:aria-label="__('Remove {0}', [item.item_name])"
 									:title="__('Remove item')"
@@ -652,7 +652,7 @@
 									<div class="relative group/uom">
 										<button
 											type="button"
-											@click="toggleUomDropdown(item.item_code)"
+											@click="toggleUomDropdown(lineRef(item))"
 											:disabled="!item.item_uoms || item.item_uoms.length === 0"
 											:class="[
 												'h-6 sm:h-7 text-[10px] sm:text-xs font-bold rounded ps-2 pe-5 transition-all touch-manipulation flex items-center justify-center min-w-[45px]',
@@ -667,7 +667,7 @@
 										<svg
 											:class="[
 												'absolute end-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 pointer-events-none transition-transform',
-												openUomDropdown === item.item_code ? 'rotate-180' : '',
+												openUomDropdown === lineRef(item) ? 'rotate-180' : '',
 												item.item_uoms && item.item_uoms.length > 0 ? 'text-white' : 'text-gray-400'
 											]"
 											fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -675,7 +675,7 @@
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
 										</svg>
 										<div
-											v-if="openUomDropdown === item.item_code && item.item_uoms && item.item_uoms.length > 0"
+											v-if="openUomDropdown === lineRef(item) && item.item_uoms && item.item_uoms.length > 0"
 											class="absolute top-full start-0 mt-0.5 bg-white border border-blue-300 rounded shadow-xl z-50 min-w-full overflow-hidden"
 										>
 											<button
@@ -703,10 +703,28 @@
 										</div>
 									</div>
 
-									<!-- Price -->
-									<span class="text-[10px] sm:text-xs font-bold text-gray-700">
-										{{ formatCurrency(item.rate) }}
+									<!-- Price. Labelled MRP once the same item is on the
+									     invoice at more than one, so the two lines can be
+									     told apart at a glance. -->
+									<span
+										class="text-[10px] sm:text-xs font-bold"
+										:class="hasMultipleMrpLines(item) ? 'text-purple-700' : 'text-gray-700'"
+									>
+										<span v-if="hasMultipleMrpLines(item)" class="font-extrabold">{{ __('MRP') }} </span>{{ formatCurrency(item.rate) }}
 									</span>
+
+									<!-- Bill the same item again at another MRP -->
+									<button
+										v-if="allowMultipleMrp"
+										type="button"
+										@click.stop="$emit('add-mrp-line', item)"
+										class="h-6 sm:h-7 px-1.5 rounded border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 active:scale-95 transition-all text-[10px] sm:text-xs font-bold touch-manipulation flex items-center gap-0.5"
+										:aria-label="__('Add {0} at another MRP', [item.item_name])"
+										:title="__('Add this item again at a different MRP')"
+									>
+										<FeatherIcon name="plus" class="w-3 h-3" />
+										{{ __('MRP') }}
+									</button>
 								</div>
 
 								<!-- Item Total -->
@@ -1036,8 +1054,8 @@ const props = defineProps({
  * Events emitted to parent component for cart operations
  */
 const emit = defineEmits([
-	"update-quantity",    // (itemCode, newQty, uom?) - Update item quantity
-	"remove-item",        // (itemCode, uom?) - Remove item from cart
+	"update-quantity",    // (lineRef, newQty, uom?) - Update line quantity
+	"remove-item",        // (lineRef, uom?) - Remove line from cart
 	"select-customer",    // (customer) - Select/change customer
 	"create-customer",    // (searchText) - Open create customer dialog
 	"proceed-to-payment", // () - Navigate to payment screen
@@ -1047,8 +1065,9 @@ const emit = defineEmits([
 	"show-coupons",       // () - Show available coupons
 	"show-offers",        // () - Show available offers dialog
 	"remove-offer",       // (offerId) - Remove applied offer
-	"update-uom",         // (itemCode, newUom) - Change item's unit of measure
+	"update-uom",         // (lineRef, newUom) - Change line's unit of measure
 	"edit-item",          // (item) - Open item edit dialog
+	"add-mrp-line",       // (item) - Bill this item again at a different MRP
 	"view-shift",         // () - View current shift details
 	"show-drafts",        // () - Show draft/held orders
 	"show-history",       // () - Show invoice history
@@ -1405,16 +1424,49 @@ const requireCartItemReview = computed(
 	() => settingsStore.requireCartItemReview,
 )
 
+/** POS Setting "Allow Multiple MRP Per Item". */
+const allowMultipleMrp = computed(() => settingsStore.allowsMultipleMrp())
+
+/**
+ * Item codes sitting on the invoice under more than one line.
+ *
+ * Only then does a line's price need to announce itself as an MRP: with one
+ * line there is nothing to tell it apart from.
+ */
+const multiLineItemCodes = computed(() => {
+	const seen = new Map()
+	for (const item of props.items) {
+		seen.set(item.item_code, (seen.get(item.item_code) || 0) + 1)
+	}
+	return new Set(
+		[...seen.entries()].filter(([, count]) => count > 1).map(([code]) => code),
+	)
+})
+
+/** True when this item is billed on more than one line of this invoice. */
+const hasMultipleMrpLines = (item) =>
+	multiLineItemCodes.value.has(item.item_code)
+
+/**
+ * How a line is named to the cart store.
+ *
+ * The line's own id, which is the only thing that tells apart two lines of the
+ * same item billed at different MRPs. Lines that predate line ids - a draft
+ * held by an older build - fall back to item_code, which the store still
+ * understands.
+ */
+const lineRef = (item) => item.line_id || item.item_code
+
 /**
  * Cart lines the operator has ticked during the final review before checkout.
- * Keyed by item_code + uom (the same identity the cart uses for a line), so a
- * tick survives quantity/price edits but not the line being removed. Purely a
- * visual confirmation aid: it is never written to the invoice.
+ * Keyed by the line itself, so a tick survives quantity/price edits but not the
+ * line being removed. Purely a visual confirmation aid: it is never written to
+ * the invoice.
  */
 const reviewedItems = ref(new Set())
 
 /** Identity of a cart line for the reviewed set. */
-const reviewKey = (item) => `${item.item_code}-${item.uom}`
+const reviewKey = (item) => lineRef(item)
 
 /** True when the operator has ticked this cart line. */
 const isItemReviewed = (item) => reviewedItems.value.has(reviewKey(item))
@@ -1538,11 +1590,11 @@ async function confirmCheckoutReviewedOnly() {
 	removingUnreviewed.value = true
 	try {
 		const dropped = unreviewedItems.value.map((item) => ({
-			item_code: item.item_code,
+			ref: lineRef(item),
 			uom: item.uom,
 		}))
-		for (const { item_code, uom } of dropped) {
-			cartStore.removeItem(item_code, uom)
+		for (const { ref, uom } of dropped) {
+			cartStore.removeItem(ref, uom)
 		}
 		if (dropped.length > 0) {
 			showWarning(
@@ -1783,7 +1835,7 @@ function incrementQuantity(item) {
 	}
 	const step = getSmartStep(item.quantity)
 	const newQty = Math.round((item.quantity + step) * 10000) / 10000
-	emit("update-quantity", item.item_code, newQty, item.uom)
+	emit("update-quantity", lineRef(item), newQty, item.uom)
 }
 
 /**
@@ -1798,9 +1850,9 @@ function decrementQuantity(item) {
 
 	if (newQty <= 0) {
 		// If quantity would be 0 or negative, remove the item
-		emit("remove-item", item.item_code, item.uom)
+		emit("remove-item", lineRef(item), item.uom)
 	} else {
-		emit("update-quantity", item.item_code, newQty, item.uom)
+		emit("update-quantity", lineRef(item), newQty, item.uom)
 	}
 }
 
@@ -1822,12 +1874,12 @@ function updateQuantity(item, value) {
 			if (qty > maxAvailable) {
 				showError(__('Cannot set quantity to {0} for "{1}". Only {2} available in stock.', [qty, item.item_name, Math.max(0, Math.floor(maxAvailable))]))
 				if (maxAvailable > 0) {
-					emit("update-quantity", item.item_code, Math.floor(maxAvailable), item.uom)
+					emit("update-quantity", lineRef(item), Math.floor(maxAvailable), item.uom)
 				}
 				return
 			}
 		}
-		emit("update-quantity", item.item_code, qty, item.uom)
+		emit("update-quantity", lineRef(item), qty, item.uom)
 	}
 }
 
@@ -1843,12 +1895,12 @@ function handleQuantityBlur(item) {
 	// When user leaves the input field, round and validate
 	if (!item.quantity || item.quantity <= 0) {
 		// If quantity is 0 or invalid, remove the item
-		emit("remove-item", item.item_code, item.uom)
+		emit("remove-item", lineRef(item), item.uom)
 	} else {
 		// Round to 4 decimal places for consistency
 		const roundedQty = Math.round(item.quantity * 10000) / 10000
 		if (roundedQty !== item.quantity) {
-			emit("update-quantity", item.item_code, roundedQty, item.uom)
+			emit("update-quantity", lineRef(item), roundedQty, item.uom)
 		}
 	}
 }
@@ -1865,20 +1917,21 @@ function handleQuantityBlur(item) {
  * @param {String} newUom - New unit of measure (e.g., "Kg", "Box")
  */
 async function handleUomChange(item, newUom) {
-	await cartStore.changeItemUOM(item.item_code, newUom)
+	await cartStore.changeItemUOM(lineRef(item), newUom)
 	openUomDropdown.value = null // Close dropdown after selection
 	// Also emit for parent component compatibility
-	emit("update-uom", item.item_code, newUom)
+	emit("update-uom", lineRef(item), newUom)
 }
 
 /**
- * Toggle UOM dropdown visibility for an item.
- * Only one dropdown can be open at a time.
+ * Toggle UOM dropdown visibility for a line.
+ * Only one dropdown can be open at a time - and it has to be keyed by the line,
+ * or an item billed at two MRPs opens both of its dropdowns at once.
  *
- * @param {String} itemCode - Item code to toggle dropdown for
+ * @param {String} ref - Line reference to toggle the dropdown for
  */
-function toggleUomDropdown(itemCode) {
-	openUomDropdown.value = openUomDropdown.value === itemCode ? null : itemCode
+function toggleUomDropdown(ref) {
+	openUomDropdown.value = openUomDropdown.value === ref ? null : ref
 }
 
 /**
@@ -1915,7 +1968,7 @@ function openEditDialog(item) {
  */
 async function handleUpdateItem(updatedItem) {
 	// Use store method to update item
-	await cartStore.updateItemDetails(updatedItem.item_code, updatedItem)
+	await cartStore.updateItemDetails(lineRef(updatedItem), updatedItem)
 	// Also emit for parent component compatibility
 	emit("edit-item", updatedItem)
 }

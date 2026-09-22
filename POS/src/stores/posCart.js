@@ -43,8 +43,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		removeDiscount,
 		applyOffersResource,
 		getItemDetailsResource,
+		getItemMrpOptionsResource,
 		recalculateItem,
 		rebuildIncrementalCache,
+		findLine,
 	} = useInvoice()
 
 	const offersStore = usePOSOffersStore()
@@ -77,7 +79,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const hasCustomer = computed(() => !!customer.value)
 
 	// Actions
-	function addItem(item, qty = 1, autoAdd = false, currentProfile = null) {
+	/**
+	 * @param {Object} item - Item to sell
+	 * @param {number} qty
+	 * @param {boolean} autoAdd
+	 * @param {Object|null} currentProfile
+	 * @param {Object} [options] - Line options passed through to the invoice:
+	 *   `rate` to bill this line at a chosen MRP, `forceNewLine` to keep it
+	 *   apart from a line already holding the same item at that rate.
+	 */
+	function addItem(item, qty = 1, autoAdd = false, currentProfile = null, options = {}) {
 		// Check stock availability before adding to cart
 		// Skip validation for batch/serial items - they have their own validation in the dialog
 		// Check for stock items AND Product Bundles (bundles now have calculated stock)
@@ -112,7 +123,38 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 
 		// Add item to cart - no toast notification for performance
-		addItemToInvoice(item, qty)
+		addItemToInvoice(item, qty, options)
+	}
+
+	/**
+	 * The MRPs this item is stocked under, to fill the picker.
+	 *
+	 * Only ever asked for once the cashier has opened the picker themselves, so
+	 * an empty list is not a dead end: they can still type the MRP printed on
+	 * the pack. That is also what a failed lookup leaves them with.
+	 *
+	 * @param {Object} item - Item being billed again
+	 * @param {string|null} uom - UOM the line will be sold in
+	 * @returns {Promise<Array>} [{rate, price_list, valid_from, is_default}]
+	 */
+	async function fetchMrpOptions(item, uom = null) {
+		if (!item?.item_code || !posProfile.value) return []
+		if (!settingsStore.allowsMultipleMrp()) return []
+
+		try {
+			const response = await getItemMrpOptionsResource.submit({
+				item_code: item.item_code,
+				pos_profile: posProfile.value,
+				uom: uom || item.uom || item.stock_uom || null,
+				current_rate: item.price_list_rate || item.rate || 0,
+			})
+
+			const payload = response?.message || response || {}
+			return Array.isArray(payload.options) ? payload.options : []
+		} catch (error) {
+			console.warn("Multiple MRP: could not load options", error)
+			return []
+		}
 	}
 
 	function clearCart() {
@@ -260,7 +302,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const freeQty = Number.parseFloat(freeItem.qty) || 0
 			if (freeQty <= 0) continue
 
-			// Find matching cart item by item_code and uom
+			// Find matching cart item by item_code and uom. An item billed at
+			// two MRPs has two lines and the server's free quantity names only
+			// the item, so the badge lands on the first of them - the free
+			// quantity itself is the server's and is unaffected.
 			const cartItem = invoiceItems.value.find(
 				item => item.item_code === freeItem.item_code &&
 				(item.uom || item.stock_uom) === (freeItem.uom || freeItem.stock_uom)
@@ -418,7 +463,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return invoiceItems.value
 			.map(
 				(item) =>
-					`${item.item_code}:${item.uom || item.stock_uom}:${item.quantity}`,
+					// The rate is part of the identity: the same item billed at two
+					// MRPs is two lines the server prices separately.
+					`${item.item_code}:${item.uom || item.stock_uom}:${item.quantity}:${item.price_list_rate || item.rate || 0}`,
 			)
 			.join("|")
 	}
@@ -847,10 +894,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
-	async function changeItemUOM(itemCode, newUom) {
+	async function changeItemUOM(lineRef, newUom) {
 		try {
-			const cartItem = invoiceItems.value.find((i) => i.item_code === itemCode)
+			const cartItem = findLine(lineRef)
 			if (!cartItem) return
+
+			const itemCode = cartItem.item_code
 
 			const itemDetails = await getItemDetailsResource.submit({
 				item_code: itemCode,
@@ -880,12 +929,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
-	async function updateItemDetails(itemCode, updatedDetails) {
+	async function updateItemDetails(lineRef, updatedDetails) {
 		try {
-			const cartItem = invoiceItems.value.find((i) => i.item_code === itemCode)
+			const cartItem = findLine(lineRef)
 			if (!cartItem) {
 				throw new Error("Item not found in cart")
 			}
+
+			const itemCode = cartItem.item_code
 
 			// If UOM changed, fetch new rate from server
 			if (updatedDetails.uom && updatedDetails.uom !== cartItem.uom) {
@@ -1180,7 +1231,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		reapplyOffer,
 		changeItemUOM,
 		updateItemDetails,
+		fetchMrpOptions,
 		getItemDetailsResource,
+		getItemMrpOptionsResource,
 		recalculateItem,
 		rebuildIncrementalCache,
 		applyOffersResource,

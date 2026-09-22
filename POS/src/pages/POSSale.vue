@@ -230,6 +230,7 @@
 						@remove-offer="offer => cartStore.removeOffer(offer, shiftStore.currentProfile, offersDialogRef.value)"
 						@update-uom="cartStore.changeItemUOM"
 						@edit-item="handleEditItem"
+						@add-mrp-line="handleAddMrpLine"
 						@view-shift="uiStore.showOpenShiftDialog = true"
 						@show-drafts="uiStore.showDraftDialog = true"
 						@show-history="uiStore.showHistoryDialog = true"
@@ -384,6 +385,8 @@
 			v-model="uiStore.showItemSelectionDialog"
 			:item="cartStore.pendingItem"
 			:mode="cartStore.selectionMode"
+			:mrp-options="mrpOptions"
+			:initial-quantity="cartStore.pendingItemQty"
 			:pos-profile="shiftStore.profileName"
 			:currency="shiftStore.profileCurrency"
 			@option-selected="handleOptionSelected"
@@ -1366,6 +1369,34 @@ function handleShiftClosed() {
 	}
 }
 
+// MRP choices handed to the selection dialog while it is in 'mrp' mode.
+const mrpOptions = ref([])
+
+/**
+ * "Bill this again at another MRP", from the cart line's own button.
+ *
+ * Deliberately the only way in. Adding an item never stops to ask, however many
+ * MRPs it is stocked under: the common sale is one price, and the cashier says
+ * when a second one is in their hand.
+ *
+ * @param {Object} cartItem - The line whose item is being billed again
+ */
+async function handleAddMrpLine(cartItem) {
+	if (!cartItem || !settingsStore.allowsMultipleMrp()) return
+
+	try {
+		mrpOptions.value = await cartStore.fetchMrpOptions(
+			cartItem,
+			cartItem.uom || cartItem.stock_uom,
+		)
+		cartStore.setPendingItem(cartItem, 1, "mrp")
+		uiStore.showItemSelectionDialog = true
+	} catch (error) {
+		log.error("Error opening MRP options:", error)
+		showError(__("Failed to load MRP options. Please try again."))
+	}
+}
+
 function handleItemSelected(item, autoAdd = false) {
 	const qty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
 
@@ -1426,7 +1457,12 @@ function handleItemSelected(item, autoAdd = false) {
 }
 
 async function handleEditItem(updatedItem) {
-	await cartStore.updateItemDetails(updatedItem.item_code, updatedItem)
+	// By line, not by item: the same item can be on the invoice twice, once per
+	// MRP, and only one of them was edited.
+	await cartStore.updateItemDetails(
+		updatedItem.line_id || updatedItem.item_code,
+		updatedItem,
+	)
 }
 
 function handleAdditionalDiscountUpdate(discountAmount) {
@@ -1702,6 +1738,28 @@ async function handleOptionSelected(option) {
 				} catch (error) {
 					showError(error.message)
 				}
+			}
+		} else if (option.type === "mrp") {
+			const qty = option.quantity || cartStore.pendingItemQty
+			const item = cartStore.pendingItem
+
+			try {
+				// Its own line, even at a rate the cart already holds: the cashier
+				// asked for a second line, not for the first one to grow.
+				cartStore.addItem(item, qty, false, shiftStore.currentProfile, {
+					rate: option.rate,
+					forceNewLine: true,
+				})
+				uiStore.showItemSelectionDialog = false
+				cartStore.clearPendingItem()
+				showSuccess(
+					__('{0} added to cart at {1}', [
+						item.item_name,
+						formatCurrency(option.rate),
+					]),
+				)
+			} catch (error) {
+				showError(error.message)
 			}
 		}
 	} catch (error) {
