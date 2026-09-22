@@ -2,6 +2,23 @@
 	<Dialog v-model="show" :options="{ title: __('Create New Customer'), size: 'md' }">
 		<template #body-content>
 			<div class="flex flex-col gap-6">
+				<!-- Customer Series (Required) -->
+				<div>
+					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+						{{ __("Customer Series") }} <span class="text-red-500">*</span>
+					</label>
+					<select
+						v-model="customerData.naming_series"
+						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+						required
+					>
+						<option value="">{{ __("Select Customer Series") }}</option>
+						<option v-for="series in namingSeries" :key="series" :value="series">
+							{{ series }}
+						</option>
+					</select>
+				</div>
+
 				<!-- Customer Name (Required) -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
@@ -110,7 +127,7 @@
 				<!-- Customer Group -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-						{{ __("Customer Group") }}
+						{{ __("Customer Group") }} <span class="text-red-500">*</span>
 					</label>
 					<select
 						v-model="customerData.customer_group"
@@ -121,6 +138,64 @@
 							{{ group }}
 						</option>
 					</select>
+				</div>
+
+				<!-- Address -->
+				<div class="border-t border-gray-200 pt-5">
+					<h3 class="text-start text-sm font-semibold text-gray-800 mb-3">
+						{{ __("Address") }} <span class="text-red-500">*</span>
+					</h3>
+					<div class="flex flex-col gap-4">
+						<div>
+							<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+								{{ __("Address Line 1") }} <span class="text-red-500">*</span>
+							</label>
+							<Input v-model="addressData.address_line1" type="text" :placeholder="__('Enter address line 1')" />
+						</div>
+						<div>
+							<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+								{{ __("Address Line 2") }}
+							</label>
+							<Input v-model="addressData.address_line2" type="text" :placeholder="__('Enter address line 2')" />
+						</div>
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+							<div>
+								<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+									{{ __("City/Town") }} <span class="text-red-500">*</span>
+								</label>
+								<Input v-model="addressData.city" type="text" :placeholder="__('Enter city')" />
+							</div>
+							<div>
+								<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+									{{ __("State/Province") }}
+								</label>
+								<Input v-model="addressData.state" type="text" :placeholder="__('Enter state')" />
+							</div>
+						</div>
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+							<div>
+								<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+									{{ __("Country") }} <span class="text-red-500">*</span>
+								</label>
+								<select
+									v-model="addressData.country"
+									@change="setCountryFromName(addressData.country)"
+									class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+								>
+									<option value="">{{ __("Select Country") }}</option>
+									<option v-for="country in countriesStore.countries" :key="country.name" :value="country.name">
+										{{ country.name }}
+									</option>
+								</select>
+							</div>
+							<div>
+								<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+									{{ __("Postal Code") }}
+								</label>
+								<Input v-model="addressData.pincode" type="text" :placeholder="__('Enter postal code')" />
+							</div>
+						</div>
+					</div>
 				</div>
 
 				<!-- Territory -->
@@ -167,7 +242,7 @@
 						variant="solid"
 						@click="handleCreate"
 						:loading="createCustomerResource.loading || checkingPermission"
-						:disabled="!customerData.customer_name || !hasPermission"
+						:disabled="!canSubmit"
 					>
 						{{ __("Create Customer") }}
 					</Button>
@@ -233,16 +308,27 @@ const countrySearchQuery = ref("")
 const dropdownRef = ref(null)
 const countrySearchRef = ref(null)
 
-const customerGroups = ref(["Commercial", "Individual", "Non Profit", "Government"])
+const customerGroups = ref([])
+const namingSeries = ref([])
 const territories = ref(["All Territories"])
 
 const customerData = ref({
+	naming_series: "",
 	customer_name: "",
 	mobile_no: "",
 	email_id: "",
 	custom_vehicle_no: "",
 	customer_group: "Individual",
 	territory: "All Territories",
+})
+
+const addressData = ref({
+	address_line1: "",
+	address_line2: "",
+	city: "",
+	state: "",
+	country: "",
+	pincode: "",
 })
 
 // =============================================================================
@@ -258,6 +344,18 @@ const currentCountryCode = computed(() => {
 	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value)
 	return country?.code.toLowerCase() || "eg"
 })
+
+const canSubmit = computed(() =>
+	Boolean(
+		hasPermission.value &&
+		customerData.value.naming_series &&
+		customerData.value.customer_name &&
+		customerData.value.customer_group &&
+		addressData.value.address_line1 &&
+		addressData.value.city &&
+		addressData.value.country
+	)
+)
 
 const filteredCountries = computed(() => {
 	if (!countrySearchQuery.value) return countriesStore.countries
@@ -276,6 +374,7 @@ const handleFlagError = (e) => (e.target.style.display = "none")
 
 const selectCountry = (country) => {
 	selectedCountryCode.value = country.isd
+	addressData.value.country = country.name
 	showCountryDropdown.value = false
 	countrySearchQuery.value = ""
 	updateMobileNumber()
@@ -301,10 +400,12 @@ const setCountryFromName = (countryName) => {
 	const isd = countriesStore.countryNameToISDMap[countryName]
 	if (isd) {
 		selectedCountryCode.value = isd
+		addressData.value.country = countryName
 		log.info(`Set country code to ${isd} for ${countryName}`)
 	} else {
 		log.warn(`Country "${countryName}" not found`)
 		selectedCountryCode.value = "+20"
+		addressData.value.country = countryName
 	}
 }
 
@@ -338,18 +439,24 @@ const updateTerritoryFromCountry = () => {
 // =============================================================================
 
 const createCustomerResource = createResource({
-	url: "frappe.client.insert",
+	// Use the POS API so Customer Series, Address, and POS Profile Customer Group
+	// validation all run in one server-side creation flow.
+	url: "pos_next.api.customers.create_customer",
 	makeParams: () => ({
-		doc: {
-			doctype: "Customer",
-			customer_name: customerData.value.customer_name,
-			customer_type: "Individual",
-			customer_group: customerData.value.customer_group || __("Individual"),
-			territory: customerData.value.territory || __("All Territories"),
-			mobile_no: customerData.value.mobile_no || "",
-			email_id: customerData.value.email_id || "",
-			custom_vehicle_no: customerData.value.custom_vehicle_no || "",
-		},
+		pos_profile: props.posProfile,
+		naming_series: customerData.value.naming_series,
+		customer_name: customerData.value.customer_name,
+		customer_group: customerData.value.customer_group,
+		territory: customerData.value.territory || __("All Territories"),
+		mobile_no: customerData.value.mobile_no || "",
+		email_id: customerData.value.email_id || "",
+		custom_vehicle_no: customerData.value.custom_vehicle_no || "",
+		address_line1: addressData.value.address_line1,
+		address_line2: addressData.value.address_line2,
+		city: addressData.value.city,
+		state: addressData.value.state,
+		country: addressData.value.country,
+		pincode: addressData.value.pincode,
 	}),
 	onSuccess: (data) => {
 		showSuccess(__("Customer {0} created successfully", [data.customer_name]))
@@ -362,35 +469,26 @@ const createCustomerResource = createResource({
 	},
 })
 
-/** Helper to create list fetch resources */
-const createListResource = (doctype, onSuccess) =>
-	createResource({
-		url: "frappe.client.get_list",
-		makeParams: () => ({
-			doctype,
-			fields: ["name"],
-			filters: doctype === "Customer Group" ? { is_group: 0 } : {},
-			limit_page_length: 500,
-		}),
-		auto: false,
-		onSuccess: (data) => data?.length && onSuccess(data.map((d) => d.name)),
-		onError: (err) => log.error(`Error loading ${doctype}`, err),
-	})
-
-const customerGroupsResource = createListResource("Customer Group", (names) => (customerGroups.value = names))
-const territoriesResource = createListResource("Territory", (names) => (territories.value = names))
-
-const posProfileResource = createResource({
-	url: "frappe.client.get_value",
+const customerCreationOptionsResource = createResource({
+	// Options are fetched from the POS API because Customer Groups must respect
+	// the cashier's active POS Profile instead of showing every Customer Group.
+	url: "pos_next.api.customers.get_customer_creation_options",
 	makeParams: () => ({
-		doctype: "POS Profile",
-		filters: { name: props.posProfile },
-		fieldname: ["country"],
+		pos_profile: props.posProfile,
 	}),
 	auto: false,
-	onSuccess: (data) => setCountryFromName(data?.country || "Egypt"),
+	onSuccess: (data) => {
+		const options = data || {}
+		customerGroups.value = options.customer_groups || []
+		namingSeries.value = options.naming_series || []
+		territories.value = options.territories || []
+		customerData.value.customer_group = options.default_customer_group || customerGroups.value[0] || ""
+		customerData.value.naming_series = options.default_naming_series || namingSeries.value[0] || ""
+		customerData.value.territory = options.default_territory || territories.value[0] || ""
+		setCountryFromName(options.default_country || "Egypt")
+	},
 	onError: (err) => {
-		log.error("Error loading POS Profile", err)
+		log.error("Error loading customer creation options", err)
 		selectedCountryCode.value = "+20"
 	},
 })
@@ -401,19 +499,11 @@ const posProfileResource = createResource({
 
 const loadDialogData = async () => {
 	// Lazy load countries (non-blocking)
-	countriesStore.loadCountries()
+	await countriesStore.loadCountries()
 
 	// Load form options
-	await territoriesResource.reload()
-	customerGroupsResource.reload()
+	await customerCreationOptionsResource.reload()
 	checkPermissions()
-
-	// Set country from POS Profile
-	if (props.posProfile) {
-		await posProfileResource.reload()
-	} else {
-		selectedCountryCode.value = "+20"
-	}
 }
 
 const checkPermissions = async () => {
@@ -432,17 +522,41 @@ const handleCreate = async () => {
 	if (!customerData.value.customer_name) {
 		return showError(__("Customer Name is required"))
 	}
+	if (!customerData.value.naming_series) {
+		return showError(__("Customer Series is required"))
+	}
+	if (!customerData.value.customer_group) {
+		return showError(__("Customer Group is required"))
+	}
+	if (!addressData.value.address_line1) {
+		return showError(__("Address Line 1 is required"))
+	}
+	if (!addressData.value.city) {
+		return showError(__("City/Town is required"))
+	}
+	if (!addressData.value.country) {
+		return showError(__("Country is required"))
+	}
 	await createCustomerResource.submit()
 }
 
 const resetForm = () => {
 	Object.assign(customerData.value, {
+		naming_series: namingSeries.value[0] || "",
 		customer_name: "",
 		mobile_no: "",
 		email_id: "",
 		custom_vehicle_no: "",
-		customer_group: "Individual",
-		territory: "All Territories",
+		customer_group: customerGroups.value[0] || "",
+		territory: territories.value.includes("All Territories") ? "All Territories" : territories.value[0] || "",
+	})
+	Object.assign(addressData.value, {
+		address_line1: "",
+		address_line2: "",
+		city: "",
+		state: "",
+		country: "",
+		pincode: "",
 	})
 	selectedCountryCode.value = ""
 	phoneNumber.value = ""
@@ -470,6 +584,10 @@ watch(
 
 watch(selectedCountryCode, async () => {
 	await nextTick()
+	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value)
+	if (country && !addressData.value.country) {
+		addressData.value.country = country.name
+	}
 	updateTerritoryFromCountry()
 })
 
