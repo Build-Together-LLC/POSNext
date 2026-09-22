@@ -12,6 +12,7 @@
  */
 
 import { call } from "@/utils/apiWrapper"
+import { userData } from "@/data/user"
 import { logger } from "@/utils/logger"
 import { defineStore } from "pinia"
 import { ref } from "vue"
@@ -58,6 +59,7 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 
 			if (result?.success) {
 				data.value = result
+				userData.setRoles(result.user_roles || [])
 				loaded.value = true
 				log.success("Bootstrap data loaded", {
 					hasShift: !!result.shift,
@@ -112,6 +114,13 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 	}
 
 	/**
+	 * Get current user's roles from bootstrap, if available.
+	 */
+	function getPreloadedUserRoles() {
+		return data.value?.user_roles || []
+	}
+
+	/**
 	 * Check if bootstrap data is available
 	 */
 	function hasBootstrapData() {
@@ -142,6 +151,7 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 		getPreloadedPOSProfile,
 		getPreloadedPOSSettings,
 		getPreloadedPaymentMethods,
+		getPreloadedUserRoles,
 		hasBootstrapData,
 		reset,
 	}
