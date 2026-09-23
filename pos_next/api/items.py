@@ -12,6 +12,8 @@ from frappe import _, as_json
 from frappe.query_builder import DocType, functions as fn
 from frappe.utils import cint, flt, nowdate
 
+from pos_next.api.invoices import _assert_pos_profile_access
+
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
 	"item_name",
@@ -1956,6 +1958,8 @@ def get_item_mrp_options(item_code, pos_profile, uom=None, current_rate=None):
 
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
+
+	_assert_pos_profile_access(pos_profile)
 
 	enabled, mrp_price_list = _mrp_settings(pos_profile)
 
