@@ -21,7 +21,7 @@ Two things worth knowing before acting on the numbers:
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt, get_first_day, getdate, nowdate
 
 GROUP_BY_FIELD = {
     "Item": "item_code",
@@ -37,26 +37,27 @@ GROUP_BY_FIELD = {
 
 def execute(filters=None):
     filters = frappe._dict(filters or {})
-
-    rows = _fetch(filters)
     group_by = filters.get("group_by") or "Item"
+
+    where_clause, values = _conditions(filters)
 
     if group_by == "Detail":
         columns = _detail_columns()
-        data = rows
+        data = _fetch_detail(where_clause, values)
     else:
         columns = _grouped_columns(group_by)
-        data = _group(rows, GROUP_BY_FIELD[group_by])
+        data = _fetch_grouped(where_clause, values, GROUP_BY_FIELD[group_by], group_by)
 
-    return columns, data, None, _chart(rows), _summary(rows)
+    return columns, data, None, _chart(where_clause, values), _summary(where_clause, values)
 
 
-def _fetch(filters):
-    conditions = {}
+def _conditions(filters):
+    conditions = ["1=1"]
+    values = {}
 
     # Rows a supervisor has written off are out unless they are asked for.
     if not filters.get("include_voided"):
-        conditions["is_void"] = 0
+        conditions.append("is_void = 0")
 
     for field in (
         "company",
@@ -72,96 +73,95 @@ def _fetch(filters):
         "loss_type",
     ):
         if filters.get(field):
-            conditions[field] = filters.get(field)
+            conditions.append(f"`{field}` = %({field})s")
+            values[field] = filters.get(field)
 
-    if filters.get("from_date") and filters.get("to_date"):
-        conditions["posting_date"] = [
-            "between",
-            [filters.get("from_date"), filters.get("to_date")],
-        ]
+    from_date = filters.get("from_date")
+    to_date = filters.get("to_date")
+    if from_date and to_date:
+        conditions.append("posting_date BETWEEN %(from_date)s AND %(to_date)s")
+        values["from_date"] = getdate(from_date)
+        values["to_date"] = getdate(to_date)
+    elif from_date:
+        conditions.append("posting_date >= %(from_date)s")
+        values["from_date"] = getdate(from_date)
+    elif to_date:
+        conditions.append("posting_date <= %(to_date)s")
+        values["to_date"] = getdate(to_date)
+    else:
+        conditions.append("posting_date BETWEEN %(from_date)s AND %(to_date)s")
+        values["from_date"] = get_first_day(nowdate())
+        values["to_date"] = nowdate()
 
-    return frappe.get_all(
-        "POS Order Loss",
-        filters=conditions,
-        fields=[
-            "name",
-            "posting_date",
-            "posting_time",
-            "pos_profile",
-            "pos_opening_shift",
-            "cashier",
-            "customer",
-            "item_code",
-            "item_name",
-            "item_group",
-            "brand",
-            "warehouse",
-            "uom",
-            "demanded_qty",
-            "available_qty",
-            "sold_qty",
-            "lost_qty",
-            "demanded_stock_qty",
-            "sold_stock_qty",
-            "lost_stock_qty",
-            "fill_rate",
-            "rate",
-            "lost_value",
-            "reason",
-            "loss_type",
-            "source",
-            "sales_invoice",
-            "is_void",
-        ],
-        order_by="posting_date desc, posting_time desc",
-        limit_page_length=0,
-    )
+    return " AND ".join(conditions), values
 
 
-def _group(rows, field):
-    buckets = {}
+def _fetch_grouped(where_clause, values, field, group_by):
+    item_name_col = "MAX(item_name) as item_name," if group_by == "Item" else ""
+    query = f"""
+        SELECT
+            `{field}` as `{field}`,
+            {item_name_col}
+            COALESCE(SUM(demanded_stock_qty), 0) as demanded_qty,
+            COALESCE(SUM(sold_stock_qty), 0) as sold_qty,
+            COALESCE(SUM(lost_stock_qty), 0) as lost_qty,
+            COALESCE(SUM(lost_value), 0) as lost_value,
+            COUNT(*) as occurrences,
+            COALESCE(SUM(CASE WHEN loss_type = 'Full' THEN 1 ELSE 0 END), 0) as full_losses,
+            COUNT(DISTINCT NULLIF(customer, '')) as customers
+        FROM `tabPOS Order Loss`
+        WHERE {where_clause}
+        GROUP BY `{field}`
+        ORDER BY lost_value DESC, lost_qty DESC
+    """
+    rows = frappe.db.sql(query, values, as_dict=True)
 
     for row in rows:
-        key = row.get(field) or ""
-        bucket = buckets.setdefault(
-            key,
-            {
-                field: key,
-                "item_name": row.get("item_name") if field == "item_code" else None,
-                "demanded_qty": 0,
-                "sold_qty": 0,
-                "lost_qty": 0,
-                "lost_value": 0,
-                "occurrences": 0,
-                "full_losses": 0,
-                "_customers": set(),
-            },
-        )
-
-        bucket["demanded_qty"] += flt(row.demanded_stock_qty)
-        bucket["sold_qty"] += flt(row.sold_stock_qty)
-        bucket["lost_qty"] += flt(row.lost_stock_qty)
-        bucket["lost_value"] += flt(row.lost_value)
-        bucket["occurrences"] += 1
-
-        if row.loss_type == "Full":
-            bucket["full_losses"] += 1
-
-        if row.customer:
-            bucket["_customers"].add(row.customer)
-
-    data = []
-    for bucket in buckets.values():
-        bucket["customers"] = len(bucket.pop("_customers"))
-        bucket["fill_rate"] = (
-            bucket["sold_qty"] / bucket["demanded_qty"] * 100
-            if bucket["demanded_qty"]
+        row["fill_rate"] = (
+            (row["sold_qty"] / row["demanded_qty"] * 100)
+            if row["demanded_qty"]
             else 0
         )
-        data.append(bucket)
 
-    # Biggest hole in the shelf first - that is the reorder list.
-    return sorted(data, key=lambda d: (d["lost_value"], d["lost_qty"]), reverse=True)
+    return rows
+
+
+def _fetch_detail(where_clause, values):
+    query = f"""
+        SELECT
+            name,
+            posting_date,
+            posting_time,
+            pos_profile,
+            pos_opening_shift,
+            cashier,
+            customer,
+            item_code,
+            item_name,
+            item_group,
+            brand,
+            warehouse,
+            uom,
+            demanded_qty,
+            available_qty,
+            sold_qty,
+            lost_qty,
+            demanded_stock_qty,
+            sold_stock_qty,
+            lost_stock_qty,
+            fill_rate,
+            rate,
+            lost_value,
+            reason,
+            loss_type,
+            source,
+            sales_invoice,
+            is_void
+        FROM `tabPOS Order Loss`
+        WHERE {where_clause}
+        ORDER BY posting_date DESC, posting_time DESC
+    """
+    return frappe.db.sql(query, values, as_dict=True)
 
 
 def _detail_columns():
@@ -244,36 +244,53 @@ def _grouped_columns(group_by):
     return columns
 
 
-def _chart(rows):
+def _chart(where_clause, values):
+    query = f"""
+        SELECT
+            COALESCE(NULLIF(item_name, ''), item_code) as label,
+            SUM(lost_value) as lost_value
+        FROM `tabPOS Order Loss`
+        WHERE {where_clause}
+        GROUP BY COALESCE(NULLIF(item_name, ''), item_code)
+        HAVING SUM(lost_value) > 0
+        ORDER BY lost_value DESC
+        LIMIT 10
+    """
+    rows = frappe.db.sql(query, values, as_dict=True)
     if not rows:
-        return None
-
-    by_item = {}
-    for row in rows:
-        by_item[row.item_name or row.item_code] = by_item.get(
-            row.item_name or row.item_code, 0
-        ) + flt(row.lost_value)
-
-    top = sorted(by_item.items(), key=lambda kv: kv[1], reverse=True)[:10]
-    if not top:
         return None
 
     return {
         "data": {
-            "labels": [label for label, _value in top],
-            "datasets": [{"name": _("Lost Value"), "values": [value for _label, value in top]}],
+            "labels": [r.label for r in rows],
+            "datasets": [{"name": _("Lost Value"), "values": [flt(r.lost_value) for r in rows]}],
         },
         "type": "bar",
         "colors": ["#e03636"],
     }
 
 
-def _summary(rows):
-    demanded = sum(flt(row.demanded_stock_qty) for row in rows)
-    sold = sum(flt(row.sold_stock_qty) for row in rows)
-    lost = sum(flt(row.lost_stock_qty) for row in rows)
-    value = sum(flt(row.lost_value) for row in rows)
-    full = sum(1 for row in rows if row.loss_type == "Full")
+def _summary(where_clause, values):
+    query = f"""
+        SELECT
+            COALESCE(SUM(demanded_stock_qty), 0) as demanded,
+            COALESCE(SUM(sold_stock_qty), 0) as sold,
+            COALESCE(SUM(lost_stock_qty), 0) as lost,
+            COALESCE(SUM(lost_value), 0) as value,
+            COALESCE(SUM(CASE WHEN loss_type = 'Full' THEN 1 ELSE 0 END), 0) as full_losses
+        FROM `tabPOS Order Loss`
+        WHERE {where_clause}
+    """
+    res = frappe.db.sql(query, values, as_dict=True)
+    if not res:
+        return []
+
+    r = res[0]
+    demanded = flt(r.demanded)
+    sold = flt(r.sold)
+    lost = flt(r.lost)
+    value = flt(r.value)
+    full = cint(r.full_losses)
 
     return [
         {"label": _("Demand Short"), "value": demanded, "datatype": "Float"},

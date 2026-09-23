@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
 
-const call = vi.fn(() => Promise.resolve({ enabled: true, rows: [], skipped: [] }))
+const call = vi.fn(() =>
+	Promise.resolve({ enabled: true, rows: [], skipped: [] }),
+)
 
 vi.mock("@/utils/apiWrapper", () => ({ call: (...args) => call(...args) }))
 vi.mock("@/utils/offline", () => ({ isOffline: () => false }))
@@ -164,7 +166,11 @@ describe("loss of order ledger", () => {
 	it("queues a second item instead of losing it", () => {
 		const store = usePOSOrderLossStore()
 		shortfall(store, 12)
-		shortfall(store, 8, 2, { ...ITEM, item_code: "GADGET", item_name: "Gadget" })
+		shortfall(store, 8, 2, {
+			...ITEM,
+			item_code: "GADGET",
+			item_name: "Gadget",
+		})
 
 		expect(store.pendingPrompt.item_code).toBe("WIDGET")
 		store.confirmPrompt(12)
@@ -278,5 +284,41 @@ describe("loss of order ledger", () => {
 			new_session: "ol-inv-SINV-26-00042",
 			pos_profile: "Main",
 		})
+	})
+
+	it("does not re-send clean entries on subsequent flushes in the steady state", async () => {
+		const store = usePOSOrderLossStore()
+		shortfall(store, 12)
+		store.confirmPrompt(12)
+
+		await store.flush({ force: true })
+		expect(call).toHaveBeenCalledTimes(1)
+
+		// Next normal flush with no changes should be a no-op
+		await store.flush()
+		expect(call).toHaveBeenCalledTimes(1)
+
+		// Debounce timer expiring without changes should also not trigger another call
+		await vi.runAllTimersAsync()
+		expect(call).toHaveBeenCalledTimes(1)
+	})
+
+	it("re-flushes when an entry is updated with a new quantity", async () => {
+		const store = usePOSOrderLossStore()
+		shortfall(store, 12)
+		store.confirmPrompt(12)
+
+		await store.flush({ force: true })
+		expect(call).toHaveBeenCalledTimes(1)
+
+		// Customer asks for 20 more
+		shortfall(store, 32)
+		store.confirmPrompt(32)
+
+		await store.flush()
+		expect(call).toHaveBeenCalledTimes(2)
+		const [, payload] = call.mock.calls[1]
+		const [sent] = JSON.parse(payload.losses)
+		expect(sent.demanded_qty).toBe(32)
 	})
 })

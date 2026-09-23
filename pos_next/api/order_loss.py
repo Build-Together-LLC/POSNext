@@ -105,6 +105,37 @@ def _item_meta(item_codes):
     return {row.name: row for row in rows}
 
 
+def _item_prices(item_codes, price_list, currency=None):
+    """Fetch price_list_rate for items in batch, bucketed by (item_code, uom) and item_code fallback."""
+    codes = [c for c in set(item_codes or []) if c]
+    if not (codes and price_list):
+        return {}
+
+    filters = {
+        "item_code": ["in", codes],
+        "price_list": price_list,
+        "selling": 1,
+    }
+    if currency:
+        filters["currency"] = currency
+
+    rows = frappe.get_all(
+        "Item Price",
+        filters=filters,
+        fields=["item_code", "uom", "price_list_rate"],
+    )
+
+    prices = {}
+    for r in rows:
+        rate = flt(r.price_list_rate)
+        if r.uom:
+            prices[(r.item_code, r.uom)] = rate
+        if r.item_code not in prices:
+            prices[r.item_code] = rate
+
+    return prices
+
+
 def _fallback_rate(item_code, uom, price_list, currency):
     """Price an item the cart never priced.
 
@@ -134,7 +165,17 @@ def _fallback_rate(item_code, uom, price_list, currency):
 # ==========================================
 
 
-def _sanitise(entry, ctx, meta, ceiling, cart_session_id, pos_profile, pos_opening_shift, customer):
+def _sanitise(
+    entry,
+    ctx,
+    meta,
+    ceiling,
+    cart_session_id,
+    pos_profile,
+    pos_opening_shift,
+    customer,
+    prices=None,
+):
     """Turn one client entry into a row, or return (None, why) to skip it.
 
     Skipping is deliberate rather than throwing: a cart with one unusable line
@@ -175,7 +216,10 @@ def _sanitise(entry, ctx, meta, ceiling, cart_session_id, pos_profile, pos_openi
     rate = flt(entry.get("rate"))
 
     if not rate:
-        rate = _fallback_rate(item_code, uom, ctx.get("selling_price_list"), ctx.get("currency"))
+        if prices is not None:
+            rate = prices.get((item_code, uom)) or prices.get(item_code) or 0
+        if not rate:
+            rate = _fallback_rate(item_code, uom, ctx.get("selling_price_list"), ctx.get("currency"))
 
     row = {
         "doctype": DOCTYPE,
@@ -278,6 +322,11 @@ def record_losses(
 
     ctx = _profile_context(pos_profile)
     meta = _item_meta([entry.get("item_code") for entry in losses])
+    prices = _item_prices(
+        [entry.get("item_code") for entry in losses],
+        ctx.get("selling_price_list"),
+        ctx.get("currency"),
+    )
     ceiling = _max_demand_qty(pos_profile)
 
     written = []
@@ -293,6 +342,7 @@ def record_losses(
             pos_profile,
             pos_opening_shift,
             customer,
+            prices=prices,
         )
 
         if row is None:
@@ -327,10 +377,19 @@ def _upsert_row(row):
     name = frappe.db.get_value(DOCTYPE, {"idempotency_key": row["idempotency_key"]}, "name")
 
     if not name:
-        doc = frappe.get_doc(row)
-        doc.flags.ignore_permissions = True
-        doc.insert()
-        return doc, None
+        insert_savepoint = "pos_order_loss_insert"
+        frappe.db.savepoint(insert_savepoint)
+        try:
+            doc = frappe.get_doc(row)
+            doc.flags.ignore_permissions = True
+            doc.insert()
+            frappe.db.release_savepoint(insert_savepoint)
+            return doc, None
+        except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
+            frappe.db.rollback(save_point=insert_savepoint)
+            name = frappe.db.get_value(DOCTYPE, {"idempotency_key": row["idempotency_key"]}, "name")
+            if not name:
+                raise
 
     doc = frappe.get_doc(DOCTYPE, name)
 
@@ -383,8 +442,9 @@ def reconcile_invoice(sales_invoice, cart_session_id=None):
         return {"updated": 0, "deleted": 0}
 
     invoice_doc = frappe.get_doc("Sales Invoice", sales_invoice)
+    _assert_pos_profile_access(invoice_doc.pos_profile)
 
-    filters = {"is_void": 0}
+    filters = {"is_void": 0, "pos_profile": invoice_doc.pos_profile}
     if cart_session_id:
         filters["cart_session_id"] = cart_session_id
     else:

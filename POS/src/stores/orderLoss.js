@@ -28,7 +28,9 @@ const FLUSH_DEBOUNCE_MS = 3000
 
 /** Mirrors make_idempotency_key in pos_order_loss.py — the two must agree. */
 function lossKey({ item_code, uom, warehouse, batch_no }) {
-	return [item_code || "", uom || "", warehouse || "", batch_no || ""].join("::")
+	return [item_code || "", uom || "", warehouse || "", batch_no || ""].join(
+		"::",
+	)
 }
 
 function newSessionId() {
@@ -133,7 +135,10 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 				})
 			}
 		} catch (error) {
-			console.warn("Loss of order: could not move rows onto the held invoice", error)
+			console.warn(
+				"Loss of order: could not move rows onto the held invoice",
+				error,
+			)
 		}
 
 		sessionId.value = target
@@ -151,7 +156,13 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 	 * @param {string} args.source - Which till action detected it
 	 * @param {string} [args.reason]
 	 */
-	function recordShortfall({ item, requestedQty, availableQty, source, reason }) {
+	function recordShortfall({
+		item,
+		requestedQty,
+		availableQty,
+		source,
+		reason,
+	}) {
 		if (!settingsStore.shouldRecordOrderLoss()) return
 		if (!item?.item_code) return
 
@@ -174,7 +185,8 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 			demanded_qty: demanded,
 			available_qty: available,
 			source: source || "Manual",
-			reason: reason || (available <= 0 ? "Out of Stock" : "Insufficient Stock"),
+			reason:
+				reason || (available <= 0 ? "Out of Stock" : "Insufficient Stock"),
 		}
 
 		const key = lossKey(entry)
@@ -183,7 +195,9 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 		// recorded demand always matches what the customer last asked for. Only a
 		// prompt for the very same quantity is skipped - one action must not put
 		// the same question up twice.
-		if (queue.value.some((q) => lossKey(q) === key && q.demanded_qty === demanded)) {
+		if (
+			queue.value.some((q) => lossKey(q) === key && q.demanded_qty === demanded)
+		) {
 			return
 		}
 
@@ -199,8 +213,13 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 		const existing = shortfalls.value.get(key)
 
 		const merged = existing
-			? { ...existing, ...entry, rate: entry.rate || existing.rate }
-			: { ...entry }
+			? {
+					...existing,
+					...entry,
+					rate: entry.rate || existing.rate,
+					_dirty: true,
+				}
+			: { ...entry, _dirty: true }
 
 		shortfalls.value.set(key, merged)
 		shortfalls.value = new Map(shortfalls.value)
@@ -275,10 +294,30 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 			return Number(line?.quantity) || 0
 		}
 
-		const entries = [...shortfalls.value.values()].map((entry) => ({
-			...entry,
-			sold_qty: cartQty(entry),
-		}))
+		const isDirty = (entry) => {
+			if (entry._dirty) return true
+			const currentCart = cartQty(entry)
+			if (
+				entry._flushedSoldQty === undefined ||
+				entry._flushedSoldQty !== currentCart
+			) {
+				return true
+			}
+			return false
+		}
+
+		const entriesToFlush = force
+			? [...shortfalls.value.values()]
+			: [...shortfalls.value.values()].filter(isDirty)
+
+		if (entriesToFlush.length === 0) return null
+
+		const entries = entriesToFlush.map(
+			({ _dirty, _flushedSoldQty, ...entry }) => ({
+				...entry,
+				sold_qty: cartQty(entry),
+			}),
+		)
 
 		const context = {
 			pos_profile: cartStore.posProfile,
@@ -303,6 +342,15 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 				losses: JSON.stringify(entries),
 			})
 			lastFlushError.value = null
+
+			for (const sent of entries) {
+				const current = shortfalls.value.get(lossKey(sent))
+				if (current && current.demanded_qty === sent.demanded_qty) {
+					current._dirty = false
+					current._flushedSoldQty = sent.sold_qty
+				}
+			}
+
 			return result
 		} catch (error) {
 			// Recording demand must never interrupt a sale. Park it on the device

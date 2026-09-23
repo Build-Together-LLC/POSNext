@@ -16,7 +16,7 @@ will catch - read the request count as a floor, not a precise tally.
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt, get_first_day, getdate, nowdate
 
 GROUP_BY_FIELD = {
     "Requested Item": "normalized_item",
@@ -31,24 +31,27 @@ GROUP_BY_FIELD = {
 
 def execute(filters=None):
     filters = frappe._dict(filters or {})
-
-    rows = _fetch(filters)
     group_by = filters.get("group_by") or "Requested Item"
 
+    where_clause, values = _conditions(filters)
+
     if group_by == "Detail":
-        return _detail_columns(), rows, None, _chart(rows), _summary(rows)
+        columns = _detail_columns()
+        data = _fetch_detail(where_clause, values)
+    else:
+        columns = _grouped_columns(group_by)
+        data = _fetch_grouped(where_clause, values, GROUP_BY_FIELD[group_by], group_by)
 
-    data = _group(rows, GROUP_BY_FIELD[group_by])
-
-    return _grouped_columns(group_by), data, None, _chart(rows), _summary(rows)
+    return columns, data, None, _chart(where_clause, values), _summary(where_clause, values)
 
 
-def _fetch(filters):
-    conditions = {}
+def _conditions(filters):
+    conditions = ["1=1"]
+    values = {}
 
     # A request somebody has written off is out unless it is asked for.
     if not filters.get("include_discarded"):
-        conditions["status"] = ["!=", "Discarded"]
+        conditions.append("status != 'Discarded'")
 
     for field in (
         "company",
@@ -61,89 +64,81 @@ def _fetch(filters):
         "status",
     ):
         if filters.get(field):
-            conditions[field] = filters.get(field)
-
-    if filters.get("from_date") and filters.get("to_date"):
-        conditions["posting_date"] = [
-            "between",
-            [filters.get("from_date"), filters.get("to_date")],
-        ]
+            conditions.append(f"`{field}` = %({field})s")
+            values[field] = filters.get(field)
 
     if filters.get("requested_item"):
-        conditions["requested_item"] = ["like", f"%{filters.get('requested_item')}%"]
+        conditions.append("requested_item LIKE %(requested_item)s")
+        values["requested_item"] = f"%{filters.get('requested_item')}%"
 
-    return frappe.get_all(
-        "POS Unlisted Item Demand",
-        filters=conditions,
-        fields=[
-            "name",
-            "posting_date",
-            "posting_time",
-            "requested_item",
-            "normalized_item",
-            "brand",
-            "item_group",
-            "qty",
-            "uom",
-            "estimated_rate",
-            "estimated_value",
-            "customer",
-            "customer_name",
-            "contact_no",
-            "notes",
-            "status",
-            "linked_item",
-            "pos_profile",
-            "pos_opening_shift",
-            "cashier",
-        ],
-        order_by="posting_date desc, posting_time desc",
-        limit_page_length=0,
-    )
+    from_date = filters.get("from_date")
+    to_date = filters.get("to_date")
+    if from_date and to_date:
+        conditions.append("posting_date BETWEEN %(from_date)s AND %(to_date)s")
+        values["from_date"] = getdate(from_date)
+        values["to_date"] = getdate(to_date)
+    elif from_date:
+        conditions.append("posting_date >= %(from_date)s")
+        values["from_date"] = getdate(from_date)
+    elif to_date:
+        conditions.append("posting_date <= %(to_date)s")
+        values["to_date"] = getdate(to_date)
+    else:
+        conditions.append("posting_date BETWEEN %(from_date)s AND %(to_date)s")
+        values["from_date"] = get_first_day(nowdate())
+        values["to_date"] = nowdate()
+
+    return " AND ".join(conditions), values
 
 
-def _group(rows, field):
-    buckets = {}
+def _fetch_grouped(where_clause, values, field, group_by):
+    item_col = "MAX(requested_item) as requested_item," if group_by == "Requested Item" else ""
+    query = f"""
+        SELECT
+            `{field}` as `{field}`,
+            {item_col}
+            COUNT(*) as requests,
+            COALESCE(SUM(qty), 0) as qty,
+            COUNT(DISTINCT NULLIF(customer, '')) as customers,
+            COALESCE(SUM(estimated_value), 0) as estimated_value,
+            COALESCE(SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END), 0) as open_requests,
+            MAX(posting_date) as last_asked
+        FROM `tabPOS Unlisted Item Demand`
+        WHERE {where_clause}
+        GROUP BY `{field}`
+        ORDER BY requests DESC, qty DESC
+    """
+    return frappe.db.sql(query, values, as_dict=True)
 
-    for row in rows:
-        key = row.get(field) or ""
-        bucket = buckets.setdefault(
-            key,
-            {
-                field: key,
-                # The most recent spelling, so the buying list reads in a
-                # cashier's words rather than in normalised form.
-                "requested_item": row.get("requested_item"),
-                "requests": 0,
-                "qty": 0,
-                "estimated_value": 0,
-                "open_requests": 0,
-                "_customers": set(),
-                "last_asked": None,
-            },
-        )
 
-        bucket["requests"] += 1
-        bucket["qty"] += flt(row.qty)
-        bucket["estimated_value"] += flt(row.estimated_value)
-
-        if row.status == "Open":
-            bucket["open_requests"] += 1
-
-        if row.customer:
-            bucket["_customers"].add(row.customer)
-
-        if not bucket["last_asked"] or row.posting_date > bucket["last_asked"]:
-            bucket["last_asked"] = row.posting_date
-            bucket["requested_item"] = row.get("requested_item")
-
-    data = []
-    for bucket in buckets.values():
-        bucket["customers"] = len(bucket.pop("_customers"))
-        data.append(bucket)
-
-    # Most asked for first - that is the order to go shopping in.
-    return sorted(data, key=lambda d: (d["requests"], d["qty"]), reverse=True)
+def _fetch_detail(where_clause, values):
+    query = f"""
+        SELECT
+            name,
+            posting_date,
+            posting_time,
+            requested_item,
+            normalized_item,
+            brand,
+            item_group,
+            qty,
+            uom,
+            estimated_rate,
+            estimated_value,
+            customer,
+            customer_name,
+            contact_no,
+            notes,
+            status,
+            linked_item,
+            pos_profile,
+            pos_opening_shift,
+            cashier
+        FROM `tabPOS Unlisted Item Demand`
+        WHERE {where_clause}
+        ORDER BY posting_date DESC, posting_time DESC
+    """
+    return frappe.db.sql(query, values, as_dict=True)
 
 
 def _detail_columns():
@@ -201,41 +196,55 @@ def _grouped_columns(group_by):
     ]
 
 
-def _chart(rows):
+def _chart(where_clause, values):
+    query = f"""
+        SELECT
+            COALESCE(NULLIF(requested_item, ''), normalized_item) as label,
+            COUNT(*) as count
+        FROM `tabPOS Unlisted Item Demand`
+        WHERE {where_clause}
+        GROUP BY COALESCE(NULLIF(requested_item, ''), normalized_item)
+        ORDER BY count DESC
+        LIMIT 10
+    """
+    rows = frappe.db.sql(query, values, as_dict=True)
     if not rows:
-        return None
-
-    counts = {}
-    for row in rows:
-        label = row.requested_item or row.normalized_item
-        counts[label] = counts.get(label, 0) + 1
-
-    top = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:10]
-    if not top:
         return None
 
     return {
         "data": {
-            "labels": [label for label, _count in top],
-            "datasets": [{"name": _("Times Asked"), "values": [count for _label, count in top]}],
+            "labels": [r.label for r in rows],
+            "datasets": [{"name": _("Times Asked"), "values": [cint(r.count) for r in rows]}],
         },
         "type": "bar",
         "colors": ["#f5a623"],
     }
 
 
-def _summary(rows):
-    distinct = len({row.normalized_item for row in rows if row.normalized_item})
-    still_open = sum(1 for row in rows if row.status == "Open")
+def _summary(where_clause, values):
+    query = f"""
+        SELECT
+            COUNT(*) as requests,
+            COUNT(DISTINCT NULLIF(normalized_item, '')) as distinct_items,
+            COALESCE(SUM(qty), 0) as qty,
+            COALESCE(SUM(estimated_value), 0) as estimated_value,
+            COALESCE(SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END), 0) as still_open
+        FROM `tabPOS Unlisted Item Demand`
+        WHERE {where_clause}
+    """
+    res = frappe.db.sql(query, values, as_dict=True)
+    if not res:
+        return []
 
+    r = res[0]
     return [
-        {"label": _("Requests"), "value": len(rows), "datatype": "Int", "indicator": "Orange"},
-        {"label": _("Distinct Items"), "value": distinct, "datatype": "Int"},
-        {"label": _("Qty Asked For"), "value": sum(flt(row.qty) for row in rows), "datatype": "Float"},
+        {"label": _("Requests"), "value": cint(r.requests), "datatype": "Int", "indicator": "Orange"},
+        {"label": _("Distinct Items"), "value": cint(r.distinct_items), "datatype": "Int"},
+        {"label": _("Qty Asked For"), "value": flt(r.qty), "datatype": "Float"},
         {
             "label": _("Est. Value"),
-            "value": sum(flt(row.estimated_value) for row in rows),
+            "value": flt(r.estimated_value),
             "datatype": "Currency",
         },
-        {"label": _("Still Open"), "value": still_open, "datatype": "Int", "indicator": "Red"},
+        {"label": _("Still Open"), "value": cint(r.still_open), "datatype": "Int", "indicator": "Red"},
     ]
