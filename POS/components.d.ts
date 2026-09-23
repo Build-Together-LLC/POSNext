@@ -36,6 +36,8 @@ declare module 'vue' {
     NumberField: typeof import('./src/components/settings/NumberField.vue')['default']
     OffersDialog: typeof import('./src/components/sale/OffersDialog.vue')['default']
     OfflineInvoicesDialog: typeof import('./src/components/sale/OfflineInvoicesDialog.vue')['default']
+    OrderLossConfirmDialog: typeof import('./src/components/sale/OrderLossConfirmDialog.vue')['default']
+    OrderLossDialog: typeof import('./src/components/sale/OrderLossDialog.vue')['default']
     PartialPayments: typeof import('./src/components/partials/PartialPayments.vue')['default']
     PaymentDialog: typeof import('./src/components/sale/PaymentDialog.vue')['default']
     PhoneInput: typeof import('./src/components/common/PhoneInput.vue')['default']
@@ -53,6 +55,7 @@ declare module 'vue' {
     StatusBadge: typeof import('./src/components/common/StatusBadge.vue')['default']
     Toast: typeof import('./src/components/common/Toast.vue')['default']
     TranslatedHTML: typeof import('./src/components/common/TranslatedHTML.vue')['default']
+    UnlistedItemDialog: typeof import('./src/components/sale/UnlistedItemDialog.vue')['default']
     UserMenu: typeof import('./src/components/common/UserMenu.vue')['default']
     WarehouseAvailabilityDialog: typeof import('./src/components/sale/WarehouseAvailabilityDialog.vue')['default']
   }

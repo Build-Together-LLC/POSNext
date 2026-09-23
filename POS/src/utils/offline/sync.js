@@ -110,6 +110,8 @@ export const syncOfflineInvoices = async () => {
 	let successCount = 0
 	let failedCount = 0
 	const errors = []
+	// (session, invoice) pairs to settle once the loss rows are up as well.
+	const syncedSessions = []
 
 	for (const invoice of pendingInvoices) {
 		try {
@@ -143,18 +145,34 @@ export const syncOfflineInvoices = async () => {
 				}))
 			}
 
+			// The session this cart recorded its lost demand under. Sent so the
+			// server can settle those rows against the sale, and remembered here
+			// in case the loss rows themselves have not been flushed yet.
+			const orderLossSession = invoiceData.order_loss_session || null
+			delete invoiceData.order_loss_session
+
 			// Submit invoice to server
 			// The API expects 'data' parameter with nested 'invoice' and 'data' keys
 			const response = await call("pos_next.api.invoices.submit_invoice", {
 				data: JSON.stringify({
 					invoice: invoiceData,
-					data: {},
+					data: orderLossSession
+						? { order_loss_session: orderLossSession }
+						: {},
 				}),
 			})
 
 			if (response.message || response.name) {
 				// Mark as synced
 				await db.invoice_queue.update(invoice.id, { synced: true })
+
+				if (orderLossSession) {
+					syncedSessions.push({
+						session: orderLossSession,
+						invoice: response.name || response.message,
+					})
+				}
+
 				successCount++
 				console.log(
 					`Invoice ${invoice.id} synced successfully as ${response.name || response.message}`,
@@ -193,7 +211,146 @@ export const syncOfflineInvoices = async () => {
 		.filter((item) => item.synced === true && item.timestamp < weekAgo)
 		.delete()
 
+	// The sale reached the server before the demand it fell short of, so the
+	// reconcile that ran on submit found nothing to settle. Push the loss rows
+	// up and run it again - it is idempotent, so the repeat costs nothing.
+	if (syncedSessions.length > 0) {
+		await syncOfflineOrderLosses()
+
+		for (const { session, invoice } of syncedSessions) {
+			try {
+				await call("pos_next.api.order_loss.reconcile_invoice", {
+					sales_invoice: invoice,
+					cart_session_id: session,
+				})
+			} catch (error) {
+				console.warn("Could not settle lost demand for", invoice, error)
+			}
+		}
+	}
+
 	return { success: successCount, failed: failedCount, errors }
+}
+
+// Hold lost demand on the device until the connection is back.
+//
+// Keyed on the idempotency key, so a shortfall that is recorded again before
+// the queue drains overwrites its own row rather than adding a second one -
+// the same merge the server does.
+export const saveOfflineOrderLosses = async (
+	losses,
+	{ pos_profile, cart_session_id, pos_opening_shift, customer },
+) => {
+	if (!losses || losses.length === 0) return true
+
+	try {
+		const now = Date.now()
+
+		const rows = losses.map((loss) => ({
+			...JSON.parse(JSON.stringify(loss)),
+			idempotency_key: [
+				cart_session_id,
+				loss.item_code,
+				loss.uom || "",
+				loss.warehouse || "",
+				loss.batch_no || "",
+			].join("::"),
+			pos_profile,
+			cart_session_id,
+			pos_opening_shift: pos_opening_shift || null,
+			customer: customer || null,
+			timestamp: now,
+			synced: false,
+			retry_count: 0,
+		}))
+
+		// Keep the real time of the shortfall: this may not reach the server for
+		// days, and "when the customer asked" is the whole point of the record.
+		for (const row of rows) {
+			if (!row.posting_date) {
+				const at = new Date()
+				row.posting_date = at.toISOString().slice(0, 10)
+				row.posting_time = at.toTimeString().slice(0, 8)
+			}
+		}
+
+		await db.order_loss_queue.bulkPut(rows)
+		return true
+	} catch (error) {
+		console.error("Error queueing lost demand:", error)
+		return false
+	}
+}
+
+export const getOfflineOrderLossCount = async () => {
+	try {
+		return await db.order_loss_queue.filter((row) => row.synced === false).count()
+	} catch (error) {
+		console.error("Error counting queued lost demand:", error)
+		return 0
+	}
+}
+
+// Push queued lost demand up, one request per cart.
+export const syncOfflineOrderLosses = async () => {
+	if (isOffline()) return { success: 0, failed: 0 }
+
+	let rows = []
+	try {
+		rows = await db.order_loss_queue.filter((row) => row.synced === false).toArray()
+	} catch (error) {
+		console.error("Error reading queued lost demand:", error)
+		return { success: 0, failed: 0 }
+	}
+
+	if (rows.length === 0) return { success: 0, failed: 0 }
+
+	const carts = new Map()
+	for (const row of rows) {
+		const key = `${row.pos_profile}::${row.cart_session_id}`
+		if (!carts.has(key)) carts.set(key, [])
+		carts.get(key).push(row)
+	}
+
+	let success = 0
+	let failed = 0
+
+	for (const cart of carts.values()) {
+		const { pos_profile, cart_session_id, pos_opening_shift, customer } = cart[0]
+
+		try {
+			await call("pos_next.api.order_loss.record_losses", {
+				losses: JSON.stringify(cart),
+				pos_profile,
+				cart_session_id,
+				pos_opening_shift: pos_opening_shift || null,
+				customer: customer || null,
+			})
+
+			for (const row of cart) {
+				await db.order_loss_queue.update(row.idempotency_key, { synced: true })
+			}
+			success += cart.length
+		} catch (error) {
+			console.error("Error syncing lost demand:", error)
+			failed += cart.length
+
+			for (const row of cart) {
+				await db.order_loss_queue.update(row.idempotency_key, {
+					retry_count: (row.retry_count || 0) + 1,
+					sync_failed: (row.retry_count || 0) >= 3,
+					error: error.message,
+				})
+			}
+		}
+	}
+
+	const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+	await db.order_loss_queue
+		.filter((row) => row.synced === true && row.timestamp < weekAgo)
+		.delete()
+
+	return { success, failed }
 }
 
 // Delete offline invoice
