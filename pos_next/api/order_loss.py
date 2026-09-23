@@ -136,35 +136,6 @@ def _item_prices(item_codes, price_list, currency=None):
     return prices
 
 
-def _fallback_rate(item_code, uom, price_list, currency):
-    """Price an item the cart never priced.
-
-    The zero-stock case reaches us with no rate at all: the item was refused at
-    the tile, so it never became a cart line with a price on it. Without this
-    the loss would be counted in quantity but valued at nothing.
-    """
-    if not (item_code and price_list):
-        return 0
-
-    filters = {"item_code": item_code, "price_list": price_list, "selling": 1}
-    if currency:
-        filters["currency"] = currency
-
-    rate = frappe.db.get_value(
-        "Item Price", dict(filters, uom=uom), "price_list_rate"
-    ) if uom else None
-
-    if not rate:
-        rate = frappe.db.get_value("Item Price", filters, "price_list_rate")
-
-    return flt(rate)
-
-
-# ==========================================
-# Recording
-# ==========================================
-
-
 def _sanitise(
     entry,
     ctx,
@@ -216,10 +187,10 @@ def _sanitise(
     rate = flt(entry.get("rate"))
 
     if not rate:
-        if prices is not None:
-            rate = prices.get((item_code, uom)) or prices.get(item_code) or 0
-        if not rate:
-            rate = _fallback_rate(item_code, uom, ctx.get("selling_price_list"), ctx.get("currency"))
+        # _item_prices has already read every Item Price row these items have, on
+        # the same filters, so a miss here means there is no row to find.
+        prices = prices or {}
+        rate = flt(prices.get((item_code, uom)) or prices.get(item_code) or 0)
 
     row = {
         "doctype": DOCTYPE,
