@@ -873,6 +873,23 @@ def submit_invoice(invoice=None, data=None):
             # Re-raise the original submission error
             raise submit_error
 
+        # Settle what this cart could not sell against the sale that came out of
+        # it. Only now the invoice has actually committed - the failure branch
+        # above deletes it, and a loss row pointing at a deleted invoice would be
+        # worse than no link at all. Never allowed to fail a banked sale.
+        order_loss_session = data.get("order_loss_session") or invoice.get(
+            "order_loss_session"
+        )
+        if order_loss_session:
+            try:
+                from pos_next.api.order_loss import reconcile_invoice
+
+                reconcile_invoice(invoice_doc.name, order_loss_session)
+            except Exception:
+                frappe.log_error(
+                    frappe.get_traceback(), "POS Order Loss Reconcile Error"
+                )
+
         # Handle credit redemption after successful submission
         customer_credit_dict = data.get("customer_credit_dict") or invoice.get("customer_credit_dict")
         redeemed_customer_credit = data.get("redeemed_customer_credit") or invoice.get("redeemed_customer_credit")

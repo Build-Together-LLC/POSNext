@@ -967,6 +967,7 @@
  */
 import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSOffersStore } from "@/stores/posOffers"
+import { usePOSOrderLossStore } from "@/stores/orderLoss"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useStockStore } from "@/stores/stock"
 import { useToast } from "@/composables/useToast"
@@ -988,6 +989,7 @@ const cartStore = usePOSCartStore()      // Pinia store for cart state managemen
 const offersStore = usePOSOffersStore()  // Pinia store for offers/promotions
 const settingsStore = usePOSSettingsStore()
 const stockStore = useStockStore()
+const orderLossStore = usePOSOrderLossStore()
 const { showError, showWarning } = useToast()
 const { formatQuantity } = useFormatters() // Quantity formatting utilities
 
@@ -1811,11 +1813,26 @@ function getItemAvailableStock(item) {
 	return serverStock - reservedQty
 }
 
+/**
+ * Offer a refused quantity up as lost demand, without ever getting in the way.
+ *
+ * `available` is the quantity the line could still reach, so the cashier is
+ * asked about the gap between that and what was actually wanted.
+ */
+function captureShortfall(item, requestedQty, availableQty, source) {
+	try {
+		orderLossStore.recordShortfall({ item, requestedQty, availableQty, source })
+	} catch (error) {
+		console.warn("Loss of order: could not capture shortfall", error)
+	}
+}
+
 function incrementQuantity(item) {
 	const isStockItem = item.is_stock_item !== false
 	if (isStockItem && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
 		const availableStock = getItemAvailableStock(item)
 		if (availableStock <= 0) {
+			captureShortfall(item, item.quantity + getSmartStep(item.quantity), item.quantity, "Qty Increment")
 			showError(item.is_bundle
 				? __('"{0}" cannot be incremented. Bundle quantity reaches 0.', [item.item_name])
 				: __('"{0}" cannot be incremented. Quantity reaches 0.', [item.item_name]))
@@ -1861,6 +1878,9 @@ function updateQuantity(item, value) {
 			const availableStock = getItemAvailableStock(item)
 			const maxAvailable = item.quantity + (availableStock || 0)
 			if (qty > maxAvailable) {
+				// The number the cashier typed is what the customer asked for; the
+				// line is about to be clamped down to what the shelf can cover.
+				captureShortfall(item, qty, maxAvailable, "Qty Update")
 				showError(__('Cannot set quantity to {0} for "{1}". Only {2} available in stock.', [qty, item.item_name, Math.max(0, Math.floor(maxAvailable))]))
 				if (maxAvailable > 0) {
 					emit("update-quantity", lineRef(item), Math.floor(maxAvailable), item.uom)

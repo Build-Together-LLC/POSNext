@@ -51,6 +51,26 @@
 						</span>
 					</button>
 					<button
+						v-if="posSettingsStore.trackOrderLoss"
+						@click="handleRecordUnlisted('')"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-orange-50 flex items-center gap-3 transition-colors"
+					>
+						<svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0l-7.1 12.25A2 2 0 005 19z"/>
+						</svg>
+						<span>{{ __('Item We Do Not Carry') }}</span>
+					</button>
+					<button
+						v-if="posSettingsStore.trackOrderLoss"
+						@click="uiStore.showOrderLossDialog = true"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-orange-50 flex items-center gap-3 transition-colors"
+					>
+						<svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/>
+						</svg>
+						<span>{{ __('Loss of Order') }}</span>
+					</button>
+					<button
 						@click="uiStore.showHistoryDialog = true"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 flex items-center gap-3 transition-colors"
 					>
@@ -170,6 +190,7 @@
 						:cart-items="cartStore.invoiceItems"
 						:currency="shiftStore.profileCurrency"
 						@item-selected="handleItemSelected"
+						@record-unlisted="handleRecordUnlisted"
 					/>
 				</div>
 			</keep-alive>
@@ -379,6 +400,28 @@
 			:warehouse="shiftStore.profileWarehouse"
 			@batch-serial-selected="handleBatchSerialSelected"
 		/>
+
+		<!-- Demand for something the catalogue does not carry at all. -->
+		<UnlistedItemDialog
+			v-model="uiStore.showUnlistedItemDialog"
+			:pos-profile="shiftStore.profileName"
+			:pos-opening-shift="cartStore.posOpeningShift"
+			:customer="cartStore.customer"
+			:initial-text="unlistedItemText"
+		/>
+
+		<!-- What the till was asked for and could not sell, for the shift. -->
+		<OrderLossDialog
+			v-model="uiStore.showOrderLossDialog"
+			:pos-profile="shiftStore.profileName"
+			:pos-opening-shift="cartStore.posOpeningShift"
+			:currency="shiftStore.profileCurrency"
+		/>
+
+		<!-- Confirms a shortfall before it is recorded as lost demand. Reads the
+		     shortfall queue straight off the store, so the guards that detect one
+		     stay a single line. -->
+		<OrderLossConfirmDialog />
 
 		<!-- Generic Item Selection Dialog -->
 		<ItemSelectionDialog
@@ -702,6 +745,9 @@ import InvoiceHistoryDialog from "@/components/sale/InvoiceHistoryDialog.vue"
 import ItemSelectionDialog from "@/components/sale/ItemSelectionDialog.vue"
 import ItemsSelector from "@/components/sale/ItemsSelector.vue"
 import OffersDialog from "@/components/sale/OffersDialog.vue"
+import OrderLossConfirmDialog from "@/components/sale/OrderLossConfirmDialog.vue"
+import OrderLossDialog from "@/components/sale/OrderLossDialog.vue"
+import UnlistedItemDialog from "@/components/sale/UnlistedItemDialog.vue"
 import OfflineInvoicesDialog from "@/components/sale/OfflineInvoicesDialog.vue"
 import PaymentDialog from "@/components/sale/PaymentDialog.vue"
 import PromotionManagement from "@/components/sale/PromotionManagement.vue"
@@ -727,6 +773,7 @@ import { useItemSearchStore } from "@/stores/itemSearch"
 import { useStockStore } from "@/stores/stock"
 // Pinia Stores
 import { usePOSCartStore } from "@/stores/posCart"
+import { usePOSOrderLossStore } from "@/stores/orderLoss"
 import { usePOSDraftsStore } from "@/stores/posDrafts"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { usePOSShiftStore } from "@/stores/posShift"
@@ -740,6 +787,9 @@ const shiftStore = usePOSShiftStore()
 const uiStore = usePOSUIStore()
 const offlineStore = usePOSSyncStore()
 const draftsStore = usePOSDraftsStore()
+// Prefill for the unlisted-item form.
+const unlistedItemText = ref("")
+const orderLossStore = usePOSOrderLossStore()
 const posSettingsStore = usePOSSettingsStore()
 const itemStore = useItemSearchStore()
 const stockStore = useStockStore()
@@ -1599,6 +1649,10 @@ async function handlePaymentCompleted(paymentData) {
 			// renders it while the sale is still queued.
 			invoiceData.grand_total = cartStore.grandTotal
 
+			// Carried so this sale can still be settled against the demand it fell
+			// short of, whenever the queue finally drains.
+			invoiceData.order_loss_session = orderLossStore.sessionId
+
 			await offlineStore.saveInvoiceOffline(invoiceData)
 			uiStore.showSuccess(`OFFLINE-${Date.now()}`, cartStore.grandTotal, paymentData.paid_amount)
 			uiStore.showPaymentDialog = false
@@ -1847,6 +1901,11 @@ async function handleLoadDraft(draft) {
 		cartStore.heldInvoiceName = draftData.invoice_name || null
 		// Version this till is working from; a save built on a stale one is refused.
 		cartStore.heldInvoiceModified = draftData.modified || null
+		// Losses recorded before this ticket was held and after it is resumed are
+		// the same customer's, so they share one session and settle together.
+		if (draftData.invoice_name) {
+			orderLossStore.bindToDraft(draftData.invoice_name)
+		}
 		cartStore.additionalDiscount = draftData.additional_discount || 0
 		cartStore.couponCode = draftData.coupon_code || null
 
@@ -1867,6 +1926,13 @@ async function handleLoadDraft(draft) {
 	} catch (error) {
 		log.error("Error loading draft:", error)
 	}
+}
+
+// Opens the "we do not carry this" form, carrying over whatever the cashier had
+// typed in the search box so they do not type it twice.
+function handleRecordUnlisted(searchTerm) {
+	unlistedItemText.value = typeof searchTerm === "string" ? searchTerm : ""
+	uiStore.showUnlistedItemDialog = true
 }
 
 function handleReturnCreated(returnInvoice) {

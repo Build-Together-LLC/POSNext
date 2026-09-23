@@ -1,0 +1,464 @@
+{
+ "actions": [],
+ "autoname": "POSA-OL-.YY.-.#######",
+ "creation": "2026-09-12 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "item_name",
+  "item_group",
+  "brand",
+  "column_break_item",
+  "uom",
+  "stock_uom",
+  "conversion_factor",
+  "batch_no",
+  "serial_no",
+  "section_break_context",
+  "company",
+  "warehouse",
+  "customer",
+  "column_break_context",
+  "pos_profile",
+  "pos_opening_shift",
+  "cashier",
+  "section_break_timing",
+  "posting_date",
+  "posting_time",
+  "section_break_qty",
+  "demanded_qty",
+  "last_demanded_qty",
+  "available_qty",
+  "sold_qty",
+  "lost_qty",
+  "column_break_qty",
+  "demanded_stock_qty",
+  "sold_stock_qty",
+  "lost_stock_qty",
+  "fill_rate",
+  "section_break_value",
+  "currency",
+  "rate",
+  "column_break_value",
+  "lost_value",
+  "section_break_class",
+  "reason",
+  "loss_type",
+  "column_break_class",
+  "source",
+  "reason_details",
+  "section_break_link",
+  "sales_invoice",
+  "cart_session_id",
+  "column_break_link",
+  "idempotency_key",
+  "section_break_admin",
+  "is_void",
+  "void_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Item Code",
+   "options": "Item",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "item_code.item_name",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "item_code.item_group",
+   "fieldname": "item_group",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Item Group",
+   "options": "Item Group",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "item_code.brand",
+   "fieldname": "brand",
+   "fieldtype": "Link",
+   "label": "Brand",
+   "options": "Brand",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_item",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "label": "UOM",
+   "options": "UOM",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "item_code.stock_uom",
+   "fieldname": "stock_uom",
+   "fieldtype": "Link",
+   "label": "Stock UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "description": "Stock UOM per sold UOM, so quantities in different UOMs can be totalled",
+   "fieldname": "conversion_factor",
+   "fieldtype": "Float",
+   "label": "Conversion Factor",
+   "precision": "9",
+   "read_only": 1
+  },
+  {
+   "description": "Reserved for batch/serial shortfalls, which the POS stock guards do not detect yet",
+   "fieldname": "batch_no",
+   "fieldtype": "Link",
+   "label": "Batch No",
+   "options": "Batch"
+  },
+  {
+   "fieldname": "serial_no",
+   "fieldtype": "Small Text",
+   "label": "Serial No"
+  },
+  {
+   "fieldname": "section_break_context",
+   "fieldtype": "Section Break",
+   "label": "Context"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Warehouse",
+   "options": "Warehouse",
+   "reqd": 1
+  },
+  {
+   "description": "Blank for a walk-in with no customer selected; filled in from the invoice if the sale completes",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "column_break_context",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pos_profile",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "POS Profile",
+   "options": "POS Profile",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "pos_opening_shift",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "POS Opening Shift",
+   "options": "POS Opening Shift"
+  },
+  {
+   "fieldname": "cashier",
+   "fieldtype": "Link",
+   "label": "Cashier",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_timing",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "Today",
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Posting Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "posting_time",
+   "fieldtype": "Time",
+   "label": "Posting Time",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_qty",
+   "fieldtype": "Section Break",
+   "label": "Demand vs Actual"
+  },
+  {
+   "description": "The largest quantity the customer asked for during this sale",
+   "fieldname": "demanded_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Demanded Qty",
+   "precision": "4",
+   "reqd": 1
+  },
+  {
+   "description": "The most recent ask. Far below Demanded Qty usually means a mistyped quantity.",
+   "fieldname": "last_demanded_qty",
+   "fieldtype": "Float",
+   "label": "Last Demanded Qty",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "description": "What the till saw as available when the sale was refused",
+   "fieldname": "available_qty",
+   "fieldtype": "Float",
+   "label": "Available Qty",
+   "precision": "4"
+  },
+  {
+   "default": "0",
+   "fieldname": "sold_qty",
+   "fieldtype": "Float",
+   "label": "Sold Qty",
+   "precision": "4"
+  },
+  {
+   "fieldname": "lost_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Lost Qty",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_qty",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "demanded_stock_qty",
+   "fieldtype": "Float",
+   "label": "Demanded Qty (Stock UOM)",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sold_stock_qty",
+   "fieldtype": "Float",
+   "label": "Sold Qty (Stock UOM)",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lost_stock_qty",
+   "fieldtype": "Float",
+   "label": "Lost Qty (Stock UOM)",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "fill_rate",
+   "fieldtype": "Percent",
+   "label": "Fill Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_value",
+   "fieldtype": "Section Break",
+   "label": "Value"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rate",
+   "fieldtype": "Currency",
+   "label": "Rate",
+   "options": "currency"
+  },
+  {
+   "fieldname": "column_break_value",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "lost_value",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Lost Value",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_class",
+   "fieldtype": "Section Break",
+   "label": "Classification"
+  },
+  {
+   "default": "Insufficient Stock",
+   "fieldname": "reason",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Reason",
+   "options": "Insufficient Stock\nOut of Stock\nBatch/Serial Unavailable\nOther",
+   "reqd": 1
+  },
+  {
+   "fieldname": "loss_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Loss Type",
+   "options": "Partial\nFull",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_class",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Which till action the shortfall was detected in",
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "label": "Source",
+   "options": "Cart Add\nQty Update\nQty Increment\nItem Tile\nBarcode Scan\nSelection Dialog\nManual",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason_details",
+   "fieldtype": "Small Text",
+   "label": "Reason Details"
+  },
+  {
+   "fieldname": "section_break_link",
+   "fieldtype": "Section Break",
+   "label": "Linkage"
+  },
+  {
+   "description": "Empty when nothing was sold at all",
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Sales Invoice",
+   "no_copy": 1,
+   "options": "Sales Invoice",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "cart_session_id",
+   "fieldtype": "Data",
+   "label": "Cart Session ID",
+   "no_copy": 1,
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_link",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "One row per item per sale. The uniqueness of this key is what stops a repeated scan creating a second row.",
+   "fieldname": "idempotency_key",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Idempotency Key",
+   "length": 255,
+   "no_copy": 1,
+   "read_only": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "section_break_admin",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "0",
+   "description": "Retires a row that does not reflect real demand, without destroying it",
+   "fieldname": "is_void",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Void"
+  },
+  {
+   "depends_on": "eval:doc.is_void",
+   "fieldname": "void_reason",
+   "fieldtype": "Small Text",
+   "label": "Void Reason"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Order Loss",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales User"
+  }
+ ],
+ "row_format": "Dynamic",
+ "search_fields": "item_code,pos_profile,posting_date",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "item_name",
+ "track_changes": 1
+}

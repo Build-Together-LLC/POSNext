@@ -19,6 +19,7 @@ import {
 	cacheCustomersFromServer,
 	cachePaymentMethodsFromServer,
 	syncOfflineInvoices,
+	syncOfflineOrderLosses,
 } from "@/utils/offline"
 import { logger } from "@/utils/logger"
 import { offlineState } from "@/utils/offline/offlineState"
@@ -119,6 +120,14 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		isSyncing.value = true
 		try {
 			const result = await syncOfflineInvoices()
+
+			// Lost demand queued on this device goes up in the same pass. Sales
+			// first: syncOfflineInvoices settles the two against each other once
+			// both are on the server.
+			await syncOfflineOrderLosses().catch((error) =>
+				log.error("Failed to sync lost demand", error),
+			)
+
 			await updatePendingCount()
 			return result
 		} catch (error) {

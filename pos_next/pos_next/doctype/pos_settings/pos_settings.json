@@ -64,7 +64,10 @@
   "auto_select_single_batch",
   "section_break_misc",
   "input_qty",
-  "allow_negative_stock"
+  "allow_negative_stock",
+  "section_break_order_loss",
+  "track_order_loss",
+  "order_loss_max_demand_qty"
  ],
  "fields": [
   {
@@ -476,6 +479,28 @@
    "fieldname": "allow_server_side_draft_invoice",
    "fieldtype": "Check",
    "label": "Allow Server Side Draft Invoice"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_order_loss",
+   "fieldtype": "Section Break",
+   "label": "Loss of Order"
+  },
+  {
+   "default": "0",
+   "description": "Record what customers asked for but could not be sold, when the till refuses or clamps a quantity for lack of stock. Has no effect while Allow Negative Stock is on, because nothing is ever refused.",
+   "fieldname": "track_order_loss",
+   "fieldtype": "Check",
+   "label": "Track Loss of Order"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.track_order_loss",
+   "description": "Ignore recorded demand above this quantity (0 = no limit). Guards against a mistyped quantity.",
+   "fieldname": "order_loss_max_demand_qty",
+   "fieldtype": "Float",
+   "label": "Ignore Demand Above Qty",
+   "precision": "4"
   }
  ],
  "index_web_pages_for_search": 1,

@@ -1,4 +1,5 @@
 import { useInvoice } from "@/composables/useInvoice"
+import { usePOSOrderLossStore } from "@/stores/orderLoss"
 import { usePOSOffersStore } from "@/stores/posOffers"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useStockStore } from "@/stores/stock"
@@ -52,6 +53,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const offersStore = usePOSOffersStore()
 	const settingsStore = usePOSSettingsStore()
 	const stockStore = useStockStore()
+	const orderLossStore = usePOSOrderLossStore()
 
 	// Additional cart state
 	const pendingItem = ref(null)
@@ -79,6 +81,25 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const hasCustomer = computed(() => !!customer.value)
 
 	// Actions
+	/**
+	 * Offer a refused quantity up as lost demand.
+	 *
+	 * Deliberately swallows everything: recording what could not be sold must
+	 * never be able to stop a sale that can be.
+	 */
+	function captureShortfall(item, requestedQty, availableQty, source) {
+		try {
+			orderLossStore.recordShortfall({
+				item,
+				requestedQty,
+				availableQty,
+				source,
+			})
+		} catch (error) {
+			console.warn("Loss of order: could not capture shortfall", error)
+		}
+	}
+
 	// `options` goes straight to the invoice: `rate` bills this line at a chosen
 	// MRP, `forceNewLine` keeps it apart from a line already at that rate.
 	function addItem(item, qty = 1, autoAdd = false, currentProfile = null, options = {}) {
@@ -101,12 +122,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			if (settingsStore.shouldEnforceStockValidation()) {
 				if (Math.floor(availableQty) <= 0) {
+					// The customer asked for something the shelf cannot cover at
+					// all: no cart line, no invoice, and until now no trace. Ask
+					// before throwing - the refusal itself is unchanged.
+					captureShortfall(item, qty, availableQty, "Cart Add")
+
 					const itemType = item.is_bundle ? "Bundle" : "Item"
 					throw new Error(
 						`"${item.item_name}" cannot be added to cart. ${itemType} quantity reaches 0.`
 					)
 				}
 				if (qty > availableQty) {
+					captureShortfall(item, qty, availableQty, "Cart Add")
+
 					const itemType = item.is_bundle ? "Bundle" : "Item"
 					throw new Error(
 						`Not enough stock for "${item.item_name}". Requested ${qty}, but only ${Math.max(0, Math.floor(availableQty))} available.`
@@ -149,6 +177,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		dismissedOfferCodes.value = new Set()
 		currentDraftId.value = null
 		lastPricedCartSignature = ""
+
+		// This sale is over. Whatever it failed to sell is written now, under the
+		// session that just ended, before the next customer's starts.
+		orderLossStore.startNewSession().catch(() => {})
 	}
 
 	function setCustomer(selectedCustomer) {

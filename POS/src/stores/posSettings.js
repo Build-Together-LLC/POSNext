@@ -59,6 +59,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Multiple MRP
 		allow_multiple_mrp: 0,
 		mrp_price_list: null,
+		// Loss of Order
+		track_order_loss: 0,
+		order_loss_max_demand_qty: 0,
 		filter_batches_by_pos_warehouse: 1,
 		auto_select_single_batch: 1,
 		// Sales Persons
@@ -201,6 +204,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const allowMultipleMrp = computed(() =>
 		Boolean(settings.value.allow_multiple_mrp),
 	)
+	// Computed - Loss of Order
+	const trackOrderLoss = computed(() =>
+		Boolean(settings.value.track_order_loss),
+	)
+
 	const filterBatchesByPosWarehouse = computed(() =>
 		Boolean(settings.value.filter_batches_by_pos_warehouse),
 	)
@@ -331,6 +339,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_negative_stock: 0,
 			allow_multiple_mrp: 0,
 			mrp_price_list: null,
+			track_order_loss: 0,
+			order_loss_max_demand_qty: 0,
 			enable_sales_persons: "Disabled",
 		}
 		isLoaded.value = false
@@ -375,6 +385,31 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	 */
 	function allowsMultipleMrp() {
 		return isEnabled.value && Boolean(settings.value.allow_multiple_mrp)
+	}
+
+	/**
+	 * Check if unmet demand should be recorded when the till comes up short.
+	 *
+	 * Deliberately tied to stock enforcement: while negative stock is allowed
+	 * nothing is ever refused, the customer gets the full quantity, and there is
+	 * no lost demand to record.
+	 *
+	 * @returns {boolean}
+	 */
+	function shouldRecordOrderLoss() {
+		return (
+			isEnabled.value &&
+			Boolean(settings.value.track_order_loss) &&
+			shouldEnforceStockValidation()
+		)
+	}
+
+	/**
+	 * Demand above this is treated as a mistyped quantity and not recorded.
+	 * @returns {number} - 0 means no limit
+	 */
+	function orderLossMaxDemandQty() {
+		return Number(settings.value.order_loss_max_demand_qty) || 0
 	}
 
 	/**
@@ -487,5 +522,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		isNegativeStockAllowed,
 		shouldEnforceStockValidation,
 		allowsMultipleMrp,
+		trackOrderLoss,
+		shouldRecordOrderLoss,
+		orderLossMaxDemandQty,
 	}
 })
