@@ -51,7 +51,7 @@
 									class="w-6 h-auto rounded-sm"
 									@error="handleFlagError"
 								/>
-								<span class="flex-1 text-start">{{ selectedCountryCode || "+20" }}</span>
+								<span class="flex-1 text-start">{{ selectedCountryCode || "+91" }}</span>
 								<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
 								</svg>
@@ -143,12 +143,12 @@
 				<!-- Address -->
 				<div class="border-t border-gray-200 pt-5">
 					<h3 class="text-start text-sm font-semibold text-gray-800 mb-3">
-						{{ __("Address") }} <span class="text-red-500">*</span>
+						{{ __("Address") }}
 					</h3>
 					<div class="flex flex-col gap-4">
 						<div>
 							<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-								{{ __("Address Line 1") }} <span class="text-red-500">*</span>
+								{{ __("Address Line 1") }}
 							</label>
 							<Input v-model="addressData.address_line1" type="text" :placeholder="__('Enter address line 1')" />
 						</div>
@@ -161,7 +161,7 @@
 						<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 							<div>
 								<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-									{{ __("City/Town") }} <span class="text-red-500">*</span>
+									{{ __("City/Town") }}
 								</label>
 								<Input v-model="addressData.city" type="text" :placeholder="__('Enter city')" />
 							</div>
@@ -175,7 +175,7 @@
 						<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 							<div>
 								<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-									{{ __("Country") }} <span class="text-red-500">*</span>
+									{{ __("Country") }}
 								</label>
 								<select
 									v-model="addressData.country"
@@ -342,7 +342,7 @@ const show = computed({
 
 const currentCountryCode = computed(() => {
 	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value)
-	return country?.code.toLowerCase() || "eg"
+	return country?.code.toLowerCase() || "in"
 })
 
 const canSubmit = computed(() =>
@@ -350,10 +350,7 @@ const canSubmit = computed(() =>
 		hasPermission.value &&
 		customerData.value.naming_series &&
 		customerData.value.customer_name &&
-		customerData.value.customer_group &&
-		addressData.value.address_line1 &&
-		addressData.value.city &&
-		addressData.value.country
+		customerData.value.customer_group
 	)
 )
 
@@ -393,7 +390,7 @@ const handleClickOutside = (event) => {
 
 const setCountryFromName = (countryName) => {
 	if (!countryName) {
-		selectedCountryCode.value = "+20"
+		selectedCountryCode.value = "+91"
 		return
 	}
 
@@ -404,7 +401,7 @@ const setCountryFromName = (countryName) => {
 		log.info(`Set country code to ${isd} for ${countryName}`)
 	} else {
 		log.warn(`Country "${countryName}" not found`)
-		selectedCountryCode.value = "+20"
+		selectedCountryCode.value = "+91"
 		addressData.value.country = countryName
 	}
 }
@@ -485,11 +482,11 @@ const customerCreationOptionsResource = createResource({
 		customerData.value.customer_group = options.default_customer_group || customerGroups.value[0] || ""
 		customerData.value.naming_series = options.default_naming_series || namingSeries.value[0] || ""
 		customerData.value.territory = options.default_territory || territories.value[0] || ""
-		setCountryFromName(options.default_country || "Egypt")
+		setCountryFromName(options.default_country || "India")
 	},
 	onError: (err) => {
 		log.error("Error loading customer creation options", err)
-		selectedCountryCode.value = "+20"
+		selectedCountryCode.value = "+91"
 	},
 })
 
@@ -500,6 +497,11 @@ const customerCreationOptionsResource = createResource({
 const loadDialogData = async () => {
 	// Lazy load countries (non-blocking)
 	await countriesStore.loadCountries()
+
+	if (!props.posProfile) {
+		checkPermissions()
+		return
+	}
 
 	// Load form options
 	await customerCreationOptionsResource.reload()
@@ -527,15 +529,6 @@ const handleCreate = async () => {
 	}
 	if (!customerData.value.customer_group) {
 		return showError(__("Customer Group is required"))
-	}
-	if (!addressData.value.address_line1) {
-		return showError(__("Address Line 1 is required"))
-	}
-	if (!addressData.value.city) {
-		return showError(__("City/Town is required"))
-	}
-	if (!addressData.value.country) {
-		return showError(__("Country is required"))
 	}
 	await createCustomerResource.submit()
 }
