@@ -67,10 +67,13 @@ def get_pos_settings(pos_profile):
 
 	try:
 		# Get POS Settings linked to this POS Profile
+		from pos_next.api.bootstrap import mrp_setting_fields
+
 		pos_settings = frappe.db.get_value(
 			"POS Settings",
 			{"pos_profile": pos_profile, "enabled": 1},
 			[
+				*mrp_setting_fields(),
 				"enabled",
 				"tax_inclusive",
 				"allow_user_to_edit_additional_discount",
@@ -108,6 +111,8 @@ def get_pos_settings(pos_profile):
 				"decimal_precision": "2",
 				"allow_negative_stock": 0,
 				"enable_sales_persons": "Disabled",
+				"allow_multiple_mrp": 0,
+				"mrp_price_list": None,
 				"track_order_loss": 0,
 				"order_loss_max_demand_qty": 0
 			}
@@ -215,6 +220,22 @@ def get_warehouses(pos_profile):
 		return warehouses
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Warehouses Error")
+		return []
+
+
+@frappe.whitelist()
+def get_selling_price_lists():
+	"""Selling price lists, for the settings screen's MRP source picker."""
+	try:
+		return frappe.get_list(
+			"Price List",
+			filters={"selling": 1, "enabled": 1},
+			fields=["name", "currency"],
+			order_by="name",
+			limit_page_length=0,
+		)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Get Selling Price Lists Error")
 		return []
 
 

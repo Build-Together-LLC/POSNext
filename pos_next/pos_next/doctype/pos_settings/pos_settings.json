@@ -39,6 +39,8 @@
   "section_break_pricing",
   "decimal_precision",
   "tax_inclusive",
+  "allow_multiple_mrp",
+  "mrp_price_list",
   "section_break_customer",
   "allow_customer_purchase_order",
   "allow_duplicate_customer_names",
@@ -298,6 +300,21 @@
    "label": "Tax Inclusive"
   },
   {
+   "default": "0",
+   "description": "Let the same item be billed more than once in one invoice at different MRPs. Each MRP becomes its own line, at its own rate.",
+   "fieldname": "allow_multiple_mrp",
+   "fieldtype": "Check",
+   "label": "Allow Multiple MRP Per Item"
+  },
+  {
+   "depends_on": "eval:doc.allow_multiple_mrp",
+   "description": "Price List the MRP choices are read from. Leave blank to offer the POS Profile's own selling price list.",
+   "fieldname": "mrp_price_list",
+   "fieldtype": "Link",
+   "label": "MRP Price List",
+   "options": "Price List"
+  },
+  {
    "collapsible": 1,
    "fieldname": "section_break_customer",
    "fieldtype": "Section Break",
@@ -488,7 +505,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-01 00:00:00.000000",
+ "modified": "2026-09-16 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

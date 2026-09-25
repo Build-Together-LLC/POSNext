@@ -56,6 +56,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Miscellaneous
 		input_qty: 0,
 		allow_negative_stock: 0,
+		// Multiple MRP
+		allow_multiple_mrp: 0,
+		mrp_price_list: null,
 		// Loss of Order
 		track_order_loss: 0,
 		order_loss_max_demand_qty: 0,
@@ -197,6 +200,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		Boolean(settings.value.allow_negative_stock),
 	)
 
+	// Computed - Multiple MRP
+	const allowMultipleMrp = computed(() =>
+		Boolean(settings.value.allow_multiple_mrp),
+	)
 	// Computed - Loss of Order
 	const trackOrderLoss = computed(() =>
 		Boolean(settings.value.track_order_loss),
@@ -330,6 +337,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_change_posting_date: 0,
 			input_qty: 0,
 			allow_negative_stock: 0,
+			allow_multiple_mrp: 0,
+			mrp_price_list: null,
 			track_order_loss: 0,
 			order_loss_max_demand_qty: 0,
 			enable_sales_persons: "Disabled",
@@ -364,6 +373,18 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	 */
 	function shouldEnforceStockValidation() {
 		return isEnabled.value && !Boolean(settings.value.allow_negative_stock)
+	}
+
+	/**
+	 * Whether one item may be billed at more than one MRP on the same invoice.
+	 *
+	 * Off by default: without it, re-adding an item is meant to raise the
+	 * quantity of the line already in the cart, not start a second one.
+	 *
+	 * @returns {boolean}
+	 */
+	function allowsMultipleMrp() {
+		return isEnabled.value && Boolean(settings.value.allow_multiple_mrp)
 	}
 
 	/**
@@ -457,6 +478,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 
 		// Computed - Pricing & Display
 		decimalPrecision,
+		allowMultipleMrp,
 
 		// Computed - Customer Settings
 		allowCustomerPurchaseOrder,
@@ -499,6 +521,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		validateDiscount,
 		isNegativeStockAllowed,
 		shouldEnforceStockValidation,
+		allowsMultipleMrp,
 		trackOrderLoss,
 		shouldRecordOrderLoss,
 		orderLossMaxDemandQty,

@@ -132,6 +132,19 @@ def get_pos_profile_data(pos_profile):
 	}
 
 
+def mrp_setting_fields():
+	"""The multiple-MRP columns, but only once this app's migration has added them.
+
+	Asking for a column the site does not have yet would fail the whole settings
+	read and drop the profile back to defaults, turning off settings that do exist.
+	"""
+	return [
+		field
+		for field in ("allow_multiple_mrp", "mrp_price_list")
+		if frappe.db.has_column("POS Settings", field)
+	]
+
+
 def get_pos_settings(pos_profile):
 	"""Get POS Settings for a given POS Profile"""
 	if not pos_profile:
@@ -142,6 +155,7 @@ def get_pos_settings(pos_profile):
 			"POS Settings",
 			{"pos_profile": pos_profile, "enabled": 1},
 			[
+				*mrp_setting_fields(),
 				"name",
 				"enabled",
 				"tax_inclusive",
@@ -198,6 +212,8 @@ def get_default_pos_settings():
 		"auto_apply_offers": 0,
 		"require_cart_item_review": 0,
 		"allow_server_side_draft_invoice": 0,
+		"allow_multiple_mrp": 0,
+		"mrp_price_list": None,
 		"track_order_loss": 0,
 		"order_loss_max_demand_qty": 0
 	}

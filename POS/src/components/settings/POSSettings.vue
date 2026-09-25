@@ -312,6 +312,18 @@
 												:label="__('Tax Inclusive')"
 												:description="__('When enabled, displayed prices include tax. When disabled, tax is calculated separately. Changes apply immediately to your cart when you save.')"
 											/>
+											<CheckboxField
+												v-model="settings.allow_multiple_mrp"
+												:label="__('Allow Multiple MRP Per Item')"
+												:description="__('For stock that is on the shelf under more than one printed price. The cashier picks the MRP when adding the item, and can bill the same item again at another one - each MRP becomes its own invoice line, at its own rate.')"
+											/>
+											<SelectField
+												v-if="settings.allow_multiple_mrp"
+												v-model="settings.mrp_price_list"
+												:label="__('MRP Price List')"
+												:options="priceListOptions"
+												:description="__('Where the MRP choices are read from. Leave unset to offer the prices from this profile\'s own selling price list.')"
+											/>
 											<NumberField
 												v-model="settings.max_discount_allowed"
 												:label="__('Max Discount (%)')"
@@ -454,6 +466,8 @@ const activeTab = ref('stock')
 const loading = ref(true)
 const saving = ref(false)
 const warehousesList = ref([])
+// Selling price lists, for choosing where the MRP options are read from.
+const priceListsList = ref([])
 const selectedWarehouse = ref(props.currentWarehouse || "")
 const settings = ref({
 	pos_profile: props.posProfile || "",
@@ -474,6 +488,8 @@ const settings = ref({
 	track_order_loss: 0,
 	order_loss_max_demand_qty: 0,
 	tax_inclusive: 0,
+	allow_multiple_mrp: 0,
+	mrp_price_list: "",
 	auto_apply_offers: 0,
 	require_cart_item_review: 0,
 })
@@ -498,6 +514,10 @@ const warehouseOptions = computed(() => {
 		value: w.name,
 	}))
 })
+
+const priceListOptions = computed(() =>
+	priceListsList.value.map((pl) => ({ label: pl.name, value: pl.name })),
+)
 
 // Dynamic classes using configuration helpers (DRY principle)
 const stockSectionClasses = computed(() => getSectionHeaderClasses("purple"))
@@ -623,6 +643,18 @@ async function loadSettings() {
 
 		// Handle frappe-ui call response format { message: [...] }
 		warehousesList.value = warehousesData?.message || warehousesData || []
+
+		// Price lists back the MRP source picker. A failure here is not worth
+		// failing the screen over: the picker simply has nothing to offer.
+		try {
+			const priceListsData = await call(
+				"pos_next.api.pos_profile.get_selling_price_lists",
+			)
+			priceListsList.value = priceListsData?.message || priceListsData || []
+		} catch (error) {
+			log.error("Error loading price lists:", error)
+			priceListsList.value = []
+		}
 
 		// Load settings
 		settingsResource.reload()

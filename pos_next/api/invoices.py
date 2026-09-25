@@ -1909,7 +1909,7 @@ def search_invoices_for_return(
     invoices_list = frappe.get_list(
         doctype,
         filters=filters,
-        fields=["name"],
+        fields=["*"],
         limit_start=start,
         limit_page_length=page_length,
         order_by="posting_date desc, name desc",
@@ -1926,57 +1926,95 @@ def search_invoices_for_return(
         SELECT
             ret_si.return_against as invoice_name,
             ret_item.item_code,
+            ret_item.sales_invoice_item,
             SUM(ABS(ret_item.qty)) as returned_qty
         FROM `tabSales Invoice` ret_si
         INNER JOIN `tabSales Invoice Item` ret_item ON ret_item.parent = ret_si.name
         WHERE ret_si.return_against IN %s
             AND ret_si.docstatus = 1
             AND ret_si.is_return = 1
-        GROUP BY ret_si.return_against, ret_item.item_code
+        GROUP BY ret_si.return_against, ret_item.item_code, ret_item.sales_invoice_item
     """
 
     returned_qty_results = frappe.db.sql(returned_qty_query, [invoice_names], as_dict=1)
 
-    # Build a map of invoice_name -> {item_code: returned_qty}
-    returned_qty_map = {}
+    # Returns that name the row they came back from are settled against that row.
+    # The rest become a per-item pool, drawn down line by line below - an item can
+    # be on the invoice more than once, one line per MRP it was sold at, and
+    # taking the whole returned quantity off each of them would hide stock that
+    # is still returnable.
+    returned_by_row = {}
+    returned_pool = {}
+    invoices_with_returns = set()
     for row in returned_qty_results:
         inv_name = row["invoice_name"]
-        if inv_name not in returned_qty_map:
-            returned_qty_map[inv_name] = {}
-        returned_qty_map[inv_name][row["item_code"]] = row["returned_qty"]
+        invoices_with_returns.add(inv_name)
+        if row.get("sales_invoice_item"):
+            returned_by_row[row["sales_invoice_item"]] = row["returned_qty"]
+        else:
+            returned_pool.setdefault(inv_name, {})
+            returned_pool[inv_name][row["item_code"]] = (
+                returned_pool[inv_name].get(row["item_code"], 0) + row["returned_qty"]
+            )
+
+    item_doctype = "Sales Invoice Item" if doctype == "Sales Invoice" else f"{doctype} Item"
+    items_by_invoice = {}
+    for item in frappe.get_all(
+        item_doctype,
+        filters={"parent": ["in", invoice_names]},
+        fields=["*"],
+        order_by="parent asc, idx asc",
+        limit_page_length=0,
+    ):
+        items_by_invoice.setdefault(item.parent, []).append(item)
 
     # Process and return results
     data = []
 
     for invoice in invoices_list:
-        invoice_doc = frappe.get_doc(doctype, invoice.name)
-        returned_qty = returned_qty_map.get(invoice.name, {})
+        inv_name = invoice.get("name")
+        invoice_items = items_by_invoice.get(inv_name, [])
+        has_returns = inv_name in invoices_with_returns
 
-        if returned_qty:
+        if has_returns:
             # Filter items with remaining qty
+            pool = dict(returned_pool.get(inv_name) or {})
             filtered_items = []
-            for item in invoice_doc.items:
-                already_returned = returned_qty.get(item.item_code, 0)
-                remaining_qty = item.qty - already_returned
+            for item in invoice_items:
+                already_returned = flt(returned_by_row.get(item.name, 0))
+
+                # Draw the rest from the item's pool, but never more than this
+                # line sold: what is left stays for the item's other lines.
+                unsettled = flt(pool.get(item.item_code, 0))
+                if unsettled > 0:
+                    taken = min(unsettled, max(flt(item.qty) - already_returned, 0))
+                    already_returned += taken
+                    pool[item.item_code] = unsettled - taken
+
+                remaining_qty = flt(item.qty) - already_returned
 
                 if remaining_qty > 0:
-                    new_item = item.as_dict().copy()
+                    new_item = item.as_dict().copy() if hasattr(item, "as_dict") else item.copy()
                     new_item["qty"] = remaining_qty
-                    new_item["amount"] = remaining_qty * item.rate
+                    new_item["amount"] = remaining_qty * flt(item.rate)
                     if item.get("stock_qty"):
                         new_item["stock_qty"] = (
-                            item.stock_qty / item.qty * remaining_qty
+                            flt(item.stock_qty) / flt(item.qty) * remaining_qty
                             if item.qty
                             else remaining_qty
                         )
                     filtered_items.append(frappe._dict(new_item))
 
             if filtered_items:
-                filtered_invoice = frappe.get_doc(doctype, invoice.name)
-                filtered_invoice.items = filtered_items
+                filtered_invoice = frappe._dict(invoice.copy())
+                filtered_invoice["doctype"] = doctype
+                filtered_invoice["items"] = filtered_items
                 data.append(filtered_invoice)
         else:
-            data.append(invoice_doc)
+            invoice_dict = frappe._dict(invoice.copy())
+            invoice_dict["doctype"] = doctype
+            invoice_dict["items"] = invoice_items
+            data.append(invoice_dict)
 
     # Check if there are more results
     has_more = (start + page_length) < total_count
