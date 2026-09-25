@@ -304,7 +304,7 @@
 				</div>
 
 				<!-- Additional Discount Section (Compact) -->
-				<div v-if="canEditAdditionalDiscount" class="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-300 rounded-lg p-2">
+				<div v-if="showAdditionalDiscount" class="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-300 rounded-lg p-2">
 					<div class="flex items-center justify-between mb-1.5">
 						<div class="flex items-center gap-1.5">
 							<div class="w-5 h-5 rounded-full bg-orange-200 flex items-center justify-center">
@@ -320,7 +320,13 @@
 						<button
 							v-if="localAdditionalDiscount > 0"
 							@click="clearAdditionalDiscount"
-							class="text-[10px] text-orange-700 hover:text-orange-900 font-semibold px-1.5 py-0.5 bg-orange-100 hover:bg-orange-200 rounded transition-colors"
+							:disabled="!canEditAdditionalDiscount"
+							:class="[
+								'text-[10px] text-orange-700 font-semibold px-1.5 py-0.5 bg-orange-100 rounded transition-colors',
+								canEditAdditionalDiscount
+									? 'hover:text-orange-900 hover:bg-orange-200'
+									: 'opacity-60 cursor-not-allowed'
+							]"
 						>
 							{{ __('Clear') }}
 						</button>
@@ -330,7 +336,13 @@
 						<select
 							v-model="additionalDiscountType"
 							@change="handleAdditionalDiscountTypeChange"
-							class="w-full px-1.5 py-1.5 text-[11px] font-medium border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-transparent bg-white"
+							:disabled="!canEditAdditionalDiscount"
+							:class="[
+								'w-full px-1.5 py-1.5 text-[11px] font-medium border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-transparent',
+								canEditAdditionalDiscount
+									? 'bg-white'
+									: 'bg-gray-100 text-gray-500 cursor-not-allowed'
+							]"
 						>
 							<option value="percentage">{{ __('% Percent') }}</option>
 							<option value="amount">{{ __('{0} Amount', [currencySymbol]) }}</option>
@@ -346,8 +358,12 @@
 								min="0"
 								:max="additionalDiscountType === 'percentage' ? 100 : subtotal"
 								step="0.01"
+								:readonly="!canEditAdditionalDiscount"
 								:class="[
-									'w-full py-1.5 text-[11px] font-semibold border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-transparent bg-white placeholder-gray-400',
+									'w-full py-1.5 text-[11px] font-semibold border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-transparent placeholder-gray-400',
+									canEditAdditionalDiscount
+										? 'bg-white'
+										: 'bg-gray-100 text-gray-500 cursor-not-allowed',
 									additionalDiscountType === 'amount' ? 'ps-9 pe-2' : 'px-2 pe-6'
 								]"
 							/>
@@ -977,6 +993,7 @@ async function loadPaymentMethods() {
 // Currency symbol for display
 const currencySymbol = computed(() => getCurrencySymbol(props.currency))
 const canEditDiscount = computed(() => userData.hasRole("Price Manager"))
+const showAdditionalDiscount = computed(() => settingsStore.allowAdditionalDiscount)
 const canEditAdditionalDiscount = computed(() =>
 	settingsStore.allowAdditionalDiscount && canEditDiscount.value,
 )
