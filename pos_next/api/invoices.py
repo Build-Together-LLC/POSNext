@@ -405,6 +405,14 @@ def _assert_not_stale(doctype, name, client_modified):
     )
 
 
+CASHIER_PRICING_FIELDS = (
+    "price_list_rate",
+    "rate",
+    "discount_percentage",
+    "discount_amount",
+    "pricing_rules",
+)
+
 # Fields the server fetched from whoever the invoice was last saved for. Frappe
 # refreshes customer_name, tax_id and loyalty_program itself on every save
 # (fetch_from without fetch_if_empty), but these are only ever *filled in* -
@@ -621,8 +629,15 @@ def update_invoice(data):
 
         invoice_doc.disable_rounded_total = disable_rounded
 
+        cashier_pricing = [
+            {field: item.get(field) for field in CASHIER_PRICING_FIELDS}
+            for item in invoice_doc.get("items", [])
+        ]
         # Populate missing fields (company, currency, accounts, etc.)
         invoice_doc.set_missing_values()
+        invoice_doc.ignore_pricing_rule = 1
+        for item, pricing in zip(invoice_doc.get("items", []), cashier_pricing):
+            item.update(pricing)
 
         # Calculate totals and apply discounts (with rounding disabled)
         invoice_doc.calculate_taxes_and_totals()
