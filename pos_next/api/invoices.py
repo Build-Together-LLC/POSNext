@@ -445,6 +445,15 @@ def _get_editable_invoice(doctype, invoice_name, offline_id=None):
     return frappe.get_doc(doctype, invoice_name)
 
 
+CASHIER_PRICING_FIELDS = (
+    "price_list_rate",
+    "rate",
+    "discount_percentage",
+    "discount_amount",
+    "pricing_rules",
+)
+
+
 @frappe.whitelist()
 def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
@@ -611,8 +620,15 @@ def update_invoice(data):
 
         invoice_doc.disable_rounded_total = disable_rounded
 
+        cashier_pricing = [
+            {field: item.get(field) for field in CASHIER_PRICING_FIELDS}
+            for item in invoice_doc.get("items", [])
+        ]
         # Populate missing fields (company, currency, accounts, etc.)
         invoice_doc.set_missing_values()
+        invoice_doc.ignore_pricing_rule = 1
+        for item, pricing in zip(invoice_doc.get("items", []), cashier_pricing):
+            item.update(pricing)
 
         # Calculate totals and apply discounts (with rounding disabled)
         invoice_doc.calculate_taxes_and_totals()
