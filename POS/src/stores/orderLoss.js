@@ -88,8 +88,6 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 	 * to the cart that just ended.
 	 */
 	async function startNewSession() {
-		await flush({ force: true }).catch(() => {})
-
 		sessionId.value = newSessionId()
 		shortfalls.value = new Map()
 		queue.value = []
@@ -97,14 +95,78 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 	}
 
 	/**
-	 * Bind to a held invoice, so rows recorded before the hold and after it is
-	 * resumed belong to the same sale and reconcile together.
+	 * Load existing shortfalls recorded on the server for a cart session.
 	 */
-	function bindToDraft(invoiceName) {
+	async function loadSessionLosses(cartSessionId) {
+		if (!cartSessionId) return
+		try {
+			const cartStore = await getCartStore()
+			const response = await call("pos_next.api.order_loss.get_order_losses", {
+				pos_profile: cartStore.posProfile || null,
+				cart_session_id: cartSessionId,
+			})
+			const rows = Array.isArray(response?.message)
+				? response.message
+				: Array.isArray(response)
+					? response
+					: []
+			for (const row of rows) {
+				const entry = {
+					item_code: row.item_code,
+					item_name: row.item_name,
+					uom: row.uom,
+					warehouse: row.warehouse,
+					batch_no: row.batch_no,
+					conversion_factor: Number(row.conversion_factor) || 1,
+					rate: Number(row.rate) || 0,
+					demanded_qty: Number(row.demanded_qty) || 0,
+					available_qty: Number(row.available_qty) || 0,
+					sold_qty: Number(row.sold_qty) || 0,
+					source: row.source || "Manual",
+					reason: row.reason,
+					_dirty: false,
+					_flushedSoldQty: Number(row.sold_qty) || 0,
+				}
+				shortfalls.value.set(lossKey(entry), entry)
+			}
+			if (rows.length > 0) {
+				shortfalls.value = new Map(shortfalls.value)
+			}
+		} catch (error) {
+			console.warn("Loss of order: could not load existing session losses", error)
+		}
+	}
+
+	/**
+	 * Bind to a held invoice, so rows recorded before the hold and after it is
+	 * resumed belong to the same sale and reconcile together. Also loads
+	 * existing loss records for that invoice from the server into memory.
+	 */
+	async function bindToDraft(invoiceName) {
 		if (!invoiceName) return
 
 		sessionId.value = `ol-inv-${invoiceName}`
 		persistSession(sessionId.value)
+		await loadSessionLosses(sessionId.value)
+	}
+
+	/**
+	 * Bind to a local/cached draft session.
+	 */
+	async function bindToLocalDraft(cartSessionId, savedLosses = []) {
+		if (!cartSessionId) return
+
+		sessionId.value = cartSessionId
+		persistSession(sessionId.value)
+
+		if (Array.isArray(savedLosses) && savedLosses.length > 0) {
+			for (const entry of savedLosses) {
+				shortfalls.value.set(lossKey(entry), { ...entry, _dirty: false })
+			}
+			shortfalls.value = new Map(shortfalls.value)
+		}
+
+		await loadSessionLosses(cartSessionId)
 	}
 
 	/**
@@ -146,8 +208,66 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 	}
 
 	/**
-	 * A shortfall just happened. Ask the cashier, unless this item is already
-	 * being tracked for this sale.
+	 * Find the map key matching an item.
+	 */
+	function getMatchingLossKey(item) {
+		if (!item?.item_code) return null
+		const exactKey = lossKey({
+			item_code: item.item_code,
+			uom: item.uom || item.stock_uom || "",
+			warehouse: item.warehouse || "",
+			batch_no: item.batch_no || "",
+		})
+		if (shortfalls.value.has(exactKey)) return exactKey
+
+		for (const [key, entry] of shortfalls.value.entries()) {
+			if (entry.item_code === item.item_code) {
+				if (!item.uom || !entry.uom || item.uom === entry.uom) {
+					return key
+				}
+			}
+		}
+		return null
+	}
+
+	/**
+	 * Get the tracked shortfall entry for an item, if any.
+	 */
+	function getShortfall(item) {
+		const key = getMatchingLossKey(item)
+		return key ? shortfalls.value.get(key) : null
+	}
+
+	/**
+	 * Remove a shortfall entry if demand was lowered back within stock.
+	 */
+	async function removeShortfall(item) {
+		if (!item?.item_code) return
+		const key = getMatchingLossKey(item)
+		if (key && shortfalls.value.has(key)) {
+			shortfalls.value.delete(key)
+			shortfalls.value = new Map(shortfalls.value)
+
+			try {
+				const cartStore = await getCartStore()
+				if (cartStore.posProfile && sessionId.value) {
+					await call("pos_next.api.order_loss.remove_loss", {
+						cart_session_id: sessionId.value,
+						item_code: item.item_code,
+						uom: item.uom || item.stock_uom || null,
+						warehouse: item.warehouse || null,
+						batch_no: item.batch_no || null,
+						pos_profile: cartStore.posProfile,
+					})
+				}
+			} catch (error) {
+				console.warn("Loss of order: could not remove shortfall from server", error)
+			}
+		}
+	}
+
+	/**
+	 * A shortfall happened. Record it immediately without popping up a dialog.
 	 *
 	 * @param {Object} args
 	 * @param {Object} args.item - The cart line or item tile that came up short
@@ -169,7 +289,10 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 		const demanded = Number(requestedQty) || 0
 		const available = Math.max(Number(availableQty) || 0, 0)
 
-		if (demanded <= available) return
+		if (demanded <= available) {
+			removeShortfall(item)
+			return
+		}
 
 		const ceiling = settingsStore.orderLossMaxDemandQty()
 		if (ceiling && demanded > ceiling) return
@@ -189,19 +312,8 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 				reason || (available <= 0 ? "Out of Stock" : "Insufficient Stock"),
 		}
 
-		const key = lossKey(entry)
-
-		// Every change of quantity is a new ask and gets its own prompt, so the
-		// recorded demand always matches what the customer last asked for. Only a
-		// prompt for the very same quantity is skipped - one action must not put
-		// the same question up twice.
-		if (
-			queue.value.some((q) => lossKey(q) === key && q.demanded_qty === demanded)
-		) {
-			return
-		}
-
-		queue.value = [...queue.value, entry]
+		// Directly commit entry so no popup dialog is shown
+		commit(entry)
 	}
 
 	/**
@@ -223,8 +335,6 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 
 		shortfalls.value.set(key, merged)
 		shortfalls.value = new Map(shortfalls.value)
-
-		scheduleFlush()
 	}
 
 	/** The cashier confirmed the prompt, possibly correcting the quantity. */
@@ -394,6 +504,11 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 		flush,
 		startNewSession,
 		bindToDraft,
+		bindToLocalDraft,
 		bindToInvoice,
+		getShortfall,
+		removeShortfall,
+		loadSessionLosses,
 	}
 })
+

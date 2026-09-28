@@ -418,10 +418,6 @@
 			:currency="shiftStore.profileCurrency"
 		/>
 
-		<!-- Confirms a shortfall before it is recorded as lost demand. Reads the
-		     shortfall queue straight off the store, so the guards that detect one
-		     stay a single line. -->
-		<OrderLossConfirmDialog />
 
 		<!-- Generic Item Selection Dialog -->
 		<ItemSelectionDialog
@@ -1453,16 +1449,24 @@ function handleItemSelected(item, autoAdd = false) {
 	// Check stock availability first (before auto-add or any dialogs)
 	// Skip validation for batch/serial items - they have their own validation in the dialog
 	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
-		if (qty <= 0) {
-			showError(item.is_bundle
-				? __('"{0}" cannot be added to cart. Bundle quantity is negative ({1}).', [item.item_name, qty])
-				: __('"{0}" cannot be added to cart. Item quantity is negative ({1}).', [item.item_name, qty]))
-			return
-		}
-		if (qty <= 0 && settingsStore.shouldEnforceStockValidation()) {
-			showError(item.is_bundle
-				? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
-				: __('"{0}" cannot be added to cart. Quantity reaches 0.', [item.item_name]))
+		const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
+		if (shouldCheckStock && qty <= 0) {
+			if (settingsStore.shouldRecordOrderLoss()) {
+				try {
+					orderLossStore.recordShortfall({
+						item,
+						requestedQty: 1,
+						availableQty: 0,
+						source: "Catalog Click",
+					})
+				} catch (error) {
+					console.warn("Loss of order: could not capture shortfall", error)
+				}
+			} else {
+				showError(item.is_bundle
+					? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+					: __('"{0}" cannot be added to cart. Quantity reaches 0.', [item.item_name]))
+			}
 			return
 		}
 	}
@@ -1472,7 +1476,9 @@ function handleItemSelected(item, autoAdd = false) {
 		try {
 			cartStore.addItem(item, 1, true, shiftStore.currentProfile)
 		} catch (error) {
-			showError(error.message)
+			if (!settingsStore.shouldRecordOrderLoss()) {
+				showError(error.message)
+			}
 		}
 		return
 	}
@@ -1502,7 +1508,9 @@ function handleItemSelected(item, autoAdd = false) {
 	try {
 		cartStore.addItem(item, 1, false, shiftStore.currentProfile)
 	} catch (error) {
-		showError(error.message)
+		if (!settingsStore.shouldRecordOrderLoss()) {
+			showError(error.message)
+		}
 	}
 }
 
@@ -1629,6 +1637,13 @@ async function handlePaymentCompleted(paymentData) {
 		// up: a server-side draft IS the invoice being submitted, so it is never
 		// deleted - submitting simply moves it out of draft state.
 		const draftIdToDelete = cartStore.currentDraftId
+
+		// Flush order loss records to server on checkout
+		try {
+			await orderLossStore.flush({ force: true })
+		} catch (error) {
+			console.warn("Could not flush order loss on checkout", error)
+		}
 
 		if (offlineStore.isOffline) {
 			// Queue exactly what an online checkout would post. Raw cart items are
@@ -1790,7 +1805,9 @@ async function handleOptionSelected(option) {
 					cartStore.clearPendingItem()
 					showSuccess(__('{0} ({1}) added to cart', [itemToAdd.item_name, option.uom]))
 				} catch (error) {
-					showError(error.message)
+					if (!settingsStore.shouldRecordOrderLoss()) {
+						showError(error.message)
+					}
 				}
 			}
 		} else if (option.type === "mrp") {
@@ -1813,7 +1830,9 @@ async function handleOptionSelected(option) {
 					]),
 				)
 			} catch (error) {
-				showError(error.message)
+				if (!settingsStore.shouldRecordOrderLoss()) {
+					showError(error.message)
+				}
 			}
 		}
 	} catch (error) {
@@ -1904,7 +1923,22 @@ async function handleLoadDraft(draft) {
 		// Losses recorded before this ticket was held and after it is resumed are
 		// the same customer's, so they share one session and settle together.
 		if (draftData.invoice_name) {
-			orderLossStore.bindToDraft(draftData.invoice_name)
+			await orderLossStore.bindToDraft(draftData.invoice_name)
+		} else if (draftData.cart_session_id) {
+			await orderLossStore.bindToLocalDraft(
+				draftData.cart_session_id,
+				draftData.order_losses,
+			)
+		}
+
+		// Sync ordered_qty from loaded order losses
+		if (Array.isArray(cartStore.invoiceItems)) {
+			for (const item of cartStore.invoiceItems) {
+				const shortfall = orderLossStore.getShortfall(item)
+				if (shortfall && Number(shortfall.demanded_qty) > Number(item.quantity)) {
+					item.ordered_qty = Number(shortfall.demanded_qty)
+				}
+			}
 		}
 		cartStore.additionalDiscount = draftData.additional_discount || 0
 		cartStore.couponCode = draftData.coupon_code || null

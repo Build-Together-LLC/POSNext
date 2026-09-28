@@ -376,7 +376,14 @@ export function useInvoice() {
 
 					const { showError } = useToast()
 					showError(__('Cannot update quantity for "{0}". Only {1} available in stock.', [item.item_name, Math.max(0, Math.floor(maxAvailable))]))
-					return
+					const clamped = Math.max(0, Math.floor(maxAvailable))
+					if (clamped > 0 && item.quantity !== clamped) {
+						quantity = clamped
+					} else {
+						return
+					}
+				} else {
+					orderLossStore.removeShortfall(item)
 				}
 			}
 

@@ -625,7 +625,7 @@
 										</button>
 										<input
 											:value="item.quantity"
-											@input="updateQuantity(item, $event.target.value)"
+											@input="updateQuantity(item, $event.target.value, $event)"
 											@blur="handleQuantityBlur(item)"
 											@keydown.enter="$event.target.blur()"
 											type="number"
@@ -646,6 +646,15 @@
 												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M12 4v16m8-8H4"/>
 											</svg>
 										</button>
+									</div>
+
+									<!-- Loss of Order Badge beside qty -->
+									<div
+										v-if="getItemOrderLoss(item)"
+										class="inline-flex items-center px-1.5 h-6 sm:h-7 rounded text-[10px] sm:text-xs font-semibold bg-orange-50 text-orange-700 border border-orange-200 whitespace-nowrap cursor-default shadow-xs"
+										:title="getItemOrderLoss(item).title"
+									>
+										{{ getItemOrderLoss(item).text }}
 									</div>
 
 									<!-- UOM Selector Dropdown -->
@@ -1832,7 +1841,9 @@ function incrementQuantity(item) {
 	if (isStockItem && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
 		const availableStock = getItemAvailableStock(item)
 		if (availableStock <= 0) {
-			captureShortfall(item, item.quantity + getSmartStep(item.quantity), item.quantity, "Qty Increment")
+			const currentShortfall = orderLossStore.getShortfall(item)
+			const baseDemanded = currentShortfall?.demanded_qty || item.quantity
+			captureShortfall(item, baseDemanded + getSmartStep(item.quantity), item.quantity, "Qty Increment")
 			showError(item.is_bundle
 				? __('"{0}" cannot be incremented. Bundle quantity reaches 0.', [item.item_name])
 				: __('"{0}" cannot be incremented. Quantity reaches 0.', [item.item_name]))
@@ -1868,8 +1879,9 @@ function decrementQuantity(item) {
  *
  * @param {Object} item - Cart item to update
  * @param {String} value - New quantity value from input
+ * @param {Event} [event] - The DOM input event
  */
-function updateQuantity(item, value) {
+function updateQuantity(item, value, event = null) {
 	const qty = Number.parseFloat(value)
 	// Allow any positive number during typing (don't round yet)
 	if (!isNaN(qty) && qty > 0) {
@@ -1882,13 +1894,48 @@ function updateQuantity(item, value) {
 				// line is about to be clamped down to what the shelf can cover.
 				captureShortfall(item, qty, maxAvailable, "Qty Update")
 				showError(__('Cannot set quantity to {0} for "{1}". Only {2} available in stock.', [qty, item.item_name, Math.max(0, Math.floor(maxAvailable))]))
-				if (maxAvailable > 0) {
-					emit("update-quantity", lineRef(item), Math.floor(maxAvailable), item.uom)
+				const clamped = Math.max(0, Math.floor(maxAvailable))
+				if (clamped > 0 && item.quantity !== clamped) {
+					emit("update-quantity", lineRef(item), clamped, item.uom)
+				}
+				if (event?.target) {
+					event.target.value = clamped
 				}
 				return
 			}
 		}
 		emit("update-quantity", lineRef(item), qty, item.uom)
+	}
+}
+
+function formatQtyNumber(val) {
+	const num = Number(val) || 0
+	return Number.isInteger(num)
+		? num.toString()
+		: num.toFixed(4).replace(/\.?0+$/, "")
+}
+
+function getItemOrderLoss(item) {
+	if (!item?.item_code) return null
+	const shortfall = orderLossStore.getShortfall(item)
+	if (!shortfall) return null
+
+	const sold = Number(item.quantity) || 0
+	const demanded = Number(shortfall.demanded_qty) || 0
+	const lost = Math.max(demanded - sold, 0)
+
+	if (lost <= 0) return null
+
+	return {
+		sold,
+		demanded,
+		lost,
+		text: `${formatQtyNumber(sold)}/${formatQtyNumber(demanded)}  - ${formatQtyNumber(lost)}`,
+		title: __("{0} sold, {1} loss, {2} ordered", [
+			formatQtyNumber(sold),
+			formatQtyNumber(lost),
+			formatQtyNumber(demanded),
+		]),
 	}
 }
 
