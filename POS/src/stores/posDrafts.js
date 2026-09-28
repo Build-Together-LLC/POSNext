@@ -355,6 +355,9 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 			let savedDraft
 
+			// Ensure any pending order losses are flushed to the server before holding
+			await orderLossStore.flush({ force: true }).catch(() => {})
+
 			if (toServer) {
 				const payload = cartStore.buildInvoicePayload({
 					includePayments: false,
@@ -397,6 +400,8 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 					coupon_code: cartStore.couponCode || null,
 					// Null unless this cart came from a server draft.
 					invoice_name: boundInvoice,
+					cart_session_id: orderLossStore.sessionId,
+					order_losses: Array.from(orderLossStore.shortfalls.values()),
 					// A fresh hold is not a failed sync - clear any earlier verdict.
 					sync_retry_count: 0,
 					sync_failed: false,

@@ -65,123 +65,65 @@ describe("loss of order ledger", () => {
 		vi.useRealTimers()
 	})
 
-	it("asks before recording anything", () => {
+	it("automatically records shortfall without asking", () => {
 		const store = usePOSOrderLossStore()
-		shortfall(store, 12)
-
-		expect(store.pendingPrompt.demanded_qty).toBe(12)
-		expect(store.shortfalls.size).toBe(0)
-	})
-
-	it("records what the cashier confirms", () => {
-		const store = usePOSOrderLossStore()
-		shortfall(store, 12)
-		store.confirmPrompt(12)
+		shortfall(store, 20, 10)
 
 		expect(store.shortfalls.size).toBe(1)
-		expect(store.pendingPrompt).toBe(null)
-		expect([...store.shortfalls.values()][0].demanded_qty).toBe(12)
+		expect([...store.shortfalls.values()][0].demanded_qty).toBe(20)
+		expect([...store.shortfalls.values()][0].available_qty).toBe(10)
 	})
 
-	it("records the corrected quantity, not the typed one", () => {
+	it("updates existing record when quantity is changed", () => {
 		const store = usePOSOrderLossStore()
-		shortfall(store, 1000)
-		store.confirmPrompt(10)
+		shortfall(store, 20, 10)
+		expect([...store.shortfalls.values()][0].demanded_qty).toBe(20)
 
-		expect([...store.shortfalls.values()][0].demanded_qty).toBe(10)
-	})
-
-	it("records nothing when the correction is within stock", () => {
-		const store = usePOSOrderLossStore()
-		shortfall(store, 12, 5)
-		store.confirmPrompt(4)
-
-		expect(store.shortfalls.size).toBe(0)
-	})
-
-	it("records nothing when the cashier says it was not a loss", () => {
-		const store = usePOSOrderLossStore()
-		shortfall(store, 12)
-		store.dismissPrompt()
-
-		expect(store.shortfalls.size).toBe(0)
-	})
-
-	it("asks again when the quantity changes after a dismissal", () => {
-		const store = usePOSOrderLossStore()
-		shortfall(store, 12)
-		store.dismissPrompt()
-
-		// A different ask is a different question.
-		shortfall(store, 30)
-
-		expect(store.pendingPrompt.demanded_qty).toBe(30)
-	})
-
-	it("does not put the same ask up twice while the dialog is open", () => {
-		const store = usePOSOrderLossStore()
-		shortfall(store, 12)
-		shortfall(store, 12)
-
-		expect(store.queue).toHaveLength(1)
-	})
-
-	it("asks about a changed quantity and updates the same entry", () => {
-		const store = usePOSOrderLossStore()
-		shortfall(store, 12)
-		store.confirmPrompt(12)
-
-		shortfall(store, 30)
-		expect(store.pendingPrompt.demanded_qty).toBe(30)
-		store.confirmPrompt(30)
-
+		shortfall(store, 30, 10)
 		expect(store.shortfalls.size).toBe(1)
 		expect([...store.shortfalls.values()][0].demanded_qty).toBe(30)
 	})
 
 	it("records the latest ask, not the largest", () => {
 		const store = usePOSOrderLossStore()
-		shortfall(store, 30)
-		store.confirmPrompt(30)
+		shortfall(store, 30, 10)
+		expect([...store.shortfalls.values()][0].demanded_qty).toBe(30)
 
-		// The customer settled for less; the record follows the cart.
-		shortfall(store, 12)
-		store.confirmPrompt(12)
-
-		expect([...store.shortfalls.values()][0].demanded_qty).toBe(12)
+		shortfall(store, 15, 10)
+		expect(store.shortfalls.size).toBe(1)
+		expect([...store.shortfalls.values()][0].demanded_qty).toBe(15)
 	})
 
 	it("drops the entry when the ask is corrected back within stock", () => {
 		const store = usePOSOrderLossStore()
-		shortfall(store, 12, 5)
-		store.confirmPrompt(12)
+		shortfall(store, 20, 10)
 		expect(store.shortfalls.size).toBe(1)
 
-		shortfall(store, 30, 5)
-		store.confirmPrompt(4)
-
+		shortfall(store, 5, 10)
 		expect(store.shortfalls.size).toBe(0)
 	})
 
-	it("queues a second item instead of losing it", () => {
+	it("records multiple short items in the ledger", () => {
 		const store = usePOSOrderLossStore()
-		shortfall(store, 12)
+		shortfall(store, 12, 5)
 		shortfall(store, 8, 2, {
 			...ITEM,
 			item_code: "GADGET",
 			item_name: "Gadget",
 		})
 
-		expect(store.pendingPrompt.item_code).toBe("WIDGET")
-		store.confirmPrompt(12)
-		expect(store.pendingPrompt.item_code).toBe("GADGET")
+		expect(store.shortfalls.size).toBe(2)
+		expect(store.getShortfall(ITEM)?.demanded_qty).toBe(12)
+		expect(
+			store.getShortfall({ item_code: "GADGET" })?.demanded_qty,
+		).toBe(8)
 	})
 
 	it("ignores a quantity the till could have covered", () => {
 		const store = usePOSOrderLossStore()
 		shortfall(store, 4, 5)
 
-		expect(store.pendingPrompt).toBe(null)
+		expect(store.shortfalls.size).toBe(0)
 	})
 
 	it("ignores demand above the profile's mistype ceiling", () => {
@@ -201,17 +143,19 @@ describe("loss of order ledger", () => {
 		expect(store.shortfalls.size).toBe(0)
 	})
 
-	it("collapses a typing burst into one write", async () => {
+	it("does not flush automatically while typing, only records when flushed on checkout or hold", async () => {
 		const store = usePOSOrderLossStore()
 		shortfall(store, 12)
 		store.confirmPrompt(12)
 		shortfall(store, 100)
 		shortfall(store, 1000)
 
+		// Timers should not trigger background auto-flush while typing
+		await vi.runAllTimersAsync()
 		expect(call).not.toHaveBeenCalled()
 
-		await vi.runAllTimersAsync()
-
+		// Flushing explicitly on checkout / hold writes the latest ask to the server
+		await store.flush({ force: true })
 		expect(call).toHaveBeenCalledTimes(1)
 		const [method, payload] = call.mock.calls[0]
 		expect(method).toBe("pos_next.api.order_loss.record_losses")
@@ -255,8 +199,7 @@ describe("loss of order ledger", () => {
 
 		expect(store.sessionId).not.toBe(firstSession)
 		expect(store.shortfalls.size).toBe(0)
-		// The ended cart's losses were written before the rotation.
-		expect(call).toHaveBeenCalledTimes(1)
+		expect(call).not.toHaveBeenCalled()
 	})
 
 	it("shares one session with the invoice a held ticket is resumed from", () => {
@@ -321,4 +264,40 @@ describe("loss of order ledger", () => {
 		const [sent] = JSON.parse(payload.losses)
 		expect(sent.demanded_qty).toBe(32)
 	})
+
+	it("loads existing session losses when resuming a draft and updates the existing record", async () => {
+		const store = usePOSOrderLossStore()
+		call.mockImplementation((method) => {
+			if (method === "pos_next.api.order_loss.get_order_losses") {
+				return Promise.resolve([
+					{
+						item_code: "WIDGET",
+						item_name: "Widget",
+						uom: "Nos",
+						warehouse: "Stores - T",
+						demanded_qty: 20,
+						available_qty: 10,
+						sold_qty: 10,
+						rate: 50,
+						cart_session_id: "ol-inv-SINV-26-00042",
+					},
+				])
+			}
+			return Promise.resolve({ enabled: true, rows: [], skipped: [] })
+		})
+
+		await store.bindToDraft("SINV-26-00042")
+		expect(store.sessionId).toBe("ol-inv-SINV-26-00042")
+		expect(store.shortfalls.size).toBe(1)
+
+		const existing = store.getShortfall(ITEM)
+		expect(existing.demanded_qty).toBe(20)
+		expect(existing.available_qty).toBe(10)
+
+		// Updating quantity to 30 updates the existing shortfall entry
+		shortfall(store, 30, 10)
+		expect(store.shortfalls.size).toBe(1)
+		expect(store.getShortfall(ITEM).demanded_qty).toBe(30)
+	})
 })
+

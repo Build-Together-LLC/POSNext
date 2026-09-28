@@ -1373,14 +1373,17 @@ function handleItemClick(itemCode) {
 	// Check stock for stock items AND Product Bundles (bundles now have calculated stock)
 	const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
 	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
-		if (settingsStore.shouldEnforceStockValidation()) {
+		const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
+		if (shouldCheckStock) {
 			if (qty <= 0) {
 				// Nothing on the shelf, so this never becomes a cart line and
 				// never reaches an invoice - the loss is the whole ask.
 				captureShortfall(item, 1, qty, "Item Tile")
-				showError(item.is_bundle 
-					? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
-					: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+				if (!settingsStore.shouldRecordOrderLoss()) {
+					showError(item.is_bundle 
+						? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+						: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+				}
 				return
 			}
 		} else if (qty <= 0) {
@@ -1422,12 +1425,15 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 		if (item) {
 			const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
 			if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
-				if (settingsStore.shouldEnforceStockValidation()) {
+				const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
+				if (shouldCheckStock) {
 					if (qty <= 0) {
 						captureShortfall(item, 1, qty, "Barcode Scan")
-						showError(item.is_bundle 
-							? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
-							: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+						if (!settingsStore.shouldRecordOrderLoss()) {
+							showError(item.is_bundle 
+								? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+								: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+						}
 						itemStore.clearSearch()
 						return
 					}
@@ -1453,12 +1459,15 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 		const item = filteredItems.value[0]
 		const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
 		if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
-			if (settingsStore.shouldEnforceStockValidation()) {
+			const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
+			if (shouldCheckStock) {
 				if (qty <= 0) {
 					captureShortfall(item, 1, qty, "Barcode Scan")
-					showError(item.is_bundle 
-						? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
-						: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+					if (!settingsStore.shouldRecordOrderLoss()) {
+						showError(item.is_bundle 
+							? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+							: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+					}
 					itemStore.clearSearch()
 					return
 				}

@@ -399,8 +399,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	function shouldRecordOrderLoss() {
 		return (
 			isEnabled.value &&
-			Boolean(settings.value.track_order_loss) &&
-			shouldEnforceStockValidation()
+			Boolean(settings.value.track_order_loss)
 		)
 	}
 

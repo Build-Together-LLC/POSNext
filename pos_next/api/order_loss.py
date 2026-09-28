@@ -655,24 +655,35 @@ def get_unlisted_demand(
 
 @frappe.whitelist()
 def get_order_losses(
-    pos_profile, pos_opening_shift=None, from_date=None, to_date=None, limit=200
+    pos_profile=None,
+    pos_opening_shift=None,
+    from_date=None,
+    to_date=None,
+    limit=200,
+    cart_session_id=None,
 ):
     """Lost demand for the till's own screen, newest first."""
-    _assert_pos_profile_access(pos_profile)
+    if pos_profile:
+        _assert_pos_profile_access(pos_profile)
 
-    filters = {"pos_profile": pos_profile, "is_void": 0}
+    filters = {"is_void": 0}
+    if pos_profile:
+        filters["pos_profile"] = pos_profile
 
-    if pos_opening_shift:
-        filters["pos_opening_shift"] = pos_opening_shift
+    if cart_session_id:
+        filters["cart_session_id"] = cart_session_id
+    else:
+        if pos_opening_shift:
+            filters["pos_opening_shift"] = pos_opening_shift
 
-    if from_date and to_date:
-        filters["posting_date"] = ["between", [getdate(from_date), getdate(to_date)]]
-    elif from_date:
-        filters["posting_date"] = [">=", getdate(from_date)]
-    elif not pos_opening_shift:
-        # Neither a shift nor a date: today only, or a busy till would pull its
-        # whole history down on every open.
-        filters["posting_date"] = nowdate()
+        if from_date and to_date:
+            filters["posting_date"] = ["between", [getdate(from_date), getdate(to_date)]]
+        elif from_date:
+            filters["posting_date"] = [">=", getdate(from_date)]
+        elif not pos_opening_shift:
+            # Neither a shift nor a date: today only, or a busy till would pull its
+            # whole history down on every open.
+            filters["posting_date"] = nowdate()
 
     return frappe.get_all(
         DOCTYPE,
@@ -683,15 +694,20 @@ def get_order_losses(
             "item_name",
             "uom",
             "warehouse",
+            "batch_no",
             "customer",
             "demanded_qty",
+            "available_qty",
             "sold_qty",
             "lost_qty",
             "rate",
             "lost_value",
             "reason",
+            "source",
             "loss_type",
             "sales_invoice",
+            "cart_session_id",
+            "idempotency_key",
             "posting_date",
             "posting_time",
         ],
@@ -699,3 +715,29 @@ def get_order_losses(
         limit_page_length=cint(limit) or 200,
         ignore_permissions=True,
     )
+
+
+@frappe.whitelist()
+def remove_loss(
+    cart_session_id,
+    item_code,
+    uom=None,
+    warehouse=None,
+    batch_no=None,
+    pos_profile=None,
+):
+    """Delete a loss row if the demand was revised back down to within stock."""
+    if pos_profile:
+        _assert_pos_profile_access(pos_profile)
+
+    if not (cart_session_id and item_code):
+        return {"deleted": None}
+
+    key = make_idempotency_key(cart_session_id, item_code, uom, warehouse, batch_no)
+    name = frappe.db.get_value(DOCTYPE, {"idempotency_key": key}, "name")
+    if name:
+        frappe.delete_doc(DOCTYPE, name, ignore_permissions=True, force=True)
+        return {"deleted": name}
+
+    return {"deleted": None}
+

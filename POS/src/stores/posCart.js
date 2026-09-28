@@ -120,7 +120,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const reservedQty = stockStore.reserved.get(item.item_code) || 0
 			const availableQty = serverStock - reservedQty
 
-			if (settingsStore.shouldEnforceStockValidation()) {
+			const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
+			if (shouldCheckStock) {
 				if (Math.floor(availableQty) <= 0) {
 					// The customer asked for something the shelf cannot cover at
 					// all: no cart line, no invoice, and until now no trace. Ask
@@ -135,10 +136,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				if (qty > availableQty) {
 					captureShortfall(item, qty, availableQty, "Cart Add")
 
-					const itemType = item.is_bundle ? "Bundle" : "Item"
-					throw new Error(
-						`Not enough stock for "${item.item_name}". Requested ${qty}, but only ${Math.max(0, Math.floor(availableQty))} available.`
-					)
+					if (!settingsStore.shouldRecordOrderLoss()) {
+						const itemType = item.is_bundle ? "Bundle" : "Item"
+						throw new Error(
+							`Not enough stock for "${item.item_name}". Requested ${qty}, but only ${Math.max(0, Math.floor(availableQty))} available.`
+						)
+					}
+					qty = Math.floor(availableQty)
 				}
 			}
 		}

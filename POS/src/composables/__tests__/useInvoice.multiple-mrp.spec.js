@@ -35,6 +35,7 @@ vi.mock("@/stores/posSettings", () => ({
 	usePOSSettingsStore: () => ({
 		allowsMultipleMrp: () => multipleMrpAllowed,
 		shouldEnforceStockValidation: () => false,
+		shouldRecordOrderLoss: () => false,
 	}),
 }))
 
