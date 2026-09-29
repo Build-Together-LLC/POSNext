@@ -273,6 +273,7 @@ export function useInvoice() {
 				rate: sourceItem.rate || sourceItem.price_list_rate || 0,
 				price_list_rate: sourceItem.price_list_rate || sourceItem.rate || 0,
 				quantity: quantity,
+				ordered_qty: null,
 				discount_amount: 0,
 				discount_percentage: 0,
 				tax_amount: 0,
@@ -353,38 +354,47 @@ export function useInvoice() {
 			const settingsStore = usePOSSettingsStore()
 			const stockStore = useStockStore()
 			const isStockItem = item.is_stock_item !== false
-			const newQuantity = Number.parseFloat(quantity) || 1
+			const requestedQuantity = Number.parseFloat(quantity) || 1
+			let finalQuantity = requestedQuantity
 
-			if (isStockItem && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
+			const shouldCheckStock = Boolean(settingsStore.shouldEnforceStockValidation?.()) || Boolean(settingsStore.shouldRecordOrderLoss?.())
+			if (isStockItem && !item.has_serial_no && !item.has_batch_no && shouldCheckStock) {
 				const serverStock = stockStore.server.get(itemCode)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
 				const reservedQty = stockStore.reserved.get(itemCode) || 0
 				const availableStock = serverStock - reservedQty
 				const maxAvailable = item.quantity + availableStock
-				if (newQuantity > maxAvailable) {
-					// The ask is known here and nowhere after: the line keeps its
-					// old quantity and the difference simply disappears.
-					try {
-						orderLossStore.recordShortfall({
-							item,
-							requestedQty: newQuantity,
-							availableQty: maxAvailable,
-							source: "Qty Update",
-						})
-					} catch (error) {
-						console.warn("Loss of order: could not capture shortfall", error)
-					}
-
-					const { showError } = useToast()
-					showError(__('Cannot update quantity for "{0}". Only {1} available in stock.', [item.item_name, Math.max(0, Math.floor(maxAvailable))]))
-					const clamped = Math.max(0, Math.floor(maxAvailable))
-					if (clamped > 0 && item.quantity !== clamped) {
-						quantity = clamped
+				if (requestedQuantity > maxAvailable) {
+					if (settingsStore.shouldRecordOrderLoss?.()) {
+						item.ordered_qty = requestedQuantity
+						try {
+							orderLossStore.recordShortfall({
+								item,
+								requestedQty: requestedQuantity,
+								availableQty: maxAvailable,
+								source: "Qty Update",
+							})
+						} catch (error) {
+							console.warn("Loss of order: could not capture shortfall", error)
+						}
+						const clamped = Math.max(0, Math.floor(maxAvailable))
+						finalQuantity = clamped > 0 ? clamped : 1
 					} else {
-						return
+						item.ordered_qty = null
+						const { showError } = useToast()
+						showError(__('Cannot update quantity for "{0}". Only {1} available in stock.', [item.item_name, Math.max(0, Math.floor(maxAvailable))]))
+						const clamped = Math.max(0, Math.floor(maxAvailable))
+						if (clamped > 0 && item.quantity !== clamped) {
+							finalQuantity = clamped
+						} else {
+							return
+						}
 					}
 				} else {
+					item.ordered_qty = null
 					orderLossStore.removeShortfall(item)
 				}
+			} else {
+				item.ordered_qty = null
 			}
 
 			// Store old values before update for incremental cache adjustment
@@ -413,7 +423,7 @@ export function useInvoice() {
 				// which should be handled by reopening the serial dialog
 			}
 
-			item.quantity = newQuantity
+			item.quantity = finalQuantity
 			recalculateItem(item)
 
 			// Update cache incrementally (new values - old values)

@@ -624,9 +624,9 @@
 											</svg>
 										</button>
 										<input
-											:value="item.quantity"
+											:value="getItemDisplayQty(item)"
 											@input="updateQuantity(item, $event.target.value, $event)"
-											@blur="handleQuantityBlur(item)"
+											@blur="handleQuantityBlur(item, $event)"
 											@keydown.enter="$event.target.blur()"
 											type="number"
 											min="0.0001"
@@ -651,10 +651,18 @@
 									<!-- Loss of Order Badge beside qty -->
 									<div
 										v-if="getItemOrderLoss(item)"
-										class="inline-flex items-center px-1.5 h-6 sm:h-7 rounded text-[10px] sm:text-xs font-semibold bg-orange-50 text-orange-700 border border-orange-200 whitespace-nowrap cursor-default shadow-xs"
+										class="inline-flex items-center gap-1 px-1.5 h-6 sm:h-7 rounded text-[10px] sm:text-xs font-semibold bg-orange-50 text-orange-700 border border-orange-200 whitespace-nowrap shadow-xs"
 										:title="getItemOrderLoss(item).title"
 									>
-										{{ getItemOrderLoss(item).text }}
+										<span>{{ getItemOrderLoss(item).text }}</span>
+										<button
+											type="button"
+											class="text-orange-500 hover:text-orange-800 focus:outline-none ml-0.5 cursor-pointer font-bold leading-none"
+											:title="__('Clear order loss and reset to available stock')"
+											@click.stop="clearItemOrderLoss(item)"
+										>
+											&times;
+										</button>
 									</div>
 
 									<!-- UOM Selector Dropdown -->
@@ -1836,22 +1844,46 @@ function captureShortfall(item, requestedQty, availableQty, source) {
 	}
 }
 
+function getItemDisplayQty(item) {
+	if (item?.ordered_qty !== undefined && item?.ordered_qty !== null && item.ordered_qty > 0) {
+		return item.ordered_qty
+	}
+	return item?.quantity ?? 1
+}
+
+function clearItemOrderLoss(item) {
+	item.ordered_qty = null
+	orderLossStore.removeShortfall(item)
+	emit("update-quantity", lineRef(item), item.quantity, item.uom)
+}
+
 function incrementQuantity(item) {
+	const currentQty = getItemDisplayQty(item)
 	const isStockItem = item.is_stock_item !== false
-	if (isStockItem && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
+	const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
+
+	if (isStockItem && !item.has_serial_no && !item.has_batch_no && shouldCheckStock) {
 		const availableStock = getItemAvailableStock(item)
 		if (availableStock <= 0) {
 			const currentShortfall = orderLossStore.getShortfall(item)
-			const baseDemanded = currentShortfall?.demanded_qty || item.quantity
-			captureShortfall(item, baseDemanded + getSmartStep(item.quantity), item.quantity, "Qty Increment")
+			const baseDemanded = item.ordered_qty || currentShortfall?.demanded_qty || item.quantity
+			const step = getSmartStep(baseDemanded)
+			const nextDemanded = baseDemanded + step
+			if (settingsStore.shouldRecordOrderLoss()) {
+				item.ordered_qty = nextDemanded
+				captureShortfall(item, nextDemanded, item.quantity, "Qty Increment")
+				emit("update-quantity", lineRef(item), nextDemanded, item.uom)
+				return
+			}
+			captureShortfall(item, nextDemanded, item.quantity, "Qty Increment")
 			showError(item.is_bundle
 				? __('"{0}" cannot be incremented. Bundle quantity reaches 0.', [item.item_name])
 				: __('"{0}" cannot be incremented. Quantity reaches 0.', [item.item_name]))
 			return
 		}
 	}
-	const step = getSmartStep(item.quantity)
-	const newQty = Math.round((item.quantity + step) * 10000) / 10000
+	const step = getSmartStep(currentQty)
+	const newQty = Math.round((currentQty + step) * 10000) / 10000
 	emit("update-quantity", lineRef(item), newQty, item.uom)
 }
 
@@ -1862,8 +1894,9 @@ function incrementQuantity(item) {
  * @param {Object} item - Cart item to decrement
  */
 function decrementQuantity(item) {
-	const step = getSmartStep(item.quantity)
-	const newQty = Math.round((item.quantity - step) * 10000) / 10000
+	const currentQty = getItemDisplayQty(item)
+	const step = getSmartStep(currentQty)
+	const newQty = Math.round((currentQty - step) * 10000) / 10000
 
 	if (newQty <= 0) {
 		// If quantity would be 0 or negative, remove the item
@@ -1886,13 +1919,21 @@ function updateQuantity(item, value, event = null) {
 	// Allow any positive number during typing (don't round yet)
 	if (!isNaN(qty) && qty > 0) {
 		const isStockItem = item.is_stock_item !== false
-		if (isStockItem && !item.has_serial_no && !item.has_batch_no && settingsStore.shouldEnforceStockValidation()) {
+		const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
+
+		if (isStockItem && !item.has_serial_no && !item.has_batch_no && shouldCheckStock) {
 			const availableStock = getItemAvailableStock(item)
 			const maxAvailable = item.quantity + (availableStock || 0)
 			if (qty > maxAvailable) {
-				// The number the cashier typed is what the customer asked for; the
-				// line is about to be clamped down to what the shelf can cover.
-				captureShortfall(item, qty, maxAvailable, "Qty Update")
+				if (settingsStore.shouldRecordOrderLoss()) {
+					// With loss tracking ON: record shortfall and emit requested quantity
+					item.ordered_qty = qty
+					captureShortfall(item, qty, maxAvailable, "Qty Update")
+					emit("update-quantity", lineRef(item), qty, item.uom)
+					return
+				}
+
+				// With loss tracking OFF: show error toast and clamp input
 				showError(__('Cannot set quantity to {0} for "{1}". Only {2} available in stock.', [qty, item.item_name, Math.max(0, Math.floor(maxAvailable))]))
 				const clamped = Math.max(0, Math.floor(maxAvailable))
 				if (clamped > 0 && item.quantity !== clamped) {
@@ -1904,6 +1945,8 @@ function updateQuantity(item, value, event = null) {
 				return
 			}
 		}
+
+		item.ordered_qty = null
 		emit("update-quantity", lineRef(item), qty, item.uom)
 	}
 }
@@ -1918,12 +1961,16 @@ function formatQtyNumber(val) {
 function getItemOrderLoss(item) {
 	if (!item?.item_code) return null
 	const shortfall = orderLossStore.getShortfall(item)
-	if (!shortfall) return null
-
 	const sold = Number(item.quantity) || 0
-	const demanded = Number(shortfall.demanded_qty) || 0
-	const lost = Math.max(demanded - sold, 0)
+	let demanded = 0
 
+	if (item.ordered_qty !== undefined && item.ordered_qty !== null && Number(item.ordered_qty) > sold) {
+		demanded = Number(item.ordered_qty)
+	} else if (shortfall) {
+		demanded = Number(shortfall.demanded_qty) || 0
+	}
+
+	const lost = Math.max(demanded - sold, 0)
 	if (lost <= 0) return null
 
 	return {
@@ -1946,16 +1993,15 @@ function getItemOrderLoss(item) {
  * - Rounds to 4 decimal places for consistency
  *
  * @param {Object} item - Cart item that lost focus
+ * @param {Event} [event]
  */
-function handleQuantityBlur(item) {
-	// When user leaves the input field, round and validate
-	if (!item.quantity || item.quantity <= 0) {
-		// If quantity is 0 or invalid, remove the item
+function handleQuantityBlur(item, event = null) {
+	const displayQty = getItemDisplayQty(item)
+	if (!displayQty || displayQty <= 0) {
 		emit("remove-item", lineRef(item), item.uom)
 	} else {
-		// Round to 4 decimal places for consistency
-		const roundedQty = Math.round(item.quantity * 10000) / 10000
-		if (roundedQty !== item.quantity) {
+		const roundedQty = Math.round(displayQty * 10000) / 10000
+		if (roundedQty !== displayQty) {
 			emit("update-quantity", lineRef(item), roundedQty, item.uom)
 		}
 	}
