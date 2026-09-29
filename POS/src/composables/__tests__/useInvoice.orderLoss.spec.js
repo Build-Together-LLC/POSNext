@@ -149,4 +149,46 @@ describe("useInvoice quantity update with order loss tracking", () => {
 		expect(recordedShortfalls[0].requestedQty).toBe(23)
 		expect(recordedShortfalls[0].availableQty).toBe(6)
 	})
+
+	it("supports adding an item with 0 quantity and ordered_qty into the cart without affecting totals", () => {
+		const { invoiceItems, addItem, subtotal, buildInvoicePayload } = useInvoice()
+		addItem(ITEM, 0, { ordered_qty: 20, rate: 150 })
+
+		expect(invoiceItems.value.length).toBe(1)
+		expect(invoiceItems.value[0].quantity).toBe(0)
+		expect(invoiceItems.value[0].ordered_qty).toBe(20)
+		expect(invoiceItems.value[0].rate).toBe(150)
+		expect(subtotal.value).toBe(0)
+
+		const payload = buildInvoicePayload()
+		// 0-quantity items must not be included in the ERPNext Sales Invoice payload
+		expect(payload.items.length).toBe(0)
+	})
+
+	it("clamps finalQuantity to 0 when available stock is 0 and records full shortfall", () => {
+		stockServerMap.set(ITEM.item_code, { qty: 0 })
+		stockReservedMap.set(ITEM.item_code, 0)
+
+		const { invoiceItems, addItem, updateItemQuantity, subtotal } = useInvoice()
+		addItem(ITEM, 0, { ordered_qty: 10, rate: 100 })
+
+		updateItemQuantity(invoiceItems.value[0].line_id, 25)
+		expect(invoiceItems.value[0].quantity).toBe(0)
+		expect(invoiceItems.value[0].ordered_qty).toBe(25)
+		expect(subtotal.value).toBe(0)
+		expect(recordedShortfalls.length).toBe(1)
+		expect(recordedShortfalls[0].requestedQty).toBe(25)
+		expect(recordedShortfalls[0].availableQty).toBe(0)
+	})
+
+	it("removes shortfall when item is removed from invoice", () => {
+		const { invoiceItems, addItem, removeItem } = useInvoice()
+		addItem(ITEM, 0, { ordered_qty: 20 })
+
+		expect(invoiceItems.value.length).toBe(1)
+		removeItem(invoiceItems.value[0].line_id)
+
+		expect(invoiceItems.value.length).toBe(0)
+		expect(removedShortfalls.length).toBe(1)
+	})
 })

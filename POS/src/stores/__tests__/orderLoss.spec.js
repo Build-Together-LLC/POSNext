@@ -299,5 +299,70 @@ describe("loss of order ledger", () => {
 		expect(store.shortfalls.size).toBe(1)
 		expect(store.getShortfall(ITEM).demanded_qty).toBe(30)
 	})
+
+	it("prompts the cashier with a popup when item has 0 stock initially", () => {
+		const store = usePOSOrderLossStore()
+		expect(store.pendingPrompt).toBe(null)
+
+		store.promptShortfall({
+			item: ITEM,
+			requestedQty: 1,
+			availableQty: 0,
+			source: "Item Tile",
+		})
+
+		expect(store.pendingPrompt).not.toBe(null)
+		expect(store.pendingPrompt.item_code).toBe(ITEM.item_code)
+		expect(store.pendingPrompt.demanded_qty).toBe(1)
+		expect(store.pendingPrompt.available_qty).toBe(0)
+
+		// Cashier changes demanded qty to 5, rate to 125 and confirms
+		store.confirmPrompt(5, 125)
+
+		expect(store.pendingPrompt).toBe(null)
+		expect(store.shortfalls.size).toBe(1)
+		expect(store.getShortfall(ITEM).demanded_qty).toBe(5)
+		expect(store.getShortfall(ITEM).available_qty).toBe(0)
+		expect(store.getShortfall(ITEM).rate).toBe(125)
+	})
+
+	it("clears prompt without recording when cashier dismisses prompt as not a loss", () => {
+		const store = usePOSOrderLossStore()
+
+		store.promptShortfall({
+			item: ITEM,
+			requestedQty: 1,
+			availableQty: 0,
+			source: "Item Tile",
+		})
+
+		expect(store.pendingPrompt).not.toBe(null)
+
+		// Cashier clicks "Not a loss"
+		store.dismissPrompt()
+
+		expect(store.pendingPrompt).toBe(null)
+		expect(store.shortfalls.size).toBe(0)
+	})
+
+	it("updates available_qty when passed to confirmPrompt", () => {
+		const store = usePOSOrderLossStore()
+
+		store.promptShortfall({
+			item: ITEM,
+			requestedQty: 1,
+			availableQty: 0,
+			source: "Item Tile",
+		})
+
+		// Available was 3 and reached 0 in cart, demanded 10, rate 150
+		store.confirmPrompt(10, 150, 3)
+
+		expect(store.pendingPrompt).toBe(null)
+		expect(store.shortfalls.size).toBe(1)
+		expect(store.getShortfall(ITEM).demanded_qty).toBe(10)
+		expect(store.getShortfall(ITEM).available_qty).toBe(3)
+		expect(store.getShortfall(ITEM).rate).toBe(150)
+	})
 })
 

@@ -363,6 +363,12 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 					includePayments: false,
 				})
 
+				if (payload.items.length === 0) {
+					cartStore.clearCart()
+					showSuccess(__("Loss of order recorded successfully"))
+					return null
+				}
+
 				// Update the bound Sales Invoice rather than holding a duplicate.
 				if (boundInvoice) {
 					payload.name = boundInvoice

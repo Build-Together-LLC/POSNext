@@ -252,7 +252,10 @@ def _merge_into(doc, row):
     # settled against a submitted invoice keeps that figure.
     if not doc.sales_invoice:
         doc.sold_qty = flt(row.get("sold_qty"))
-    doc.rate = flt(doc.rate) or flt(row["rate"])
+    if flt(row.get("rate")) > 0:
+        doc.rate = flt(row.get("rate"))
+    elif not flt(doc.rate):
+        doc.rate = flt(row.get("rate"))
     doc.customer = doc.customer or row.get("customer")
     doc.pos_opening_shift = doc.pos_opening_shift or row.get("pos_opening_shift")
 

@@ -267,6 +267,48 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 	}
 
 	/**
+	 * Prompt the cashier for a shortfall when an item has 0 stock before adding to cart.
+	 */
+	function promptShortfall({
+		item,
+		requestedQty = 1,
+		availableQty = 0,
+		rate,
+		source = "Manual",
+		reason,
+	}) {
+		if (!settingsStore.shouldRecordOrderLoss()) return
+		if (!item?.item_code) return
+
+		const demanded = Number(requestedQty) || 1
+		const available = Math.max(Number(availableQty) || 0, 0)
+		const itemRate =
+			rate !== undefined && rate !== null
+				? Number(rate) || 0
+				: Number(item.rate || item.price_list_rate || item.standard_rate) || 0
+
+		const entry = {
+			item_code: item.item_code,
+			item_name: item.item_name || item.item_code,
+			uom: item.uom || item.stock_uom || null,
+			warehouse: item.warehouse || null,
+			batch_no: item.batch_no || null,
+			conversion_factor: Number(item.conversion_factor) || 1,
+			rate: itemRate,
+			demanded_qty: demanded,
+			available_qty: available,
+			source: source || "Manual",
+			reason: reason || (available <= 0 ? "Out of Stock" : "Insufficient Stock"),
+			item,
+		}
+
+		const key = lossKey(entry)
+		if (queue.value.some((q) => lossKey(q) === key)) return
+
+		queue.value = [...queue.value, entry]
+	}
+
+	/**
 	 * A shortfall happened. Record it immediately without popping up a dialog.
 	 *
 	 * @param {Object} args
@@ -275,6 +317,7 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 	 * @param {number} args.availableQty - What the till could actually give
 	 * @param {string} args.source - Which till action detected it
 	 * @param {string} [args.reason]
+	 * @param {boolean} [args.prompt=false] - Whether to prompt the cashier
 	 */
 	function recordShortfall({
 		item,
@@ -282,9 +325,15 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 		availableQty,
 		source,
 		reason,
+		prompt = false,
 	}) {
 		if (!settingsStore.shouldRecordOrderLoss()) return
 		if (!item?.item_code) return
+
+		if (prompt) {
+			promptShortfall({ item, requestedQty, availableQty, source, reason })
+			return
+		}
 
 		const demanded = Number(requestedQty) || 0
 		const available = Math.max(Number(availableQty) || 0, 0)
@@ -304,7 +353,7 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 			warehouse: item.warehouse || null,
 			batch_no: item.batch_no || null,
 			conversion_factor: Number(item.conversion_factor) || 1,
-			rate: Number(item.price_list_rate ?? item.rate) || 0,
+			rate: Number(item.rate || item.price_list_rate || item.standard_rate) || 0,
 			demanded_qty: demanded,
 			available_qty: available,
 			source: source || "Manual",
@@ -328,7 +377,10 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 			? {
 					...existing,
 					...entry,
-					rate: entry.rate || existing.rate,
+					rate:
+						entry.rate !== undefined && entry.rate !== null
+							? entry.rate
+							: (existing.rate ?? 0),
 					_dirty: true,
 				}
 			: { ...entry, _dirty: true }
@@ -337,16 +389,20 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 		shortfalls.value = new Map(shortfalls.value)
 	}
 
-	/** The cashier confirmed the prompt, possibly correcting the quantity. */
-	function confirmPrompt(demandedQty) {
+	/** The cashier confirmed the prompt, possibly correcting the quantity, rate, and available quantity. */
+	function confirmPrompt(demandedQty, rate, availableQty) {
 		const entry = queue.value[0]
 		if (!entry) return
 
 		const demanded = Number(demandedQty) || entry.demanded_qty
+		const available =
+			availableQty !== undefined && availableQty !== null
+				? Number(availableQty) || 0
+				: entry.available_qty
 
 		queue.value = queue.value.slice(1)
 
-		if (demanded <= entry.available_qty) {
+		if (demanded <= available) {
 			// Corrected down to something the till can cover: nothing is lost any
 			// more, so stop sending it. A row already on the server is cleared up
 			// by the reconcile at checkout, which drops rows that lost nothing.
@@ -355,7 +411,16 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 			return
 		}
 
-		commit({ ...entry, demanded_qty: demanded })
+		const updatedEntry = {
+			...entry,
+			available_qty: available,
+			demanded_qty: demanded,
+		}
+		if (rate !== undefined && rate !== null) {
+			updatedEntry.rate = Math.max(Number(rate) || 0, 0)
+		}
+
+		commit(updatedEntry)
 	}
 
 	/**
@@ -423,7 +488,7 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 		if (entriesToFlush.length === 0) return null
 
 		const entries = entriesToFlush.map(
-			({ _dirty, _flushedSoldQty, ...entry }) => ({
+			({ _dirty, _flushedSoldQty, item, ...entry }) => ({
 				...entry,
 				sold_qty: cartQty(entry),
 			}),
@@ -499,6 +564,7 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 		flushing,
 		lastFlushError,
 		recordShortfall,
+		promptShortfall,
 		confirmPrompt,
 		dismissPrompt,
 		flush,

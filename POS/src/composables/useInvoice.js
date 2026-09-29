@@ -234,6 +234,14 @@ export function useInvoice() {
 					)
 
 		if (existingItem) {
+			if (options.ordered_qty !== undefined && options.ordered_qty !== null) {
+				existingItem.ordered_qty = options.ordered_qty
+			}
+			if (options.rate !== undefined && options.rate !== null) {
+				existingItem.rate = options.rate
+				existingItem.price_list_rate = options.rate
+			}
+
 			// Store old values before update for incremental cache adjustment
 			// Use price_list_rate for subtotal calculations (before discount)
 			const oldPriceListRate = existingItem.price_list_rate || existingItem.rate
@@ -266,18 +274,19 @@ export function useInvoice() {
 			_cachedTotalDiscount.value +=
 				(existingItem.discount_amount || 0) - oldDiscount
 		} else {
+			const itemRate = options.rate !== undefined && options.rate !== null ? options.rate : (sourceItem.rate || sourceItem.price_list_rate || 0)
 			const newItem = {
 				line_id: nextLineId(),
 				item_code: item.item_code,
 				item_name: item.item_name,
-				rate: sourceItem.rate || sourceItem.price_list_rate || 0,
-				price_list_rate: sourceItem.price_list_rate || sourceItem.rate || 0,
+				rate: itemRate,
+				price_list_rate: options.price_list_rate || itemRate,
 				quantity: quantity,
-				ordered_qty: null,
+				ordered_qty: options.ordered_qty ?? null,
 				discount_amount: 0,
 				discount_percentage: 0,
 				tax_amount: 0,
-				amount: quantity * (sourceItem.rate || sourceItem.price_list_rate || 0),
+				amount: quantity * itemRate,
 				stock_qty: item.stock_qty || 0,
 				image: item.image,
 				uom: item.uom || item.stock_uom,
@@ -336,6 +345,7 @@ export function useInvoice() {
 		// Only the line that was found goes: an item billed at two MRPs has a
 		// second line that the cashier did not ask to remove.
 		invoiceItems.value = invoiceItems.value.filter((i) => i !== itemToRemove)
+		orderLossStore.removeShortfall(itemToRemove)
 	}
 
 	/**
@@ -377,7 +387,7 @@ export function useInvoice() {
 							console.warn("Loss of order: could not capture shortfall", error)
 						}
 						const clamped = Math.max(0, Math.floor(maxAvailable))
-						finalQuantity = clamped > 0 ? clamped : 1
+						finalQuantity = clamped
 					} else {
 						item.ordered_qty = null
 						const { showError } = useToast()
@@ -740,7 +750,9 @@ export function useInvoice() {
 		 * Returns array of errors if stock is insufficient
 		 */
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-		const rawItems = toRaw(invoiceItems.value)
+		const rawItems = toRaw(invoiceItems.value).filter(
+			(item) => (Number(item.quantity) || 0) > 0,
+		)
 
 		const items = rawItems.map((item) => ({
 			item_code: item.item_code,
@@ -781,7 +793,9 @@ export function useInvoice() {
 		includeSalesTeam = true,
 	} = {}) {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-		const rawItems = toRaw(invoiceItems.value)
+		const rawItems = toRaw(invoiceItems.value).filter(
+			(item) => (Number(item.quantity) || 0) > 0,
+		)
 		const rawPayments = toRaw(payments.value)
 		const rawSalesTeam = toRaw(salesTeam.value)
 

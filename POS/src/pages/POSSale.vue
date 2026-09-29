@@ -418,6 +418,9 @@
 			:currency="shiftStore.profileCurrency"
 		/>
 
+		<!-- Confirm order loss dialog for 0-stock items -->
+		<OrderLossConfirmDialog :currency="shiftStore.profileCurrency" />
+
 
 		<!-- Generic Item Selection Dialog -->
 		<ItemSelectionDialog
@@ -1444,7 +1447,10 @@ async function handleAddMrpLine(cartItem) {
 }
 
 function handleItemSelected(item, autoAdd = false) {
-	const qty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
+	const serverStock = stockStore.server.get(item.item_code)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
+	const reservedQty = stockStore.reserved.get(item.item_code) || 0
+	const availableQty = serverStock - reservedQty
+	const qty = Math.floor(availableQty)
 
 	// Check stock availability first (before auto-add or any dialogs)
 	// Skip validation for batch/serial items - they have their own validation in the dialog
@@ -1453,14 +1459,14 @@ function handleItemSelected(item, autoAdd = false) {
 		if (shouldCheckStock && qty <= 0) {
 			if (settingsStore.shouldRecordOrderLoss()) {
 				try {
-					orderLossStore.recordShortfall({
+					orderLossStore.promptShortfall({
 						item,
 						requestedQty: 1,
 						availableQty: 0,
 						source: "Catalog Click",
 					})
 				} catch (error) {
-					console.warn("Loss of order: could not capture shortfall", error)
+					console.warn("Loss of order: could not prompt shortfall", error)
 				}
 			} else {
 				showError(item.is_bundle
@@ -1556,9 +1562,25 @@ function handleCreateCustomer(searchValue) {
 	uiStore.showCreateCustomerDialog = true
 }
 
-function handleProceedToPayment() {
+async function handleProceedToPayment() {
 	if (cartStore.isEmpty) {
 		showWarning(__("Please add items to cart before proceeding to payment"))
+		return
+	}
+
+	const hasSellableItems = cartStore.invoiceItems.some(
+		(item) => (Number(item.quantity) || 0) > 0,
+	)
+
+	if (!hasSellableItems) {
+		try {
+			await orderLossStore.flush({ force: true })
+			cartStore.clearCart()
+			showSuccess(__("Loss of order recorded successfully"))
+		} catch (error) {
+			console.warn("Could not flush order loss", error)
+			showError(__("Failed to record loss of order"))
+		}
 		return
 	}
 
@@ -1815,11 +1837,10 @@ async function handleOptionSelected(option) {
 			const item = cartStore.pendingItem
 
 			try {
-				// Its own line, even at a rate the cart already holds: the cashier
-				// asked for a second line, not for the first one to grow.
+				// If the item is already present in cart with the same MRP,
+				// merge by increasing quantity; otherwise, a new row will be created for the different MRP.
 				cartStore.addItem(item, qty, false, shiftStore.currentProfile, {
 					rate: option.rate,
-					forceNewLine: true,
 				})
 				uiStore.showItemSelectionDialog = false
 				cartStore.clearPendingItem()
