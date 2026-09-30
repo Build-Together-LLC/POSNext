@@ -1854,7 +1854,11 @@ function getItemDisplayQty(item) {
 function clearItemOrderLoss(item) {
 	item.ordered_qty = null
 	orderLossStore.removeShortfall(item)
-	emit("update-quantity", lineRef(item), item.quantity, item.uom)
+	if (item.quantity <= 0) {
+		emit("remove-item", lineRef(item), item.uom)
+	} else {
+		emit("update-quantity", lineRef(item), item.quantity, item.uom)
+	}
 }
 
 function incrementQuantity(item) {
@@ -1977,7 +1981,7 @@ function getItemOrderLoss(item) {
 		sold,
 		demanded,
 		lost,
-		text: `${formatQtyNumber(sold)}/${formatQtyNumber(demanded)}  - ${formatQtyNumber(lost)}`,
+		text: `${formatQtyNumber(sold)}/${formatQtyNumber(demanded)} - ${formatQtyNumber(lost)}`,
 		title: __("{0} sold, {1} loss, {2} ordered", [
 			formatQtyNumber(sold),
 			formatQtyNumber(lost),

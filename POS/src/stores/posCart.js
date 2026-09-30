@@ -115,7 +115,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const hasActualQty = item.actual_qty !== undefined || item.stock_qty !== undefined
 		const shouldValidateStock = !isNonStockItem && (item.is_stock_item || item.is_bundle || hasActualQty)
 
-		if (shouldValidateStock && !item.has_serial_no && !item.has_batch_no) {
+		if (!options.skipStockCheck && shouldValidateStock && !item.has_serial_no && !item.has_batch_no) {
 			const serverStock = stockStore.server.get(item.item_code)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
 			const reservedQty = stockStore.reserved.get(item.item_code) || 0
 			const availableQty = serverStock - reservedQty
@@ -123,10 +123,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
 			if (shouldCheckStock) {
 				if (Math.floor(availableQty) <= 0) {
-					// The customer asked for something the shelf cannot cover at
-					// all: no cart line, no invoice, and until now no trace. Ask
-					// before throwing - the refusal itself is unchanged.
-					captureShortfall(item, qty, availableQty, "Cart Add")
+					if (settingsStore.shouldRecordOrderLoss()) {
+						orderLossStore.promptShortfall({
+							item,
+							requestedQty: qty,
+							availableQty: 0,
+							source: "Cart Add",
+						})
+						return
+					}
 
 					const itemType = item.is_bundle ? "Bundle" : "Item"
 					throw new Error(
@@ -142,6 +147,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 							`Not enough stock for "${item.item_name}". Requested ${qty}, but only ${Math.max(0, Math.floor(availableQty))} available.`
 						)
 					}
+					options.ordered_qty = qty
 					qty = Math.floor(availableQty)
 				}
 			}

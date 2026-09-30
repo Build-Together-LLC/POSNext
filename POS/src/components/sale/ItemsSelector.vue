@@ -767,6 +767,7 @@ import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailability
 import { useItemSearchStore } from "@/stores/itemSearch"
 import { usePOSOrderLossStore } from "@/stores/orderLoss"
 import { usePOSSettingsStore } from "@/stores/posSettings"
+import { useStockStore } from "@/stores/stock"
 import { useStock } from "@/composables/useStock"
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { useToast } from "@/composables/useToast"
@@ -797,7 +798,15 @@ const emit = defineEmits(["item-selected", "record-unlisted"])
 const { getStockStatus } = useStock()
 const settingsStore = usePOSSettingsStore()
 const orderLossStore = usePOSOrderLossStore()
+const stockStore = useStockStore()
 const { showError, showWarning } = useToast()
+
+function getItemAvailableStock(item) {
+	if (!item) return 0
+	const serverStock = stockStore.server.get(item.item_code)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
+	const reservedQty = stockStore.reserved.get(item.item_code) || 0
+	return serverStock - reservedQty
+}
 
 // Use Pinia store
 const itemStore = useItemSearchStore()
@@ -1371,19 +1380,19 @@ function handleItemClick(itemCode) {
 	// - Batch/serial items - they have their own validation in the dialog
 	// - Item templates (has_variants) - variants have their own stock, template shouldn't be checked
 	// Check stock for stock items AND Product Bundles (bundles now have calculated stock)
-	const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
+	const qty = Math.floor(getItemAvailableStock(item))
 	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
 		const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
 		if (shouldCheckStock) {
 			if (qty <= 0) {
-				// Nothing on the shelf, so this never becomes a cart line and
-				// never reaches an invoice - the loss is the whole ask.
-				captureShortfall(item, 1, qty, "Item Tile")
-				if (!settingsStore.shouldRecordOrderLoss()) {
-					showError(item.is_bundle 
-						? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
-						: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+				// Nothing on the shelf, so prompt the cashier to record loss of order
+				if (settingsStore.shouldRecordOrderLoss()) {
+					promptShortfall(item, 1, qty, "Item Tile")
+					return
 				}
+				showError(item.is_bundle 
+					? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+					: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
 				return
 			}
 		} else if (qty <= 0) {
@@ -1406,6 +1415,14 @@ function captureShortfall(item, requestedQty, availableQty, source) {
 	}
 }
 
+function promptShortfall(item, requestedQty, availableQty, source) {
+	try {
+		orderLossStore.promptShortfall({ item, requestedQty, availableQty, source })
+	} catch (error) {
+		console.warn("Loss of order: could not prompt shortfall", error)
+	}
+}
+
 async function handleBarcodeSearch(forceAutoAdd = false) {
 	const barcode = searchTerm.value.trim()
 
@@ -1423,17 +1440,19 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 		const item = await itemStore.searchByBarcode(barcode)
 
 		if (item) {
-			const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
+			const qty = Math.floor(getItemAvailableStock(item))
 			if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
 				const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
 				if (shouldCheckStock) {
 					if (qty <= 0) {
-						captureShortfall(item, 1, qty, "Barcode Scan")
-						if (!settingsStore.shouldRecordOrderLoss()) {
-							showError(item.is_bundle 
-								? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
-								: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+						if (settingsStore.shouldRecordOrderLoss()) {
+							promptShortfall(item, 1, qty, "Barcode Scan")
+							itemStore.clearSearch()
+							return
 						}
+						showError(item.is_bundle 
+							? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+							: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
 						itemStore.clearSearch()
 						return
 					}
@@ -1457,17 +1476,19 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 	// Fallback: If only one item matches in filtered results, auto-select it
 	if (filteredItems.value.length === 1) {
 		const item = filteredItems.value[0]
-		const qty = Math.floor((item.actual_qty ?? item.stock_qty ?? 0))
+		const qty = Math.floor(getItemAvailableStock(item))
 		if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
 			const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
 			if (shouldCheckStock) {
 				if (qty <= 0) {
-					captureShortfall(item, 1, qty, "Barcode Scan")
-					if (!settingsStore.shouldRecordOrderLoss()) {
-						showError(item.is_bundle 
-							? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
-							: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
+					if (settingsStore.shouldRecordOrderLoss()) {
+						promptShortfall(item, 1, qty, "Search Match")
+						itemStore.clearSearch()
+						return
 					}
+					showError(item.is_bundle 
+						? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+						: __('"{0}" cannot be added to cart. Item quantity reaches 0.', [item.item_name]))
 					itemStore.clearSearch()
 					return
 				}

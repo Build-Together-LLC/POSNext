@@ -358,11 +358,17 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			// Ensure any pending order losses are flushed to the server before holding
 			await orderLossStore.flush({ force: true }).catch(() => {})
 
-			if (toServer) {
-				const payload = cartStore.buildInvoicePayload({
-					includePayments: false,
-				})
+			const payload = cartStore.buildInvoicePayload({
+				includePayments: false,
+			})
 
+			if (payload.items.length === 0) {
+				cartStore.clearCart()
+				showSuccess(__("Loss of order recorded successfully"))
+				return { ok: true, invoice: null, loss_only: true }
+			}
+
+			if (toServer) {
 				// Update the bound Sales Invoice rather than holding a duplicate.
 				if (boundInvoice) {
 					payload.name = boundInvoice
