@@ -13,6 +13,8 @@ export const userData = reactive({
 	userId: null,
 	fullName: null,
 	userImage: null,
+	// bt-autorider merge: cache boot roles so POS discount UI can check Price Manager.
+	roles: [],
 
 	refresh() {
 		const userId = getCookie("user_id")
@@ -25,6 +27,22 @@ export const userData = reactive({
 			this.fullName = fullName
 			this.userImage = userImage
 		}
+
+		const bootRoles =
+			window.frappe?.boot?.user?.roles ||
+			window.frappe?.boot?.roles ||
+			window.frappe?.user_roles
+		if (Array.isArray(bootRoles) && bootRoles.length) {
+			this.setRoles(bootRoles)
+		}
+	},
+
+	setRoles(roles) {
+		this.roles = Array.isArray(roles) ? [...new Set(roles.filter(Boolean))] : []
+	},
+
+	hasRole(role) {
+		return this.roles.includes(role)
 	},
 
 	getDisplayName() {
@@ -61,6 +79,8 @@ export const useUserData = () => ({
 	userImage: computed(() => userData.getImageUrl()),
 	userInitials: computed(() => userData.getInitials()),
 	userId: computed(() => userData.userId),
+	roles: computed(() => userData.roles),
+	hasRole: (role) => userData.hasRole(role),
 	refresh: () => userData.refresh(),
 })
 

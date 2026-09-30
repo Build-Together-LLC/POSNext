@@ -240,7 +240,7 @@
 						:warehouses="profileWarehouses"
 						:is-saving-draft="isHoldingDraft || draftsStore.isSavingDraft"
 						@update-quantity="cartStore.updateItemQuantity"
-						@remove-item="(itemCode, uom) => cartStore.removeItem(itemCode, uom)"
+						@remove-item="(itemCode, uom, batchNo) => cartStore.removeItem(itemCode, uom, batchNo)"
 						@select-customer="handleCustomerSelected"
 						@create-customer="handleCreateCustomer"
 						@proceed-to-payment="handleProceedToPayment"
@@ -805,7 +805,7 @@ const { showSuccess, showError, showWarning } = useToast()
 const log = logger.create('POSSale')
 
 // User data composable
-const { userName, userImage } = useUserData()
+const { userName, userImage, hasRole } = useUserData()
 
 // Locale composable for RTL support
 const { isRTL } = useLocale()
@@ -1446,29 +1446,22 @@ async function handleAddMrpLine(cartItem) {
 function handleItemSelected(item, autoAdd = false) {
 	const qty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
 
-	// Check stock availability first (before auto-add or any dialogs)
-	// Skip validation for batch/serial items - they have their own validation in the dialog
-	if ((item.is_stock_item || item.is_bundle) && !item.has_variants && !item.has_serial_no && !item.has_batch_no) {
-		const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
-		if (shouldCheckStock && qty <= 0) {
-			if (settingsStore.shouldRecordOrderLoss()) {
-				try {
-					orderLossStore.recordShortfall({
-						item,
-						requestedQty: 1,
-						availableQty: 0,
-						source: "Catalog Click",
-					})
-				} catch (error) {
-					console.warn("Loss of order: could not capture shortfall", error)
-				}
-			} else {
-				showError(item.is_bundle
-					? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
-					: __('"{0}" cannot be added to cart. Quantity reaches 0.', [item.item_name]))
+	if (shouldBlockOutOfStockItem(item, qty)) {
+		if (settingsStore.shouldRecordOrderLoss()) {
+			try {
+				orderLossStore.recordShortfall({
+					item,
+					requestedQty: 1,
+					availableQty: 0,
+					source: "Catalog Click",
+				})
+			} catch (error) {
+				console.warn("Loss of order: could not capture shortfall", error)
 			}
-			return
+		} else {
+			showOutOfStockError(item, qty)
 		}
+		return
 	}
 
 	// Auto-add mode
@@ -1524,6 +1517,11 @@ async function handleEditItem(updatedItem) {
 }
 
 function handleAdditionalDiscountUpdate(discountAmount) {
+	if (!hasRole("Price Manager")) {
+		showWarning(__("Only users with the Price Manager role can edit discounts."))
+		return
+	}
+
 	// Update the additional discount value in the cart store
 	cartStore.additionalDiscount = discountAmount
 
@@ -1756,6 +1754,12 @@ async function handleOptionSelected(option) {
 	try {
 		if (option.type === "variant") {
 			const variant = option.data
+			const variantQty = Math.floor(variant.actual_qty ?? variant.stock_qty ?? 0)
+
+			if (shouldBlockOutOfStockItem(variant, variantQty)) {
+				showOutOfStockError(variant, variantQty)
+				return
+			}
 
 			if (variant.item_uoms && variant.item_uoms.length > 0) {
 				cartStore.setPendingItem(variant, cartStore.pendingItemQty, "uom")
@@ -1792,6 +1796,12 @@ async function handleOptionSelected(option) {
 				conversion_factor: option.conversion_factor,
 				rate: itemDetails.price_list_rate || itemDetails.rate,
 				price_list_rate: itemDetails.price_list_rate,
+			}
+			const itemQty = Math.floor(itemToAdd.actual_qty ?? itemToAdd.stock_qty ?? 0)
+
+			if (shouldBlockOutOfStockItem(itemToAdd, itemQty)) {
+				showOutOfStockError(itemToAdd, itemQty)
+				return
 			}
 
 			if (itemToAdd.has_batch_no || itemToAdd.has_serial_no) {
@@ -1839,6 +1849,18 @@ async function handleOptionSelected(option) {
 		log.error("Error handling option selection:", error)
 		showError(__("Failed to process selection. Please try again."))
 	}
+}
+
+function shouldBlockOutOfStockItem(item, qty) {
+	if (!(item?.is_stock_item || item?.is_bundle)) return false
+	if (item.has_variants) return false
+	return settingsStore.shouldEnforceStockValidation() && qty <= 0
+}
+
+function showOutOfStockError(item, qty) {
+	showError(item.is_bundle
+		? __('"{0}" cannot be added to cart. Bundle quantity reaches 0.', [item.item_name])
+		: __('"{0}" cannot be added to cart. Quantity reaches 0.', [item.item_name]))
 }
 
 function handleCloseShift() {

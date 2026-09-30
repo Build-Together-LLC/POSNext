@@ -62,8 +62,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Loss of Order
 		track_order_loss: 0,
 		order_loss_max_demand_qty: 0,
+		// bt-autorider merge: batch filtering and per-batch cart line controls.
 		filter_batches_by_pos_warehouse: 1,
 		auto_select_single_batch: 1,
+		allow_multiple_batches_per_item: 0,
 		// Sales Persons
 		enable_sales_persons: "Disabled",
 	})
@@ -209,11 +211,15 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		Boolean(settings.value.track_order_loss),
 	)
 
+	// bt-autorider merge: exposes POS batch behavior added on bt-autorider.
 	const filterBatchesByPosWarehouse = computed(() =>
 		Boolean(settings.value.filter_batches_by_pos_warehouse),
 	)
 	const autoSelectSingleBatch = computed(() =>
 		Boolean(settings.value.auto_select_single_batch),
+	)
+	const allowMultipleBatchesPerItem = computed(() =>
+		Boolean(settings.value.allow_multiple_batches_per_item),
 	)
 
 	// Computed - Sales Persons
@@ -341,6 +347,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			mrp_price_list: null,
 			track_order_loss: 0,
 			order_loss_max_demand_qty: 0,
+			filter_batches_by_pos_warehouse: 1,
+			auto_select_single_batch: 1,
 			enable_sales_persons: "Disabled",
 		}
 		isLoaded.value = false
@@ -364,7 +372,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	 * @returns {boolean} - True if negative stock is allowed
 	 */
 	function isNegativeStockAllowed() {
-		return isEnabled.value && Boolean(settings.value.allow_negative_stock)
+		return Boolean(settings.value.allow_negative_stock)
 	}
 
 	/**
@@ -372,7 +380,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	 * @returns {boolean} - True if stock validation should prevent negative stock
 	 */
 	function shouldEnforceStockValidation() {
-		return isEnabled.value && !Boolean(settings.value.allow_negative_stock)
+		return !Boolean(settings.value.allow_negative_stock)
 	}
 
 	/**
@@ -506,6 +514,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allowNegativeStock,
 		filterBatchesByPosWarehouse,
 		autoSelectSingleBatch,
+		allowMultipleBatchesPerItem,
 
 		// Computed - Sales Persons
 		enableSalesPersons,

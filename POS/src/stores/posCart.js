@@ -19,6 +19,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		customer,
 		subtotal,
 		totalTax,
+		roundedTotal,
+		roundOff,
 		totalDiscount,
 		grandTotal,
 		posProfile,
@@ -34,7 +36,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		buildInvoicePayload,
 		addItem: addItemToInvoice,
 		removeItem,
-		updateItemQuantity,
+		updateItemQuantity: updateInvoiceItemQuantity,
 		submitInvoice,
 		clearCart: clearInvoiceCart,
 		loadTaxRules,
@@ -100,51 +102,135 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
+	// bt-autorider merge: item identity can include batch when POS Settings allow
+	// multiple cart lines for the same item/batch combination.
+	function batchScoped() {
+		return settingsStore.allowMultipleBatchesPerItem
+	}
+
+	function lineMatches(line, itemCode, uom, batchNo) {
+		if (line.item_code !== itemCode) return false
+		if (uom != null && line.uom !== uom) return false
+		if (batchNo === undefined || !batchScoped()) return true
+		return (line.batch_no || null) === (batchNo || null)
+	}
+
+	function getLineQuantity(item) {
+		return Number(item?.quantity) || 0
+	}
+
+	function getConversionFactor(item) {
+		return Number(item?.conversion_factor) || 1
+	}
+
+	function isEnabledFlag(value) {
+		return value === true || value === 1 || value === "1"
+	}
+
+	function getItemServerStock(item) {
+		return stockStore.server.get(item.item_code)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
+	}
+
+	function shouldValidateStock(item) {
+		const isNonStockItem = item.is_stock_item === 0 || item.is_stock_item === false || item.is_stock_item === "0"
+		const hasActualQty = item.actual_qty !== undefined || item.stock_qty !== undefined
+		return !isNonStockItem && (item.is_stock_item || item.is_bundle || hasActualQty)
+	}
+
+	function getProjectedStockLimit(item, matchingLine, finalLineQty) {
+		const serverStock = getItemServerStock(item)
+		const projectedLineReserved = finalLineQty * getConversionFactor(item)
+		const otherReservedQty = invoiceItems.value.reduce((total, line) => {
+			if (line.item_code !== item.item_code || line === matchingLine) return total
+			return total + (getLineQuantity(line) * getConversionFactor(line))
+		}, 0)
+		const maxLineQty = (serverStock - otherReservedQty) / getConversionFactor(item)
+
+		return {
+			projectedReservedQty: otherReservedQty + projectedLineReserved,
+			serverStock,
+			maxLineQty,
+		}
+	}
+
+	function validateStockLimit(item, finalLineQty, matchingLine = null) {
+		const validatesStock = shouldValidateStock(item)
+		const enforcesStock = settingsStore.shouldEnforceStockValidation()
+
+		if (!validatesStock || !enforcesStock) {
+			return
+		}
+
+		const batchCap =
+			item.batch_no && settingsStore.allowMultipleBatchesPerItem
+				? Number(item.actual_batch_qty) || 0
+				: 0
+		// bt-autorider merge: a batch-selected line cannot exceed that batch's
+		// own available stock even when the same item has stock in other batches.
+		if (batchCap && finalLineQty > batchCap) {
+			throw new Error(`Only ${batchCap} available in batch ${item.batch_no}.`)
+		}
+
+		const hasSelectedSerials = isEnabledFlag(item.has_serial_no) && Boolean(item.serial_no)
+		if (batchCap || hasSelectedSerials) {
+			return
+		}
+
+		const { projectedReservedQty, serverStock, maxLineQty } = getProjectedStockLimit(
+			item,
+			matchingLine,
+			finalLineQty,
+		)
+		if (projectedReservedQty <= serverStock) {
+			return
+		}
+
+		const itemType = item.is_bundle ? "Bundle" : "Item"
+		const availableQty = Math.max(0, Math.floor(maxLineQty))
+		if (availableQty <= 0) {
+			throw new Error(
+				`"${item.item_name}" cannot be added to cart. ${itemType} quantity reaches 0.`
+			)
+		}
+
+		throw new Error(
+			`Not enough stock for "${item.item_name}". Requested ${finalLineQty}, but only ${availableQty} available.`
+		)
+	}
+
+	// Actions
 	// `options` goes straight to the invoice: `rate` bills this line at a chosen
 	// MRP, `forceNewLine` keeps it apart from a line already at that rate.
 	function addItem(item, qty = 1, autoAdd = false, currentProfile = null, options = {}) {
-		// Check stock availability before adding to cart
-		// Skip validation for batch/serial items - they have their own validation in the dialog
-		// Check for stock items AND Product Bundles (bundles now have calculated stock)
-		// Also check items with actual_qty defined (catches misconfigured items)
+		const itemUom = item.uom || item.stock_uom
+		const matchingLine = invoiceItems.value.find((line) =>
+			lineMatches(line, item.item_code, itemUom, item.batch_no || null),
+		)
+		const finalLineQty = (matchingLine?.quantity || 0) + (Number(qty) || 1)
 
-		// Determine if this item should be validated for stock
-		// Include: stock items, bundles, OR items with actual_qty defined (catches misconfigured items)
-		// CRITICAL: If is_stock_item is explicitly false/0, we must skip validation even if actual_qty exists
-		const isNonStockItem = item.is_stock_item === 0 || item.is_stock_item === false
-		const hasActualQty = item.actual_qty !== undefined || item.stock_qty !== undefined
-		const shouldValidateStock = !isNonStockItem && (item.is_stock_item || item.is_bundle || hasActualQty)
-
-		if (shouldValidateStock && !item.has_serial_no && !item.has_batch_no) {
-			const serverStock = stockStore.server.get(item.item_code)?.qty ?? item.actual_qty ?? item.stock_qty ?? 0
-			const reservedQty = stockStore.reserved.get(item.item_code) || 0
-			const availableQty = serverStock - reservedQty
-
+		if (!autoAdd && shouldValidateStock(item)) {
 			const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
 			if (shouldCheckStock) {
-				if (Math.floor(availableQty) <= 0) {
-					// The customer asked for something the shelf cannot cover at
-					// all: no cart line, no invoice, and until now no trace. Ask
-					// before throwing - the refusal itself is unchanged.
+				const { projectedReservedQty, serverStock, maxLineQty } = getProjectedStockLimit(
+					item,
+					matchingLine,
+					finalLineQty,
+				)
+				if (!item.batch_no && !item.has_serial_no && projectedReservedQty > serverStock) {
+					const availableQty = Math.max(0, Math.floor(maxLineQty))
 					captureShortfall(item, qty, availableQty, "Cart Add")
-
-					const itemType = item.is_bundle ? "Bundle" : "Item"
-					throw new Error(
-						`"${item.item_name}" cannot be added to cart. ${itemType} quantity reaches 0.`
-					)
-				}
-				if (qty > availableQty) {
-					captureShortfall(item, qty, availableQty, "Cart Add")
-
-					if (!settingsStore.shouldRecordOrderLoss()) {
+					if (availableQty <= 0) {
 						const itemType = item.is_bundle ? "Bundle" : "Item"
 						throw new Error(
-							`Not enough stock for "${item.item_name}". Requested ${qty}, but only ${Math.max(0, Math.floor(availableQty))} available.`
+							`"${item.item_name}" cannot be added to cart. ${itemType} quantity reaches 0.`
 						)
 					}
-					qty = Math.floor(availableQty)
+					if (settingsStore.shouldRecordOrderLoss() && !settingsStore.shouldEnforceStockValidation()) {
+						qty = availableQty
+					}
 				}
 			}
+			validateStockLimit(item, finalLineQty, matchingLine)
 		}
 
 		// Add item to cart - no toast notification for performance
@@ -171,6 +257,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			console.warn("Multiple MRP: could not load options", error)
 			return []
 		}
+	}
+
+	function updateItemQuantity(itemCode, quantity, uom = null, batchNo = undefined) {
+		const item = invoiceItems.value.find((line) =>
+			lineMatches(line, itemCode, uom, batchNo),
+		)
+		if (!item) return
+
+		try {
+			validateStockLimit(item, Number.parseFloat(quantity) || 1, item)
+		} catch (error) {
+			showError(error.message)
+			return
+		}
+
+		updateInvoiceItemQuantity(itemCode, quantity, uom, batchNo)
 	}
 
 	function clearCart() {
@@ -1209,6 +1311,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		totalTax,
 		totalDiscount,
 		grandTotal,
+		roundedTotal,
+		roundOff,
 		posProfile,
 		posOpeningShift,
 		payments,

@@ -188,8 +188,8 @@
 					</div>
 				</div>
 
-				<!-- Item Discount Section (only if allowed by POS Profile) -->
-				<div v-if="settingsStore.allowItemDiscount" class="border-t border-gray-200 pt-4">
+				<!-- Item Discount Section -->
+				<div v-if="showItemDiscount" class="border-t border-gray-200 pt-4">
 					<label class="block text-sm font-medium text-gray-700 mb-3 text-start">{{ __('Item Discount') }}</label>
 					<div class="grid grid-cols-2 gap-3">
 						<!-- Discount Type -->
@@ -198,7 +198,11 @@
 							<select
 								v-model="discountType"
 								@change="handleDiscountTypeChange"
-								class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+								:disabled="!canEditItemDiscount"
+								:class="[
+									'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
+									!canEditItemDiscount ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''
+								]"
 							>
 								<option value="percentage">{{ __('Percentage (%)') }}</option>
 								<option value="amount">{{ __('Amount') }}</option>
@@ -214,7 +218,11 @@
 									min="0"
 									:max="discountType === 'percentage' ? 100 : undefined"
 									step="0.01"
-									class="w-full border border-gray-300 rounded-lg px-3 py-2 pe-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+									:readonly="!canEditItemDiscount"
+									:class="[
+										'w-full border border-gray-300 rounded-lg px-3 py-2 pe-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
+										!canEditItemDiscount ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''
+									]"
 									@input="calculateDiscount"
 								/>
 								<span class="absolute inset-y-0 end-0 pe-3 flex items-center text-gray-500 text-sm">
@@ -262,6 +270,7 @@
 
 <script setup>
 import { useToast } from "@/composables/useToast"
+import { userData } from "@/data/user"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { getItemStock } from "@/utils/stockValidator"
@@ -306,6 +315,8 @@ const isCheckingStock = ref(false)
 const localSerials = ref([]) // List of serial numbers for this item
 const removedSerials = ref([]) // Track serials removed during this edit session
 const originalSerials = ref([]) // Original serials when dialog opened
+const originalDiscountPercentage = ref(0)
+const originalDiscountAmount = ref(0)
 
 const show = computed({
 	get: () => props.modelValue,
@@ -320,6 +331,12 @@ const availableUoms = computed(() => {
 })
 
 const currencySymbol = computed(() => getCurrencySymbol(props.currency))
+// bt-autorider merge: item discount edits require the Price Manager role.
+const canEditDiscount = computed(() => userData.hasRole("Price Manager"))
+const showItemDiscount = computed(() => settingsStore.allowItemDiscount)
+const canEditItemDiscount = computed(() =>
+	settingsStore.allowItemDiscount && canEditDiscount.value,
+)
 
 // Initialize local state when item changes
 watch(
@@ -331,6 +348,8 @@ watch(
 			localUom.value = newItem.uom || newItem.stock_uom || __("Nos")
 			localRate.value = newItem.rate || 0
 			originalRate.value = newItem.rate || 0
+			originalDiscountPercentage.value = newItem.discount_percentage || 0
+			originalDiscountAmount.value = newItem.discount_amount || 0
 			localWarehouse.value =
 				newItem.warehouse || props.warehouses[0]?.name || ""
 
@@ -498,12 +517,24 @@ async function handleWarehouseChange() {
 }
 
 function handleDiscountTypeChange() {
+	if (!canEditItemDiscount.value) return
 	// Reset discount value when type changes
 	discountValue.value = 0
 	calculateTotals()
 }
 
 function calculateDiscount() {
+	if (!canEditItemDiscount.value) {
+		if (originalDiscountPercentage.value > 0) {
+			calculatedDiscount.value =
+				(calculatedSubtotal.value * originalDiscountPercentage.value) / 100
+		} else {
+			calculatedDiscount.value = originalDiscountAmount.value || 0
+		}
+		calculatedTotal.value = calculatedSubtotal.value - calculatedDiscount.value
+		return
+	}
+
 	if (discountType.value === "percentage") {
 		// Ensure percentage doesn't exceed 100
 		if (discountValue.value > 100) {
@@ -550,9 +581,13 @@ function updateItem() {
 		uom: localUom.value,
 		warehouse: localWarehouse.value,
 		discount_percentage:
-			discountType.value === "percentage" ? discountValue.value : 0,
+			canEditItemDiscount.value && discountType.value === "percentage"
+				? discountValue.value
+				: originalDiscountPercentage.value,
 		discount_amount:
-			discountType.value === "amount" ? discountValue.value : 0,
+			canEditItemDiscount.value && discountType.value === "amount"
+				? discountValue.value
+				: originalDiscountAmount.value,
 	}
 
 	// Only send a rate when the user actually edited it. Otherwise the stale

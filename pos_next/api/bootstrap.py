@@ -44,6 +44,8 @@ def get_initial_data():
 	result = {
 		"success": True,
 		"locale": get_user_language(),
+		# bt-autorider merge: expose roles so the POS UI can gate discount edits.
+		"user_roles": frappe.get_roles(frappe.session.user),
 		"shift": None,
 		"pos_profile": None,
 		"pos_settings": None,
@@ -176,7 +178,8 @@ def get_pos_settings(pos_profile):
 				"require_cart_item_review",
 				"allow_server_side_draft_invoice",
 				"track_order_loss",
-				"order_loss_max_demand_qty"
+				"order_loss_max_demand_qty",
+				"allow_multiple_batches_per_item"
 			],
 			as_dict=True
 		)
@@ -215,7 +218,8 @@ def get_default_pos_settings():
 		"allow_multiple_mrp": 0,
 		"mrp_price_list": None,
 		"track_order_loss": 0,
-		"order_loss_max_demand_qty": 0
+		"order_loss_max_demand_qty": 0,
+		"allow_multiple_batches_per_item": 0
 	}
 
 

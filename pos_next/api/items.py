@@ -10,7 +10,7 @@ from erpnext.stock.doctype.batch.batch import get_batch_qty
 from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_details
 from frappe import _, as_json
 from frappe.query_builder import DocType, functions as fn
-from frappe.utils import cint, flt, nowdate
+from frappe.utils import cint, flt, getdate, nowdate
 
 from pos_next.api.invoices import _assert_pos_profile_access
 
@@ -72,6 +72,59 @@ def get_stock_availability(item_code, warehouse):
 	).run()
 
 	return flt(rows[0][0]) if rows and rows[0][0] is not None else 0.0
+
+
+def available_batches(item_code, warehouse, include_other_warehouses=False):
+	"""Sellable batches of `item_code`, each counted by what `warehouse` holds.
+
+	bt-autorider merge: batch choices and quantities are scoped to the POS warehouse.
+	Quantity is always this warehouse's stock. get_batch_qty() called without a
+	warehouse returns one row per (batch, warehouse) pair, so the same batch comes
+	back once for every warehouse that stocks it, each row carrying that other
+	warehouse's quantity - which is how a Birhata till listed a batch three times
+	and priced it off Main's stock.
+
+	`include_other_warehouses` reflects the "Only Batches Stocked in POS Warehouse"
+	setting, which is about which batches are *listed*, never about the number shown
+	against them: a batch stocked only elsewhere is listed at 0, not at its stock
+	somewhere else.
+
+	Expired and disabled batches are always excluded. Sorted first to expire first.
+	"""
+	if not warehouse or not item_code:
+		return []
+
+	in_warehouse = {}
+	for row in get_batch_qty(warehouse=warehouse, item_code=item_code) or []:
+		batch_no = row.get("batch_no")
+		if batch_no:
+			in_warehouse[batch_no] = flt(row.get("qty"))
+
+	if include_other_warehouses:
+		candidates = frappe.get_all("Batch", filters={"item": item_code}, pluck="name")
+	else:
+		candidates = [b for b, qty in in_warehouse.items() if qty > 0]
+
+	today = nowdate()
+	batches = []
+	for batch_no in candidates:
+		batch_doc = frappe.get_cached_doc("Batch", batch_no)
+		if batch_doc.disabled:
+			continue
+		if batch_doc.expiry_date and str(batch_doc.expiry_date) <= str(today):
+			continue
+
+		batches.append(
+			{
+				"batch_no": batch_no,
+				"batch_qty": flt(in_warehouse.get(batch_no)),
+				"expiry_date": batch_doc.expiry_date,
+				"manufacturing_date": batch_doc.manufacturing_date,
+			}
+		)
+
+	batches.sort(key=lambda b: (b["expiry_date"] is None, b["expiry_date"], b["batch_no"]))
+	return batches
 
 
 def _batch_settings(pos_profile):
@@ -205,32 +258,9 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	filter_by_warehouse, auto_select_single = _batch_settings(item.get("pos_profile"))
 
 	if warehouse and item.get("has_batch_no"):
-		# Get all batches with available quantity for this item in warehouse
-		batch_list = get_batch_qty(
-			warehouse=warehouse if filter_by_warehouse else None, item_code=item_code
+		batch_no_data = available_batches(
+			item_code, warehouse, include_other_warehouses=not filter_by_warehouse
 		)
-		if batch_list:
-			for batch in batch_list:
-				# Filter 1: Only batches with available stock
-				if batch.qty > 0 and batch.batch_no:
-					# Fetch batch metadata (expiry, manufacturing dates, disabled status)
-					batch_doc = frappe.get_cached_doc("Batch", batch.batch_no)
-
-					# Filter 2: Exclude expired batches
-					# Filter 3: Exclude disabled batches
-					is_not_expired = (
-						str(batch_doc.expiry_date) > str(today)
-						or batch_doc.expiry_date in ["", None]
-					)
-					is_enabled = batch_doc.disabled == 0
-
-					if is_not_expired and is_enabled:
-						batch_no_data.append({
-							"batch_no": batch.batch_no,
-							"batch_qty": batch.qty,
-							"expiry_date": batch_doc.expiry_date,
-							"manufacturing_date": batch_doc.manufacturing_date,
-						})
 
 	# ===========================================================================
 	# SERIAL NUMBER TRACKING: Get available serial numbers
@@ -495,22 +525,16 @@ def get_batch_serial_details(item_code, warehouse):
 		}
 
 		if has_batch_no:
-			batches = []
-			for batch in get_batch_qty(warehouse=warehouse, item_code=item_code) or []:
-				if flt(batch.get("qty")) <= 0 or not batch.get("batch_no"):
-					continue
-				batch_doc = frappe.get_cached_doc("Batch", batch.get("batch_no"))
-				if batch_doc.disabled:
-					continue
-				batches.append(
-					{
-						"batch_no": batch.get("batch_no"),
-						"qty": flt(batch.get("qty")),
-						"expiry_date": batch_doc.expiry_date,
-					}
-				)
-			batches.sort(key=lambda b: (b["expiry_date"] is None, b["expiry_date"]))
-			result["batches"] = batches
+			# Same source as the item tile, so the picker and the tile can never
+			# disagree about how much of a batch this warehouse actually holds.
+			result["batches"] = [
+				{
+					"batch_no": b["batch_no"],
+					"qty": b["batch_qty"],
+					"expiry_date": b["expiry_date"],
+				}
+				for b in available_batches(item_code, warehouse)
+			]
 
 		if has_serial_no:
 			# Get available serial numbers
@@ -652,6 +676,83 @@ def get_item_variants(template_item, pos_profile):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Variants Error")
 		frappe.throw(_("Error fetching item variants: {0}").format(str(e)))
+
+
+def get_sales_tax_accounts(pos_profile_doc):
+	"""Account heads the sale will actually be taxed on, with the template that holds them.
+
+	Taken from the POS Profile's tax template when it has one; otherwise from the company's
+	default intra-state template, which is what the Sales Invoice falls back to for a
+	counter sale.
+	"""
+	template = getattr(pos_profile_doc, "taxes_and_charges", None)
+
+	if not template and pos_profile_doc.company:
+		try:
+			from india_compliance.gst_india.overrides.transaction import get_tax_template
+
+			template = get_tax_template(
+				"Sales Taxes and Charges Template", pos_profile_doc.company, False, False
+			)
+		except ImportError:
+			template = None
+
+	if not template:
+		return "", []
+
+	accounts = frappe.get_all(
+		"Sales Taxes and Charges",
+		filters={"parent": template, "parenttype": "Sales Taxes and Charges Template"},
+		pluck="account_head",
+	)
+	return template, accounts
+
+
+def _get_item_tax_rate_map(item_codes, account_heads=None):
+	"""Batch-load the tax rate that applies to each item as {item_code: rate}.
+
+	The rate lives on the item's Item Tax Template, not on the Sales Taxes and Charges
+	Template: sites that tax per item (GST 18%, GST 28%, ...) leave the account-head rows
+	at 0 and let each item carry its own rate. Only the accounts the sale is charged on are
+	counted, since one Item Tax Template also carries input, inter-state and reverse-charge
+	rates that this sale will not use.
+	"""
+	if not item_codes or not account_heads:
+		return {}
+
+	rows = frappe.get_all(
+		"Item Tax",
+		filters={"parent": ["in", list(item_codes)], "parenttype": "Item"},
+		fields=["parent", "item_tax_template", "valid_from"],
+		order_by="valid_from asc",
+	)
+	if not rows:
+		return {}
+
+	today = nowdate()
+	template_by_item = {}
+	for row in rows:
+		if row.valid_from and getdate(row.valid_from) > getdate(today):
+			continue
+		template_by_item[row.parent] = row.item_tax_template
+
+	templates = {t for t in template_by_item.values() if t}
+	if not templates:
+		return {}
+
+	rate_by_template = {}
+	for tax in frappe.get_all(
+		"Item Tax Template Detail",
+		filters={"parent": ["in", list(templates)], "tax_type": ["in", list(account_heads)]},
+		fields=["parent", "tax_rate"],
+	):
+		rate_by_template[tax.parent] = rate_by_template.get(tax.parent, 0) + flt(tax.tax_rate)
+
+	return {
+		item_code: rate_by_template.get(template, 0)
+		for item_code, template in template_by_item.items()
+		if rate_by_template.get(template)
+	}
 
 
 def _get_uom_prices_map(item_codes, price_list, transaction_date=None):
@@ -1205,6 +1306,9 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 		if item_codes:
 			uom_prices_map = _get_uom_prices_map(item_codes, pos_profile_doc.selling_price_list)
 
+		_, sales_tax_accounts = get_sales_tax_accounts(pos_profile_doc)
+		item_tax_rate_map = _get_item_tax_rate_map(item_codes, sales_tax_accounts)
+
 		# Batch query stock for all items at once (performance optimization)
 		stock_map = {}
 		if item_codes and pos_profile_doc.warehouse:
@@ -1387,6 +1491,8 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 
 			# UOM-specific prices map for frontend selector
 			item["uom_prices"] = uom_prices_map.get(item["item_code"], {})
+
+			item["item_tax_rate_total"] = item_tax_rate_map.get(item["item_code"], 0)
 
 		return items
 	except Exception as e:

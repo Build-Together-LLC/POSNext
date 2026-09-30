@@ -1153,7 +1153,8 @@ const customersResource = createResource({
 		allCustomers.value = customers
 		customersLoaded.value = true
 
-		// Also cache in worker for offline support
+		// Replace cached customers with the POS Profile-scoped list for offline support.
+		await offlineWorker.clearCustomersCache()
 		await offlineWorker.cacheCustomers(customers)
 	},
 	onError(error) {
@@ -1600,6 +1601,7 @@ async function confirmCheckoutReviewedOnly() {
 		const dropped = unreviewedItems.value.map((item) => ({
 			ref: lineRef(item),
 			uom: item.uom,
+			batch_no: item.batch_no || null,
 		}))
 		for (const { ref, uom } of dropped) {
 			cartStore.removeItem(ref, uom)
@@ -1857,10 +1859,23 @@ function clearItemOrderLoss(item) {
 	emit("update-quantity", lineRef(item), item.quantity, item.uom)
 }
 
+function batchLimit(item) {
+	if (!item.batch_no || !settingsStore.allowMultipleBatchesPerItem) return 0
+	return Number(item.actual_batch_qty) || 0
+}
+
 function incrementQuantity(item) {
 	const currentQty = getItemDisplayQty(item)
 	const isStockItem = item.is_stock_item !== false
 	const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
+	const step = getSmartStep(currentQty)
+	const newQty = Math.round((currentQty + step) * 10000) / 10000
+	const limit = batchLimit(item)
+
+	if (isStockItem && settingsStore.shouldEnforceStockValidation() && limit && newQty > limit) {
+		showError(__('Only {0} available in batch {1}.', [limit, item.batch_no]))
+		return
+	}
 
 	if (isStockItem && !item.has_serial_no && !item.has_batch_no && shouldCheckStock) {
 		const availableStock = getItemAvailableStock(item)
@@ -1874,16 +1889,14 @@ function incrementQuantity(item) {
 				captureShortfall(item, nextDemanded, item.quantity, "Qty Increment")
 				emit("update-quantity", lineRef(item), nextDemanded, item.uom)
 				return
-			}
-			captureShortfall(item, nextDemanded, item.quantity, "Qty Increment")
-			showError(item.is_bundle
-				? __('"{0}" cannot be incremented. Bundle quantity reaches 0.', [item.item_name])
-				: __('"{0}" cannot be incremented. Quantity reaches 0.', [item.item_name]))
+				}
+				captureShortfall(item, nextDemanded, item.quantity, "Qty Increment")
+				showError(item.is_bundle
+					? __('"{0}" cannot be incremented. Bundle quantity reaches 0.', [item.item_name])
+					: __('"{0}" cannot be incremented. Quantity reaches 0.', [item.item_name]))
 			return
+			}
 		}
-	}
-	const step = getSmartStep(currentQty)
-	const newQty = Math.round((currentQty + step) * 10000) / 10000
 	emit("update-quantity", lineRef(item), newQty, item.uom)
 }
 
@@ -1920,8 +1933,14 @@ function updateQuantity(item, value, event = null) {
 	if (!isNaN(qty) && qty > 0) {
 		const isStockItem = item.is_stock_item !== false
 		const shouldCheckStock = settingsStore.shouldEnforceStockValidation() || settingsStore.shouldRecordOrderLoss()
+		const limit = batchLimit(item)
 
-		if (isStockItem && !item.has_serial_no && !item.has_batch_no && shouldCheckStock) {
+		if (isStockItem && limit && settingsStore.shouldEnforceStockValidation() && qty > limit) {
+			showError(__('Only {0} available in batch {1}.', [limit, item.batch_no]))
+			emit("update-quantity", lineRef(item), limit, item.uom)
+			return
+		}
+		if (isStockItem && !limit && !item.has_serial_no && !item.has_batch_no && shouldCheckStock) {
 			const availableStock = getItemAvailableStock(item)
 			const maxAvailable = item.quantity + (availableStock || 0)
 			if (qty > maxAvailable) {

@@ -76,16 +76,19 @@ class POSClosingShift(Document):
 
     def on_submit(self):
         opening_entry = frappe.get_doc("POS Opening Shift", self.pos_opening_shift)
+        opening_entry.flags.ignore_permissions = True
         opening_entry.pos_closing_shift = self.name
         opening_entry.set_status()
         self.delete_draft_invoices()
         opening_entry.save()
+        # bt-autorider merge: allow cashier close flow while linking invoices back.
         # link invoices with this closing shift so ERPNext can block edits
         self._set_closing_entry_invoices()
 
     def on_cancel(self):
         if frappe.db.exists("POS Opening Shift", self.pos_opening_shift):
             opening_entry = frappe.get_doc("POS Opening Shift", self.pos_opening_shift)
+            opening_entry.flags.ignore_permissions = True
             if opening_entry.pos_closing_shift == self.name:
                 opening_entry.pos_closing_shift = ""
                 opening_entry.set_status()

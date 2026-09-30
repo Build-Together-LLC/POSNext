@@ -34,6 +34,7 @@ except Exception:  # pragma: no cover - ERPNext not installed in some environmen
 # Roles allowed to clear held POS drafts that belong to another cashier
 # (see delete_all_pos_drafts).
 POS_DRAFT_MANAGER_ROLES = ("System Manager", "Sales Manager", "Accounts Manager")
+PRICE_MANAGER_ROLE = "Price Manager"
 
 
 # ==========================================
@@ -100,6 +101,67 @@ def get_payment_account(mode_of_payment, company):
         ).format(mode_of_payment, company),
         title=_("Missing Account"),
     )
+
+
+def _has_price_manager_role():
+    return PRICE_MANAGER_ROLE in frappe.get_roles(frappe.session.user)
+
+
+def _normalize_applied_pricing_rules(applied_pricing_rules, item_count=0):
+    if isinstance(applied_pricing_rules, str):
+        applied_pricing_rules = json.loads(applied_pricing_rules or "[]")
+
+    if not isinstance(applied_pricing_rules, list):
+        applied_pricing_rules = []
+
+    rows = []
+    for row in applied_pricing_rules:
+        if isinstance(row, str):
+            row = [row]
+        if isinstance(row, (list, tuple, set)):
+            rows.append([rule for rule in row if rule])
+        else:
+            rows.append([])
+
+    while len(rows) < item_count:
+        rows.append([])
+
+    return rows
+
+
+def _validate_discount_edit_permission(invoice_doc, applied_pricing_rules=None):
+    """Restrict cashier-entered discounts to users with Price Manager role.
+
+    bt-autorider merge: backend enforcement for the POS discount UI restriction.
+    Pricing-rule item discounts and coupon invoice discounts are system-driven
+    POS discounts, so they stay allowed for regular cashiers.
+    """
+    if _has_price_manager_role():
+        return
+
+    if flt(invoice_doc.get("discount_amount") or 0) and not invoice_doc.get("coupon_code"):
+        frappe.throw(
+            _("Only users with the Price Manager role can edit discounts in POSNext."),
+            frappe.PermissionError,
+        )
+
+    items = invoice_doc.get("items", [])
+    rule_rows = _normalize_applied_pricing_rules(applied_pricing_rules, len(items))
+
+    for index, item in enumerate(items):
+        has_discount = flt(item.get("discount_percentage") or 0) or flt(
+            item.get("discount_amount") or 0
+        )
+        if not has_discount:
+            continue
+
+        if rule_rows[index]:
+            continue
+
+        frappe.throw(
+            _("Only users with the Price Manager role can edit item discounts in POSNext."),
+            frappe.PermissionError,
+        )
 
 
 # ==========================================
@@ -317,25 +379,58 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 # ==========================================
 
 
-def _get_editable_invoice(doctype, invoice_name):
-    """Load the draft `invoice_name` points at, or None if a new document is due.
+OFFLINE_ID_FIELD = "posa_offline_id"
+
+
+def _offline_id_supported(doctype):
+    """Whether this site carries the offline-id column. Not every site does."""
+    return frappe.db.has_column(doctype, OFFLINE_ID_FIELD)
+
+
+def _find_by_offline_id(doctype, offline_id):
+    """The invoice already booked for this sale, by its offline id.
+
+    The offline id is the sale's identity across a dropped connection: the
+    document name may never have reached the till, but the row it names is the
+    same sale. The column is unique, so resolving it here is what stops a re-sync
+    from inserting a second invoice - and, because a duplicate key aborts the
+    whole submit, from stranding the original draft unsubmitted.
+    """
+    if not offline_id or not _offline_id_supported(doctype):
+        return None
+
+    return frappe.db.get_value(
+        doctype, {OFFLINE_ID_FIELD: offline_id}, ["name", "docstatus"], as_dict=True
+    )
+
+
+def _get_editable_invoice(doctype, invoice_name, offline_id=None):
+    """Load the draft this sale points at, or None if a new document is due.
 
     A held draft can be resumed on more than one terminal at a time. If the first
     till submits it, the second must not quietly fall through to creating a
     second Sales Invoice for the same sale - that books the goods twice. So a
     name that exists but has left draft state is an error, not a cue to create.
 
-    Returns None only when there is nothing to update: no name at all, or a name
-    the server has never heard of (an invoice queued offline, say), in which case
-    the caller creates the document.
+    When the name is unknown here - queued offline, or lost with the connection -
+    the offline id is consulted before giving up, so a retry updates the sale it
+    already created instead of trying to insert it a second time.
+
+    Returns None only when there is nothing to update: no name and no offline id
+    the server has heard of, in which case the caller creates the document.
     """
-    if not invoice_name:
+    if not invoice_name and not offline_id:
         return None
 
-    docstatus = frappe.db.get_value(doctype, invoice_name, "docstatus")
+    docstatus = (
+        frappe.db.get_value(doctype, invoice_name, "docstatus") if invoice_name else None
+    )
 
     if docstatus is None:
-        return None
+        existing = _find_by_offline_id(doctype, offline_id)
+        if not existing:
+            return None
+        invoice_name, docstatus = existing.name, existing.docstatus
 
     docstatus = cint(docstatus)
 
@@ -482,12 +577,17 @@ def update_invoice(data):
 
         # Turn the write away if another till has saved this draft since it was loaded here.
         _assert_not_stale(doctype, invoice_name, client_modified)
+        offline_id = data.get(OFFLINE_ID_FIELD)
 
         # Throws if the name belongs to an invoice that is no longer a draft.
-        invoice_doc = _get_editable_invoice(doctype, invoice_name)
+        invoice_doc = _get_editable_invoice(doctype, invoice_name, offline_id)
 
         if invoice_doc:
             previous_customer = invoice_doc.get("customer")
+            # The resolved draft's own name wins. An offline-id match can land on a
+            # different name than the till sent, and update() would otherwise carry
+            # the stale name across and rename the document.
+            data.pop("name", None)
             invoice_doc.update(data)
             _clear_stale_party_details(invoice_doc, previous_customer, data)
         else:
@@ -565,6 +665,8 @@ def update_invoice(data):
         # Disable automatic pricing rules (we handle discounts manually from POS)
         invoice_doc.ignore_pricing_rule = 1
         invoice_doc.flags.ignore_pricing_rule = True
+
+        _validate_discount_edit_permission(invoice_doc, applied_pricing_rules)
 
         # ========================================================================
         # DISCOUNT CALCULATION - CRITICAL LOGIC
@@ -694,7 +796,20 @@ def update_invoice(data):
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
         invoice_doc.docstatus = 0
-        invoice_doc.save()
+
+        try:
+            invoice_doc.save()
+        except frappe.UniqueValidationError:
+            # Another request booked this same sale between the lookup above and
+            # this insert - the offline id is unique precisely so the second one
+            # loses. Hand back the invoice that won instead of failing, which is
+            # what stranded the first one as an unsubmitted draft.
+            existing = _find_by_offline_id(doctype, invoice_doc.get(OFFLINE_ID_FIELD))
+            if not existing or existing.name == invoice_doc.get("name"):
+                raise
+            # Throws if that invoice has already left draft, so a genuine
+            # double-charge still surfaces rather than being papered over.
+            invoice_doc = _get_editable_invoice(doctype, existing.name)
 
         return invoice_doc.as_dict()
     except Exception as e:
@@ -755,18 +870,26 @@ def submit_invoice(invoice=None, data=None):
         doctype = "Sales Invoice"
 
         invoice_name = invoice.get("name")
+        offline_id = invoice.get(OFFLINE_ID_FIELD)
 
         # Banking someone else's later changes under this cart's totals would lose them.
         _assert_not_stale(doctype, invoice_name, client_modified)
 
         # Throws if this sale was already submitted (or cancelled) elsewhere,
-        # rather than booking a duplicate for the same cart.
-        invoice_doc = _get_editable_invoice(doctype, invoice_name)
+        # rather than booking a duplicate for the same cart. The offline id is
+        # consulted when the name is unknown here, so a checkout retry updates
+        # the draft it already created instead of inserting a second invoice
+        # that then fails on the unique key and leaves the first one in Draft.
+        invoice_doc = _get_editable_invoice(doctype, invoice_name, offline_id)
 
         if invoice_doc:
             previous_customer = invoice_doc.get("customer")
+            # As in update_invoice: the resolved draft's name wins over whatever
+            # name the till sent, which may be stale or unknown to this server.
+            invoice.pop("name", None)
             invoice_doc.update(invoice)
             _clear_stale_party_details(invoice_doc, previous_customer, invoice)
+            invoice_name = invoice_doc.name
         else:
             invoice.pop("name", None)
             created = update_invoice(json.dumps(invoice, default=str))
@@ -826,6 +949,11 @@ def submit_invoice(invoice=None, data=None):
 
         # Auto-set batch numbers for returns
         _auto_set_return_batches(invoice_doc)
+        for item in invoice_doc.items:
+            if item.batch_no or item.serial_no:
+                item.use_serial_batch_fields = 1
+
+        _validate_discount_edit_permission(invoice_doc, applied_pricing_rules)
 
         # Check if POS Settings allows negative stock
         pos_settings_allow_negative = False
@@ -977,8 +1105,9 @@ def get_invoice(invoice_name):
 def render_draft_receipt(invoice_data):
 	"""Render the draft receipt print format from cart data without saving an invoice.
 
+	bt-autorider merge: render POS Profile-driven draft receipt print formats.
 	Builds a transient Sales Invoice so taxes/GST/totals are computed by ERPNext,
-	then renders the "POS Next Draft Receipt" print format against it.
+	then renders the POS Profile print format against it.
 	"""
 	data = json.loads(invoice_data) if isinstance(invoice_data, str) else invoice_data
 
@@ -1028,7 +1157,38 @@ def render_draft_receipt(invoice_data):
 	if data.get("name"):
 		si.name = data.get("name")
 
-	return frappe.get_print(doc=si, print_format="POS Next Draft Receipt", no_letterhead=1)
+	print_format = data.get("print_format")
+	if not print_format and pos_profile_doc:
+		print_format = pos_profile_doc.print_format
+
+	if not print_format or not frappe.db.exists("Print Format", print_format):
+		print_format = "POS Next Draft Receipt"
+
+	letterhead = data.get("letterhead") or (pos_profile_doc.letter_head if pos_profile_doc else None)
+	print_format_doc = frappe.get_cached_doc("Print Format", print_format)
+
+	if print_format_doc.print_format_type == "Jinja":
+		html = frappe.render_template(print_format_doc.html or "", {"doc": si})
+		css = print_format_doc.css or ""
+		return f"""
+			<!doctype html>
+			<html>
+				<head>
+					<meta charset="utf-8">
+					<style>{css}</style>
+				</head>
+				<body>
+					<div class="print-format">{html}</div>
+				</body>
+			</html>
+		"""
+
+	return frappe.get_print(
+		doc=si,
+		print_format=print_format,
+		no_letterhead=0 if letterhead else 1,
+		letterhead=letterhead,
+	)
 
 
 @frappe.whitelist()

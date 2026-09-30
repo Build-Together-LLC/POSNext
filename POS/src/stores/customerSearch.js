@@ -220,37 +220,33 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 
 		loading.value = true
 		try {
-                        // Try to get from worker cache first
-                        const cachedCustomers = await offlineWorker.searchCachedCustomers(
-                                "",
-                                0,
-                        )
-
-			if (cachedCustomers && cachedCustomers.length > 0) {
-				allCustomers.value = cachedCustomers
-				console.log(
-					`✓ Loaded ${cachedCustomers.length} customers from cache`,
-				)
-			} else if (!isOffline()) {
-				// Fetch from server if cache is empty and online
-                                const response = await call("pos_next.api.customers.get_customers", {
-                                        pos_profile: posProfile,
-                                        search_term: "",
-                                        start: 0,
-                                        limit: 0,
-                                })
+			if (!isOffline()) {
+				// Fetch from server when online so POS Profile customer-group filters are current.
+				const response = await call("pos_next.api.customers.get_customers", {
+					pos_profile: posProfile,
+					search_term: "",
+					start: 0,
+					limit: 0,
+				})
 				const list = response?.message || response || []
 				allCustomers.value = list
 
-				// Cache for future use
+				// Replace the customer cache with the profile-scoped list.
+				await offlineWorker.clearCustomersCache()
 				if (list.length) {
 					await offlineWorker.cacheCustomers(list)
 				}
 				console.log(`✓ Loaded ${list.length} customers from server`)
 			} else {
-				// Offline and cache is empty - show warning
-				console.warn("⚠️ Offline mode: No cached customers available. Please sync data when online.")
-				allCustomers.value = []
+				// Offline fallback to the last profile-scoped customer cache.
+				const cachedCustomers = await offlineWorker.searchCachedCustomers("", 0)
+				if (cachedCustomers && cachedCustomers.length > 0) {
+					allCustomers.value = cachedCustomers
+					console.log(`✓ Loaded ${cachedCustomers.length} customers from cache`)
+				} else {
+					console.warn("⚠️ Offline mode: No cached customers available. Please sync data when online.")
+					allCustomers.value = []
+				}
 			}
 
 			// Clear caches when new data is loaded
