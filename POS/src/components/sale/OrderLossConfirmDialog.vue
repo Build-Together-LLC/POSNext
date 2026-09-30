@@ -200,6 +200,7 @@ async function confirm() {
 			inCartItem.rate = rateVal
 			inCartItem.price_list_rate = rateVal
 			cartStore.recalculateItem?.(inCartItem)
+			cartStore.rebuildIncrementalCache?.()
 		}
 		showSuccess(__('Loss of order recorded for "{0}" ({1} units)', [itemName, qty]))
 	} else {

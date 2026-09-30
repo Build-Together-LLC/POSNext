@@ -191,4 +191,19 @@ describe("useInvoice quantity update with order loss tracking", () => {
 		expect(invoiceItems.value.length).toBe(0)
 		expect(removedShortfalls.length).toBe(1)
 	})
+
+	it("rebuildIncrementalCache updates subtotal when an in-cart item's rate is corrected", () => {
+		const { invoiceItems, addItem, recalculateItem, rebuildIncrementalCache, subtotal } = useInvoice()
+		addItem(ITEM, 3) // 3 * 100 = 300
+		expect(subtotal.value).toBe(300)
+
+		const item = invoiceItems.value[0]
+		item.rate = 150
+		item.price_list_rate = 150
+		recalculateItem(item)
+		expect(subtotal.value).toBe(300) // Stale before rebuild
+
+		rebuildIncrementalCache()
+		expect(subtotal.value).toBe(450) // Corrected after rebuild
+	})
 })
