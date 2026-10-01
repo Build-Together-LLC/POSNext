@@ -364,5 +364,50 @@ describe("loss of order ledger", () => {
 		expect(store.getShortfall(ITEM).available_qty).toBe(3)
 		expect(store.getShortfall(ITEM).rate).toBe(150)
 	})
+
+	it("records 0-stock demand directly using unique session IDs for each recording so they do not overwrite each other", async () => {
+		const store = usePOSOrderLossStore()
+		call.mockClear()
+
+		await store.recordDirectLoss({
+			item: ITEM,
+			demandedQty: 200,
+			rate: 50,
+			availableQty: 0,
+		})
+
+		expect(call).toHaveBeenCalledTimes(1)
+		const firstCall = call.mock.calls[0]
+		const firstSession = firstCall[1].cart_session_id
+		const firstLosses = JSON.parse(firstCall[1].losses)
+		expect(firstLosses[0].demanded_qty).toBe(200)
+
+		await store.recordDirectLoss({
+			item: ITEM,
+			demandedQty: 300,
+			rate: 50,
+			availableQty: 0,
+		})
+
+		expect(call).toHaveBeenCalledTimes(2)
+		const secondCall = call.mock.calls[1]
+		const secondSession = secondCall[1].cart_session_id
+		const secondLosses = JSON.parse(secondCall[1].losses)
+		expect(secondLosses[0].demanded_qty).toBe(300)
+
+		// Each direct recording gets its own unique session ID so backend treats them as distinct records
+		expect(secondSession).not.toBe(firstSession)
+		// Direct losses do not pollute the current cart shortfalls
+		expect(store.shortfalls.size).toBe(0)
+	})
+
+	it("does not prompt again when shortfall for the item is already recorded in shortfalls map", () => {
+		const store = usePOSOrderLossStore()
+		store.recordShortfall({ item: ITEM, requestedQty: 10, availableQty: 2 })
+		expect(store.shortfalls.size).toBe(1)
+
+		store.promptShortfall({ item: ITEM, requestedQty: 10, availableQty: 2 })
+		expect(store.pendingPrompt).toBe(null)
+	})
 })
 

@@ -190,9 +190,8 @@ async function confirm() {
 	const inCartItem = existingCartItem.value
 	const availQty = availableQtyForPrompt.value
 
-	orderLossStore.confirmPrompt(qty, rateVal, availQty)
-
 	if (inCartItem) {
+		orderLossStore.confirmPrompt(qty, rateVal, availQty)
 		// Available qty was > 0 (e.g. 3) and reached 0 while adding to cart.
 		// Keep in cart and display the loss badge beside qty (e.g. 3/10 - 7).
 		inCartItem.ordered_qty = qty
@@ -205,7 +204,9 @@ async function confirm() {
 		showSuccess(__('Loss of order recorded for "{0}" ({1} units)', [itemName, qty]))
 	} else {
 		// Initially 0 qty was available.
-		// Do NOT add to cart; record it directly to the backend!
+		// Dismiss the prompt from queue and record directly to backend as a new record!
+		orderLossStore.dismissPrompt()
+
 		const zeroQtyItem = (cartStore.invoiceItems || []).find(
 			(i) =>
 				i.item_code === currentPrompt.item_code &&
@@ -217,7 +218,14 @@ async function confirm() {
 		}
 
 		try {
-			await orderLossStore.flush({ force: true })
+			await orderLossStore.recordDirectLoss({
+				item: currentPrompt.item || currentPrompt,
+				demandedQty: qty,
+				rate: rateVal,
+				availableQty: 0,
+				source: currentPrompt.source || "Catalog Click",
+				reason: currentPrompt.reason,
+			})
 		} catch (error) {
 			console.warn("Could not record loss of order directly", error)
 		}

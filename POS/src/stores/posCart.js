@@ -124,19 +124,24 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (shouldCheckStock) {
 				if (Math.floor(availableQty) <= 0) {
 					if (settingsStore.shouldRecordOrderLoss()) {
-						orderLossStore.promptShortfall({
-							item,
-							requestedQty: qty,
-							availableQty: 0,
-							source: "Cart Add",
-						})
-						return
+						if (!options.skipShortfallPrompt) {
+							orderLossStore.promptShortfall({
+								item,
+								requestedQty: qty,
+								availableQty: 0,
+								source: "Cart Add",
+							})
+							return
+						}
+						captureShortfall(item, qty, 0, "MRP Selection")
+						options.ordered_qty = qty
+						qty = 0
+					} else {
+						const itemType = item.is_bundle ? "Bundle" : "Item"
+						throw new Error(
+							`"${item.item_name}" cannot be added to cart. ${itemType} quantity reaches 0.`
+						)
 					}
-
-					const itemType = item.is_bundle ? "Bundle" : "Item"
-					throw new Error(
-						`"${item.item_name}" cannot be added to cart. ${itemType} quantity reaches 0.`
-					)
 				}
 				if (qty > availableQty) {
 					captureShortfall(item, qty, availableQty, "Cart Add")
