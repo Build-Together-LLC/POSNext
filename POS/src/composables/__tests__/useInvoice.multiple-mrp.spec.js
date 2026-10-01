@@ -156,4 +156,20 @@ describe("cart lines when one item carries several MRPs", () => {
 		expect(invoiceItems.value).toHaveLength(1)
 		expect(invoiceItems.value[0].rate).toBe(500)
 	})
+
+	it("updates existing item rate and preserves ordered_qty without opening empty line when skipShortfallPrompt is set and quantity is 0", () => {
+		const { invoiceItems, addItem } = useInvoice()
+
+		addItem(ITEM, 1, { rate: 400, ordered_qty: 20 })
+		expect(invoiceItems.value).toHaveLength(1)
+		expect(invoiceItems.value[0].rate).toBe(400)
+		expect(invoiceItems.value[0].ordered_qty).toBe(20)
+
+		// Cashier selects MRP 400 from MRP dialog when stock is exhausted
+		addItem(ITEM, 0, { rate: 400, ordered_qty: 1, skipShortfallPrompt: true })
+		expect(invoiceItems.value).toHaveLength(1)
+		expect(invoiceItems.value[0].rate).toBe(400)
+		// ordered_qty is preserved (not overwritten by 1)
+		expect(invoiceItems.value[0].ordered_qty).toBe(20)
+	})
 })
