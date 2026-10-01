@@ -1841,6 +1841,7 @@ async function handleOptionSelected(option) {
 				// merge by increasing quantity; otherwise, a new row will be created for the different MRP.
 				cartStore.addItem(item, qty, false, shiftStore.currentProfile, {
 					rate: option.rate,
+					skipShortfallPrompt: true,
 				})
 				uiStore.showItemSelectionDialog = false
 				cartStore.clearPendingItem()

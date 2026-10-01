@@ -304,8 +304,69 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 
 		const key = lossKey(entry)
 		if (queue.value.some((q) => lossKey(q) === key)) return
+		if (shortfalls.value.has(key)) return
 
 		queue.value = [...queue.value, entry]
+	}
+
+	/**
+	 * Directly record a 0-stock shortfall to the backend as an independent record.
+	 * Generates a unique session ID so each direct recording creates a new record
+	 * on the server rather than merging into previous recordings.
+	 */
+	async function recordDirectLoss({
+		item,
+		demandedQty = 1,
+		rate,
+		availableQty = 0,
+		source = "Catalog Click",
+		reason,
+	}) {
+		if (!settingsStore.shouldRecordOrderLoss()) return null
+		if (!item?.item_code) return null
+
+		const cartStore = await getCartStore()
+		const demanded = Number(demandedQty) || 1
+		const itemRate =
+			rate !== undefined && rate !== null
+				? Number(rate) || 0
+				: Number(item.rate || item.price_list_rate || item.standard_rate) || 0
+
+		const directSessionId = newSessionId()
+
+		const entry = {
+			item_code: item.item_code,
+			item_name: item.item_name || item.item_code,
+			uom: item.uom || item.stock_uom || null,
+			warehouse: item.warehouse || null,
+			batch_no: item.batch_no || null,
+			conversion_factor: Number(item.conversion_factor) || 1,
+			rate: itemRate,
+			demanded_qty: demanded,
+			available_qty: 0,
+			sold_qty: 0,
+			source: source || "Catalog Click",
+			reason: reason || "Out of Stock",
+		}
+
+		const context = {
+			pos_profile: cartStore.posProfile,
+			cart_session_id: directSessionId,
+			pos_opening_shift: cartStore.posOpeningShift || null,
+			customer: cartStore.customer?.name || cartStore.customer || null,
+		}
+
+		if (!context.pos_profile) return null
+
+		if (isOffline()) {
+			await queueOffline([entry], context)
+			return null
+		}
+
+		return await call("pos_next.api.order_loss.record_losses", {
+			...context,
+			losses: JSON.stringify([entry]),
+		})
 	}
 
 	/**
@@ -565,6 +626,7 @@ export const usePOSOrderLossStore = defineStore("posOrderLoss", () => {
 		lastFlushError,
 		recordShortfall,
 		promptShortfall,
+		recordDirectLoss,
 		confirmPrompt,
 		dismissPrompt,
 		flush,

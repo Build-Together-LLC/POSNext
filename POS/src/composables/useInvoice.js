@@ -235,7 +235,10 @@ export function useInvoice() {
 
 		if (existingItem) {
 			if (options.ordered_qty !== undefined && options.ordered_qty !== null) {
-				existingItem.ordered_qty = options.ordered_qty
+				existingItem.ordered_qty = Math.max(
+					existingItem.ordered_qty || 0,
+					options.ordered_qty,
+				)
 			}
 			if (options.rate !== undefined && options.rate !== null) {
 				existingItem.rate = options.rate
@@ -274,6 +277,9 @@ export function useInvoice() {
 			_cachedTotalDiscount.value +=
 				(existingItem.discount_amount || 0) - oldDiscount
 		} else {
+			if (quantity <= 0 && options.skipShortfallPrompt) {
+				return
+			}
 			const itemRate = options.rate !== undefined && options.rate !== null ? options.rate : (sourceItem.rate || sourceItem.price_list_rate || 0)
 			const newItem = {
 				line_id: nextLineId(),

@@ -219,9 +219,14 @@ def _sanitise(
         "rate": rate,
         "reason": entry.get("reason") or ("Out of Stock" if not available else "Insufficient Stock"),
         "source": entry.get("source") or "Manual",
-        "cart_session_id": cart_session_id,
-        "idempotency_key": make_idempotency_key(
-            cart_session_id, item_code, uom, warehouse, entry.get("batch_no")
+        "cart_session_id": entry.get("cart_session_id") or cart_session_id,
+        "idempotency_key": entry.get("idempotency_key")
+        or make_idempotency_key(
+            entry.get("cart_session_id") or cart_session_id,
+            item_code,
+            uom,
+            warehouse,
+            entry.get("batch_no"),
         ),
     }
 
