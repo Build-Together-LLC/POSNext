@@ -63,6 +63,7 @@
 									</svg>
 								</button>
 								<button
+									v-if="canDeleteDrafts"
 									@click.stop="handleDeleteDraft(draft.draft_id)"
 									class="text-gray-400 hover:text-red-600 transition-colors p-1"
 									:title="__('Delete draft')"
@@ -109,7 +110,7 @@
 		<template #actions>
 			<div class="flex justify-between items-center w-full">
 				<Button
-					v-if="drafts.length > 0"
+					v-if="drafts.length > 0 && canDeleteDrafts"
 					variant="subtle"
 					theme="red"
 					@click="showClearAllDialog = true"
@@ -177,6 +178,7 @@ import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { printDraftReceipt } from "@/utils/printInvoice"
 import { useToast } from "@/composables/useToast"
 import { usePOSDraftsStore } from "@/stores/posDrafts"
+import { usePOSPermissions } from "@/composables/usePermissions"
 import { usePOSShiftStore } from "@/stores/posShift"
 import { Button, Dialog, Input } from "frappe-ui"
 import { computed, onMounted, ref, watch } from "vue"
@@ -186,6 +188,17 @@ const shiftStore = usePOSShiftStore()
 // Reading through the store keeps this dialog agnostic of where drafts live -
 // IndexedDB or server-side Sales Invoice drafts. It lists both.
 const draftsStore = usePOSDraftsStore()
+const { canDeleteInvoice } = usePOSPermissions()
+const canDeleteDrafts = ref(false)
+
+async function checkDeletePermission() {
+	try {
+		canDeleteDrafts.value = await canDeleteInvoice()
+	} catch (error) {
+		console.error("Error checking delete permission:", error)
+		canDeleteDrafts.value = false
+	}
+}
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -235,6 +248,7 @@ watch(
 		if (val) {
 			draftListFilter.value = ""
 			loadDrafts()
+			checkDeletePermission()
 		}
 	},
 )
@@ -245,6 +259,7 @@ watch(show, (val) => {
 
 onMounted(() => {
 	loadDrafts()
+	checkDeletePermission()
 })
 
 async function loadDrafts() {
@@ -293,11 +308,21 @@ async function handlePrintDraft(draft) {
 }
 
 function handleDeleteDraft(draftId) {
+	if (!canDeleteDrafts.value) {
+		showError(__("You don't have permission to delete draft invoices"))
+		return
+	}
 	draftToDelete.value = draftId
 	showDeleteDialog.value = true
 }
 
 async function confirmDeleteDraft() {
+	if (!canDeleteDrafts.value) {
+		showError(__("You don't have permission to delete draft invoices"))
+		showDeleteDialog.value = false
+		draftToDelete.value = null
+		return
+	}
 	// The store owns the toast and the list refresh, and routes the delete to
 	// whichever backend this draft lives in.
 	await draftsStore.deleteDraft(draftToDelete.value)
@@ -309,6 +334,11 @@ async function confirmDeleteDraft() {
 }
 
 async function confirmClearAll() {
+	if (!canDeleteDrafts.value) {
+		showError(__("You don't have permission to delete draft invoices"))
+		showClearAllDialog.value = false
+		return
+	}
 	await draftsStore.deleteAllDrafts()
 	showClearAllDialog.value = false
 

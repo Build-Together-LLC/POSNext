@@ -2,6 +2,7 @@ import router from "@/router"
 import { createResource } from "frappe-ui"
 import { computed, reactive } from "vue"
 
+import { clearPermissionCache } from "@/composables/usePermissions"
 import { ensureCSRFToken } from "@/utils/csrf"
 import { userResource, userData } from "./user"
 
@@ -27,6 +28,7 @@ export const session = reactive({
 			// Initialize CSRF token immediately after successful login
 			await ensureCSRFToken()
 
+			clearPermissionCache()
 			await userResource.reload()
 
 			// Refresh userData from cookies after login
@@ -45,6 +47,7 @@ export const session = reactive({
 	logout: createResource({
 		url: "logout",
 		onSuccess() {
+			clearPermissionCache()
 			userResource.reset()
 			session.user = sessionUser()
 			router.replace({ name: "Login" })
@@ -52,6 +55,7 @@ export const session = reactive({
 		onError(error) {
 			console.error("Logout error:", error)
 			// Even if logout fails on server, clear local session
+			clearPermissionCache()
 			userResource.reset()
 			session.user = null
 			router.replace({ name: "Login" })

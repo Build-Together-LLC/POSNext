@@ -23,6 +23,7 @@ import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSOrderLossStore } from "@/stores/orderLoss"
 import { usePOSOffersStore } from "@/stores/posOffers"
 import { usePOSSettingsStore } from "@/stores/posSettings"
+import { usePermissions } from "@/composables/usePermissions"
 import { defineStore } from "pinia"
 import { computed, ref } from "vue"
 
@@ -48,6 +49,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 	const cartStore = usePOSCartStore()
 	const orderLossStore = usePOSOrderLossStore()
 	const offersStore = usePOSOffersStore()
+	const { checkPermission } = usePermissions()
 
 	// State
 	const draftsCount = ref(0)
@@ -677,6 +679,12 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 	}
 
 	async function deleteDraftById(draftId) {
+		const hasPermission = await checkPermission("Sales Invoice", "delete")
+		if (!hasPermission) {
+			showError(__("You don't have permission to delete draft invoices"))
+			return false
+		}
+
 		// Deep resolve: a miss here means the id is a server draft, which is not
 		// the same question as "where would the next hold go".
 		const draft = await resolveDraftDeep(draftId)
@@ -698,13 +706,26 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			}
 			await loadDrafts() // Refresh drafts list and count
 			showSuccess(__("Draft deleted successfully"))
+			return true
 		} catch (error) {
 			console.error("Error deleting draft:", error)
-			showError(__("Failed to delete draft"))
+			const parsed = parseError(error)
+			showError(
+				parsed?.message && parsed.message !== __("An unexpected error occurred")
+					? parsed.message
+					: __("Failed to delete draft"),
+			)
+			return false
 		}
 	}
 
 	async function deleteAllDrafts() {
+		const hasPermission = await checkPermission("Sales Invoice", "delete")
+		if (!hasPermission) {
+			showError(__("You don't have permission to delete draft invoices"))
+			return false
+		}
+
 		try {
 			await clearAllDrafts()
 
@@ -731,7 +752,12 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			return true
 		} catch (error) {
 			console.error("Error clearing drafts:", error)
-			showError(__("Failed to clear drafts"))
+			const parsed = parseError(error)
+			showError(
+				parsed?.message && parsed.message !== __("An unexpected error occurred")
+					? parsed.message
+					: __("Failed to clear drafts"),
+			)
 			return false
 		}
 	}
