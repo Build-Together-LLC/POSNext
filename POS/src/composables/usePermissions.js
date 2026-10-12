@@ -1,3 +1,4 @@
+import { sessionUser } from "@/data/session"
 import { call } from "@/utils/apiWrapper"
 import { computed, ref } from "vue"
 
@@ -8,6 +9,10 @@ import { computed, ref } from "vue"
 
 // Cache permissions to avoid repeated API calls
 const permissionCache = ref({})
+
+export function clearPermissionCache() {
+	permissionCache.value = {}
+}
 
 export function usePermissions() {
 	/**
@@ -20,7 +25,8 @@ export function usePermissions() {
 	async function checkPermission(doctype, permType = "create", docname = null) {
 		try {
 			// Check cache first
-			const cacheKey = `${doctype}:${permType}`
+			const currentUser = sessionUser() || (typeof window !== "undefined" && window.frappe?.session?.user) || ""
+			const cacheKey = `${currentUser}:${doctype}:${permType}:${docname || ""}`
 			if (permissionCache.value[cacheKey] !== undefined) {
 				return permissionCache.value[cacheKey]
 			}
@@ -116,6 +122,7 @@ export function usePermissions() {
 			{ doctype: "POS Coupon", permType: "write" },
 			{ doctype: "Sales Invoice", permType: "create" },
 			{ doctype: "Sales Invoice", permType: "submit" },
+			{ doctype: "Sales Invoice", permType: "delete" },
 		]
 
 		await checkMultiplePermissions(commonChecks)
@@ -160,6 +167,8 @@ export function usePOSPermissions() {
 		await checkPermission("Sales Invoice", "create")
 	const canSubmitInvoice = async () =>
 		await checkPermission("Sales Invoice", "submit")
+	const canDeleteInvoice = async () =>
+		await checkPermission("Sales Invoice", "delete")
 
 	// Settings permissions
 	const canEditSettings = async () =>
@@ -175,6 +184,7 @@ export function usePOSPermissions() {
 		canApplyCoupon,
 		canCreateInvoice,
 		canSubmitInvoice,
+		canDeleteInvoice,
 		canEditSettings,
 		preloadCommonPermissions,
 	}

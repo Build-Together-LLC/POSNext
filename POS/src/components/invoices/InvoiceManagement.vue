@@ -450,6 +450,7 @@
 													<span>{{ __('Edit') }}</span>
 												</button>
 												<button
+													v-if="canDeleteDrafts"
 													@click.stop="$emit('delete-draft', draft.draft_id)"
 													class="text-gray-400 hover:text-red-600 transition-colors p-1"
 													:title="__('Delete draft')"
@@ -575,6 +576,7 @@ import { useInvoiceFilters } from "@/composables/useInvoiceFilters"
 import { useInvoiceFiltersStore } from "@/stores/invoiceFilters"
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
+import { usePOSPermissions } from "@/composables/usePermissions"
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
 import { Button, call } from "frappe-ui"
@@ -582,6 +584,17 @@ import { computed, onMounted, ref, watch } from "vue"
 
 const { showSuccess, showError } = useToast()
 const { formatDate, formatDateTime, formatTime } = useFormatters()
+const { canDeleteInvoice } = usePOSPermissions()
+const canDeleteDrafts = ref(false)
+
+async function checkDeletePermission() {
+	try {
+		canDeleteDrafts.value = await canDeleteInvoice()
+	} catch (error) {
+		console.error("Error checking delete permission:", error)
+		canDeleteDrafts.value = false
+	}
+}
 // Two tills can open the same unpaid invoice from this list, so hold it while one is settling it.
 const {
 	acquire: acquireInvoiceLock,
@@ -792,6 +805,7 @@ watch(
 	(val) => {
 		show.value = val
 		if (val) {
+			checkDeletePermission()
 			loadUnpaidInvoices()
 			loadUnpaidSummary()
 			// Also request history refresh if we don't have data
@@ -968,6 +982,7 @@ function draftTotal(draft) {
 
 // Lifecycle
 onMounted(() => {
+	checkDeletePermission()
 	// Load saved filter presets from localStorage
 	filterStore.loadSavedFiltersFromStorage()
 

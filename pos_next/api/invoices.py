@@ -1155,6 +1155,12 @@ def delete_invoice(invoice):
     if frappe.db.get_value(doctype, invoice, "docstatus") != 0:
         frappe.throw(_("Cannot delete submitted invoice {0}").format(invoice))
 
+    if not frappe.has_permission(doctype, "delete", invoice):
+        frappe.throw(
+            _("You don't have permission to delete draft invoices"),
+            frappe.PermissionError,
+        )
+
     frappe.delete_doc(doctype, invoice, force=1)
     return _("Invoice {0} Deleted").format(invoice)
 
@@ -1406,17 +1412,20 @@ def _get_pos_draft_doc(invoice_name, ptype="read"):
     if doc.docstatus != 0:
         frappe.throw(_("Invoice {0} is no longer a draft").format(invoice_name))
 
-    if (
-        ptype == "delete"
-        and doc.owner != frappe.session.user
-        and not _can_delete_others_drafts()
-    ):
-        frappe.throw(
-            _("Draft {0} was held by another user and can only be deleted by a manager").format(
-                invoice_name
-            ),
-            frappe.PermissionError,
-        )
+    if ptype == "delete":
+        if not frappe.has_permission("Sales Invoice", "delete", doc):
+            frappe.throw(
+                _("You don't have permission to delete draft invoices"),
+                frappe.PermissionError,
+            )
+
+        if doc.owner != frappe.session.user and not _can_delete_others_drafts():
+            frappe.throw(
+                _("Draft {0} was held by another user and can only be deleted by a manager").format(
+                    invoice_name
+                ),
+                frappe.PermissionError,
+            )
 
     return doc
 
@@ -1698,6 +1707,12 @@ def delete_all_pos_drafts(pos_profile=None, pos_opening_shift=None):
     """
     _assert_pos_profile_access(pos_profile)
 
+    if not frappe.has_permission("Sales Invoice", "delete"):
+        frappe.throw(
+            _("You don't have permission to delete draft invoices"),
+            frappe.PermissionError,
+        )
+
     owner_only = not _can_delete_others_drafts()
 
     names = _pos_draft_names(
@@ -1715,6 +1730,9 @@ def delete_all_pos_drafts(pos_profile=None, pos_opening_shift=None):
 
     deleted, failed = [], []
     for name in names:
+        if not frappe.has_permission("Sales Invoice", "delete", name):
+            failed.append(name)
+            continue
         try:
             frappe.delete_doc("Sales Invoice", name, force=1)
             deleted.append(name)
