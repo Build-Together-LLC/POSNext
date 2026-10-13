@@ -233,7 +233,7 @@ export function printInvoiceCustom(invoiceData) {
 						: 0;
 				const qtyDisplay = rawQty % 1 !== 0 ? rawQty : Math.floor(rawQty);
 				const itemPrice = item.price_list_rate || item.custom_mrp || item.rate || "";
-				const nm = (item.item_name || "").slice(0, 17);
+				const nm = item.item_name || "";
 
 				itemRowsHtml += `
 				<div class="itm">
@@ -291,16 +291,16 @@ export function printInvoiceCustom(invoiceData) {
             width: 100%; table-layout: fixed; border-collapse: collapse;
             font-size: 9.5px; line-height: 1.2; margin: 0;
         }
-        .r1 td, .r2 td { vertical-align: top; white-space: nowrap; overflow: hidden; }
-        .r1 td.a0, .r2 td.a0 { width: 8%; }
+        .r1 td, .r2 td { vertical-align: top; white-space: normal; word-wrap: break-word; overflow-wrap: anywhere; word-break: break-word; }
+        .r1 td.a0, .r2 td.a0 { width: 8%; white-space: nowrap; }
         .r2 td.a0 { text-indent: 22px; overflow: visible; }
-        .r1 td.a1 { width: 44%; text-align: center; }
+        .r1 td.a1 { width: 44%; text-align: center; padding: 0 2px; }
         .r1 td.a2 { width: 48%; }
         
         .r2 td.b2 { width: 44%; text-align: center; }
         .r2 td.b3 { width: 26%; }
         .r2 td.b4 { width: 22%; }
-        .hd td { font-size: 8.5px; }
+        .hd td { font-size: 8.5px; white-space: nowrap; }
         .sn { font-size: 7.5px; vertical-align: super; }
         .itm { margin-bottom: 5px; }
         .brand { font-size: 9px; margin: 3px 0 1px; font-weight: bold; }
