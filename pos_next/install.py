@@ -117,7 +117,7 @@ def install_print_format(doc_dict, quiet=False):
 			existing_doc = frappe.get_doc("Print Format", name)
 
 			# Update key properties
-			update_fields = ["html", "doc_type", "module", "disabled", "standard"]
+			update_fields = ["html", "css", "doc_type", "module", "disabled", "standard"]
 			updated = False
 
 			for field in update_fields:

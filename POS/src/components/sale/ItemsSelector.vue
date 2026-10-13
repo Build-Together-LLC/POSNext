@@ -390,9 +390,9 @@
 						</div>
 
 						<!-- Item Details -->
-						<div class="min-w-0 flex justify-between items-end gap-1">
+						<div class="min-w-0 flex flex-wrap justify-between items-end gap-x-1 gap-y-0.5">
 							<div class="min-w-0">
-								<h3 class="text-[10px] sm:text-xs font-semibold text-gray-900 break-words mb-0.5 leading-tight" :title="item.item_name">
+								<h3 class="text-[10px] sm:text-xs font-semibold text-gray-900 break-words [overflow-wrap:anywhere] mb-0.5 leading-tight" :title="item.item_name">
 									{{ item.item_name }}
 								</h3>
 								<p class="text-[9px] sm:text-[10px] text-gray-500 leading-tight">
@@ -400,7 +400,7 @@
 									<span class="text-gray-400">/ {{ item.uom || item.stock_uom || __('Nos', null, 'UOM') }}</span>
 								</p>
 							</div>
-							<span class="text-[9px] sm:text-[10px] text-black font-medium truncate flex-shrink-0" :title="item.item_code">
+							<span class="text-[9px] sm:text-[10px] text-black font-medium break-all" :title="item.item_code">
 								{{ item.item_code }}
 							</span>
 						</div>
@@ -565,37 +565,37 @@
 							]"
 						>
 							<td class="w-full max-w-0 px-2 sm:px-3 py-2">
-								<!-- Wraps onto a second line when the column gets squeezed (e.g.
-								     after widening Sub Brand) before falling back to an ellipsis. -->
-								<div class="text-xs sm:text-sm font-medium text-gray-900 line-clamp-2 break-words" :title="item.item_name">
+								<!-- Wraps onto subsequent lines when the column gets squeezed (e.g.
+								     after widening Sub Brand) so the full name stays visible. -->
+								<div class="text-xs sm:text-sm font-medium text-gray-900 break-words [overflow-wrap:anywhere]" :title="item.item_name">
 									{{ item.item_name }}
 								</div>
 								<!-- Sub brand rides under the name on phones, where its own
 								     column is hidden. -->
-								<div v-if="showSubBrandColumn && item.custom_sub_brand" class="sm:hidden text-[10px] text-gray-500 truncate">
+								<div v-if="showSubBrandColumn && item.custom_sub_brand" class="sm:hidden text-[10px] text-gray-500 break-words [overflow-wrap:anywhere]">
 									{{ item.custom_sub_brand }}
 								</div>
 							</td>
 							<td :style="codeColumn.style" class="hidden sm:table-cell px-2 sm:px-3 py-2">
-								<!-- Codes have no spaces, so break-all lets them wrap onto a
-								     second line when the column is collapsed. -->
-								<div class="text-xs sm:text-sm font-bold text-gray-900 line-clamp-2 break-all" :title="item.item_code">{{ item.item_code }}</div>
+								<!-- Codes have no spaces, so break-all lets them wrap onto
+								     subsequent lines when the column is collapsed. -->
+								<div class="text-xs sm:text-sm font-bold text-gray-900 break-all" :title="item.item_code">{{ item.item_code }}</div>
 							</td>
 							<td v-if="showSubBrandColumn" :style="subBrandColumn.style" class="hidden sm:table-cell px-2 sm:px-3 py-2">
 								<span
 									v-if="item.custom_sub_brand"
-									class="inline-block max-w-full truncate align-middle px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 text-[10px] sm:text-xs font-medium"
+									class="inline-block max-w-full whitespace-normal break-words [overflow-wrap:anywhere] align-middle px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 text-[10px] sm:text-xs font-medium"
 									:title="item.custom_sub_brand"
 								>
 									{{ item.custom_sub_brand }}
 								</span>
 								<span v-else class="text-xs sm:text-sm text-gray-400">—</span>
 							</td>
-							<td v-if="showRackColumn" class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[90px]">
+							<td v-if="showRackColumn" class="px-2 sm:px-3 py-2 w-[70px] sm:w-[90px]">
 								<span
 									v-if="item.custom_rack_identifier"
 									:class="[
-										'inline-block px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-md shadow-sm max-w-full truncate',
+										'inline-block px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-md shadow-sm max-w-full whitespace-normal break-words [overflow-wrap:anywhere]',
 										'text-[10px] sm:text-sm font-bold',
 										getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).color,
 										getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).textColor
