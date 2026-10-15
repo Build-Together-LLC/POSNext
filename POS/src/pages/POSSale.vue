@@ -494,6 +494,7 @@
 		<InvoiceManagement
 			v-model="showInvoiceManagement"
 			:pos-profile="shiftStore.profileName"
+			:company="shiftStore.profileCompany"
 			:currency="shiftStore.profileCurrency"
 			:history-invoices="invoiceHistoryData"
 			:draft-invoices="draftsStore.drafts"
@@ -503,6 +504,13 @@
 			@load-draft="handleLoadDraftFromManagement"
 			@delete-draft="handleDeleteDraft"
 			@refresh-history="loadInvoiceHistoryData"
+		/>
+
+		<!-- POS Reports & Analytics Dialog -->
+		<POSReportsDialog
+			v-model="showReportsDialog"
+			:pos-profile="shiftStore.profileName"
+			:company="shiftStore.profileCompany"
 		/>
 
 		<!-- Invoice Detail Dialog -->
@@ -755,6 +763,7 @@ import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailability
 import POSSettings from "@/components/settings/POSSettings.vue"
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue"
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue"
+import POSReportsDialog from "@/components/pos/POSReportsDialog.vue"
 import { useRealtimeStock } from "@/composables/useRealtimeStock"
 import { usePOSEvents } from "@/composables/usePOSEvents"
 import { useLocale } from "@/composables/useLocale"
@@ -847,6 +856,9 @@ const showPOSSettings = ref(false)
 
 // Stock Lookup dialog (Products menu)
 const showStockLookup = ref(false)
+
+// Reports dialog (Reports menu)
+const showReportsDialog = ref(false)
 
 // Invoice Management dialog
 const showInvoiceManagement = ref(false)
@@ -2379,6 +2391,8 @@ function handleManagementMenuClick(menuItem) {
 	} else if (menuItem === "products") {
 		// Open Stock Lookup dialog in search mode
 		showStockLookup.value = true
+	} else if (menuItem === "reports") {
+		showReportsDialog.value = true
 	}
 }
 

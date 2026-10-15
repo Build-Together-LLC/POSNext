@@ -286,19 +286,158 @@
 										:unique-customers="invoiceFilters.uniqueCustomers.value"
 										:unique-products="invoiceFilters.uniqueProducts.value"
 										:filter-stats="invoiceFilters.filterStats.value"
+										:company="props.company"
 									/>
 								</div>
 
+								<!-- View Mode Switcher & Stats Bar -->
+								<div class="flex items-center justify-between mb-4">
+									<div class="text-sm font-semibold text-gray-700">
+										{{ __('{0} invoice(s) found', [filteredHistoryInvoices.length]) }}
+									</div>
+									<div class="flex items-center gap-1.5 bg-gray-100 border border-gray-300 rounded-lg p-1">
+										<button
+											type="button"
+											@click="setViewMode('card')"
+											:class="[
+												'px-3 py-1.5 rounded-md text-xs flex items-center gap-1.5 transition-all',
+												viewMode === 'card'
+													? 'bg-white text-gray-900 font-bold border-2 border-gray-900 shadow-sm'
+													: 'text-gray-600 font-medium hover:text-gray-900 hover:bg-gray-200/60 border-2 border-transparent'
+											]"
+											:title="__('Card View')"
+										>
+											<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
+											</svg>
+											<span>{{ __('Cards') }}</span>
+										</button>
+										<button
+											type="button"
+											@click="setViewMode('list')"
+											:class="[
+												'px-3 py-1.5 rounded-md text-xs flex items-center gap-1.5 transition-all',
+												viewMode === 'list'
+													? 'bg-white text-gray-900 font-bold border-2 border-gray-900 shadow-sm'
+													: 'text-gray-600 font-medium hover:text-gray-900 hover:bg-gray-200/60 border-2 border-transparent'
+											]"
+											:title="__('List View')"
+										>
+											<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+											</svg>
+											<span>{{ __('List') }}</span>
+										</button>
+									</div>
+								</div>
+
+								<!-- Loading State -->
+								<div v-if="loadingHistory" class="flex flex-col items-center justify-center py-12">
+									<div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mb-3"></div>
+									<p class="text-sm font-medium text-gray-600">{{ __('Fetching invoices from ERP...') }}</p>
+								</div>
+
 								<!-- Empty State -->
-								<div v-if="filteredHistoryInvoices.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
+								<div v-else-if="filteredHistoryInvoices.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
 									<svg class="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
 									</svg>
 									<p class="text-gray-600 font-medium">{{ __('No invoices found') }}</p>
 								</div>
 
+								<!-- List View Table -->
+								<div v-else-if="viewMode === 'list'" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+									<div class="overflow-x-auto">
+										<table class="w-full text-start border-collapse text-sm">
+											<thead class="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+												<tr>
+													<th class="px-4 py-3.5 text-start">{{ __('Invoice') }}</th>
+													<th class="px-4 py-3.5 text-start">{{ __('Date & Time') }}</th>
+													<th class="px-4 py-3.5 text-start">{{ __('Customer') }}</th>
+													<th class="px-4 py-3.5 text-start">{{ __('Status') }}</th>
+													<th class="px-4 py-3.5 text-end">{{ __('Total') }}</th>
+													<th class="px-4 py-3.5 text-end">{{ __('Paid') }}</th>
+													<th class="px-4 py-3.5 text-end">{{ __('Outstanding') }}</th>
+													<th class="px-4 py-3.5 text-center">{{ __('Actions') }}</th>
+												</tr>
+											</thead>
+											<tbody class="divide-y divide-gray-100">
+												<tr
+													v-for="invoice in filteredHistoryInvoices"
+													:key="invoice.name"
+													class="hover:bg-indigo-50/40 transition-colors"
+												>
+													<td class="px-4 py-3.5 font-bold text-gray-900 whitespace-nowrap">
+														{{ invoice.name }}
+													</td>
+													<td class="px-4 py-3.5 text-gray-600 whitespace-nowrap text-xs">
+														{{ formatDate(invoice.posting_date) }} {{ formatTime(invoice.posting_time) }}
+													</td>
+													<td class="px-4 py-3.5 text-gray-800 font-medium whitespace-nowrap">
+														{{ invoice.customer_name || invoice.customer }}
+													</td>
+													<td class="px-4 py-3.5 whitespace-nowrap">
+														<span
+															:class="[
+																'text-xs px-2.5 py-1 rounded-full font-semibold',
+																getInvoiceStatusColor(invoice)
+															]"
+														>
+															{{ __(invoice.status) }}
+														</span>
+													</td>
+													<td class="px-4 py-3.5 text-end font-bold text-indigo-600 whitespace-nowrap">
+														{{ formatCurrency(invoice.grand_total) }}
+													</td>
+													<td class="px-4 py-3.5 text-end font-semibold text-green-600 whitespace-nowrap">
+														{{ formatCurrency(invoice.paid_amount || 0) }}
+													</td>
+													<td class="px-4 py-3.5 text-end font-semibold text-orange-600 whitespace-nowrap">
+														{{ formatCurrency(invoice.outstanding_amount || 0) }}
+													</td>
+													<td class="px-4 py-3.5 text-center whitespace-nowrap">
+														<div class="flex items-center justify-center gap-1.5">
+															<button
+																@click="$emit('view-invoice', invoice)"
+																class="px-2.5 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors inline-flex items-center gap-1"
+																:title="__('View Details')"
+															>
+																<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+																	<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+																	<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+																</svg>
+																<span>{{ __('View') }}</span>
+															</button>
+															<button
+																@click="$emit('print-invoice', invoice)"
+																class="px-2.5 py-1.5 text-xs font-semibold text-green-600 bg-green-50 hover:bg-green-100 rounded-md transition-colors inline-flex items-center gap-1"
+																:title="__('Print')"
+															>
+																<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+																	<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+																</svg>
+																<span>{{ __('Print') }}</span>
+															</button>
+															<button
+																@click="$emit('create-return', invoice)"
+																class="px-2.5 py-1.5 text-xs font-semibold text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-md transition-colors inline-flex items-center gap-1"
+																:title="__('Create Return')"
+															>
+																<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+																	<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
+																</svg>
+																<span>{{ __('Return') }}</span>
+															</button>
+														</div>
+													</td>
+												</tr>
+											</tbody>
+										</table>
+									</div>
+								</div>
+
 								<!-- Invoices Grid - 2 columns on large screens -->
-								<div v-else class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+								<div v-else-if="viewMode === 'card'" class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
 									<div
 										v-for="invoice in filteredHistoryInvoices"
 										:key="invoice.name"
@@ -611,6 +750,7 @@ function lockedInvoiceMessage() {
 const props = defineProps({
 	modelValue: Boolean,
 	posProfile: String,
+	company: String,
 	currency: {
 		type: String,
 		default: "USD",
@@ -638,14 +778,89 @@ const emit = defineEmits([
 
 const show = ref(props.modelValue)
 const loading = ref(false)
+const loadingHistory = ref(false)
+const serverHistoryInvoices = ref([])
+const hasLoadedServerHistory = ref(false)
+const viewMode = ref(localStorage.getItem("pos_invoice_view_mode") || "card")
+
+function setViewMode(mode) {
+	viewMode.value = mode
+	try {
+		localStorage.setItem("pos_invoice_view_mode", mode)
+	} catch (e) {
+		// ignore
+	}
+}
+
 const activeTab = ref("partial")
 
 // Initialize filter store and composable
 const filterStore = useInvoiceFiltersStore()
 
-// Create a computed ref for history invoices to use with filter composable
-const historyInvoicesRef = computed(() => props.historyInvoices)
-const invoiceFilters = useInvoiceFilters(historyInvoicesRef)
+// Effective history invoices: prefer server queried results, fallback to props.historyInvoices
+const historyInvoicesToUse = computed(() => {
+	if (hasLoadedServerHistory.value || serverHistoryInvoices.value.length > 0) {
+		return serverHistoryInvoices.value
+	}
+	return Array.isArray(props.historyInvoices) ? props.historyInvoices : []
+})
+
+const invoiceFilters = useInvoiceFilters(historyInvoicesToUse)
+
+async function loadServerHistoryInvoices() {
+	if (!props.posProfile) return
+
+	loadingHistory.value = true
+	try {
+		const params = {
+			pos_profile: props.posProfile,
+			company: props.company || undefined,
+			customer: filterStore.customer || undefined,
+			item_code: filterStore.product || undefined,
+			search_term: filterStore.searchTerm || undefined,
+			from_date: filterStore.dateFrom || undefined,
+			to_date: filterStore.dateTo || undefined,
+			status: filterStore.status || undefined,
+			limit: 200,
+		}
+
+		const result = await call("pos_next.api.invoices.get_invoices", params)
+		serverHistoryInvoices.value = result || []
+		hasLoadedServerHistory.value = true
+	} catch (error) {
+		console.error("Error loading invoices from ERP:", error)
+		showError(error.message || __("Failed to load invoices from ERP"))
+	} finally {
+		loadingHistory.value = false
+	}
+}
+
+let searchDebounceTimer = null
+watch(
+	() => filterStore.searchTerm,
+	() => {
+		if (!show.value || (activeTab.value !== "history" && activeTab.value !== "returns")) return
+		clearTimeout(searchDebounceTimer)
+		searchDebounceTimer = setTimeout(() => {
+			loadServerHistoryInvoices()
+		}, 300)
+	},
+)
+
+watch(
+	[
+		() => filterStore.customer,
+		() => filterStore.product,
+		() => filterStore.status,
+		() => filterStore.dateFrom,
+		() => filterStore.dateTo,
+	],
+	() => {
+		if (show.value && (activeTab.value === "history" || activeTab.value === "returns")) {
+			loadServerHistoryInvoices()
+		}
+	},
+)
 
 // Unpaid invoices data
 const unpaidInvoices = ref([])
@@ -691,8 +906,8 @@ const filteredUnpaidSummary = computed(() => {
 
 // Return invoices (filtered from history)
 const returnInvoices = computed(() => {
-	const allInvoices = Array.isArray(props.historyInvoices)
-		? props.historyInvoices
+	const allInvoices = Array.isArray(historyInvoicesToUse.value)
+		? historyInvoicesToUse.value
 		: []
 	return allInvoices.filter((inv) => inv.is_return)
 })
@@ -700,8 +915,8 @@ const returnInvoices = computed(() => {
 // Filtered history using the composable (exclude returns, show in separate tab)
 const filteredHistoryInvoices = computed(() => {
 	// Filter out return invoices, then apply all filters from the store
-	const allInvoices = Array.isArray(props.historyInvoices)
-		? props.historyInvoices
+	const allInvoices = Array.isArray(historyInvoicesToUse.value)
+		? historyInvoicesToUse.value
 		: []
 	const nonReturnInvoices = allInvoices.filter((inv) => !inv.is_return)
 
@@ -808,6 +1023,7 @@ watch(
 			checkDeletePermission()
 			loadUnpaidInvoices()
 			loadUnpaidSummary()
+			loadServerHistoryInvoices()
 			// Also request history refresh if we don't have data
 			if (props.historyInvoices.length === 0) {
 				emit("refresh-history")
@@ -825,6 +1041,7 @@ watch(activeTab, (newTab) => {
 	// Always emit refresh event when switching to history or returns tabs
 	// This ensures up-to-date outstanding amounts and invoice data
 	if (newTab === "history" || newTab === "returns") {
+		loadServerHistoryInvoices()
 		emit("refresh-history")
 	} else if (newTab === "partial") {
 		// Refresh unpaid invoices when switching to partial tab
@@ -842,13 +1059,13 @@ async function refreshCurrentTab() {
 	if (activeTab.value === "partial") {
 		await Promise.all([loadUnpaidInvoices(), loadUnpaidSummary()])
 	} else if (activeTab.value === "history") {
-		// Request parent to refresh history data
+		await loadServerHistoryInvoices()
 		emit("refresh-history")
 	} else if (activeTab.value === "drafts") {
 		// Drafts are passed from parent, emit event if needed
 		emit("refresh-history")
 	} else if (activeTab.value === "returns") {
-		// Returns would also need a refresh
+		await loadServerHistoryInvoices()
 		emit("refresh-history")
 	}
 }
@@ -989,6 +1206,9 @@ onMounted(() => {
 	if (show.value) {
 		loadUnpaidInvoices()
 		loadUnpaidSummary()
+		if (activeTab.value === "history" || activeTab.value === "returns") {
+			loadServerHistoryInvoices()
+		}
 	}
 })
 </script>

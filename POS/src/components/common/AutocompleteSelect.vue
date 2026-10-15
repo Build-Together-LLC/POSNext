@@ -147,7 +147,7 @@ const props = defineProps({
 	},
 })
 
-const emit = defineEmits(["update:modelValue", "search"])
+const emit = defineEmits(["update:modelValue", "search", "select"])
 
 const containerRef = ref(null)
 const inputRef = ref(null)
@@ -182,9 +182,10 @@ const filteredOptions = computed(() => {
 
 	const query = searchQuery.value.toLowerCase()
 	return props.options.filter((option) => {
-		const label = option.label.toLowerCase()
+		const label = option.label?.toLowerCase() || ""
 		const subtitle = option.subtitle?.toLowerCase() || ""
-		return label.includes(query) || subtitle.includes(query)
+		const value = String(option.value || "").toLowerCase()
+		return label.includes(query) || subtitle.includes(query) || value.includes(query)
 	})
 })
 
@@ -265,6 +266,7 @@ function toggleDropdown() {
 
 function selectOption(option) {
 	emit("update:modelValue", option.value)
+	emit("select", option)
 	searchQuery.value = option.label
 	closeDropdown()
 	inputRef.value?.blur()
