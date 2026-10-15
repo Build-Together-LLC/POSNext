@@ -37,8 +37,88 @@
 						class="border border-gray-200 hover:border-orange-300 hover:shadow-md rounded-xl p-4 transition-all bg-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group"
 					>
 						<div class="flex items-start gap-3.5">
-							<div :class="['p-2.5 rounded-lg text-white shrink-0 mt-0.5', report.bgClass]">
-								<component :is="report.icon" class="w-5 h-5" />
+							<div
+								:class="[
+									'w-10 h-10 rounded-lg text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm',
+									report.bgClass,
+								]"
+								:style="{ backgroundColor: report.bgColor }"
+							>
+								<!-- Demand Icon -->
+								<svg
+									v-if="report.iconType === 'trending'"
+									class="w-5 h-5 text-white"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
+									/>
+								</svg>
+								<!-- Alert Icon -->
+								<svg
+									v-else-if="report.iconType === 'alert'"
+									class="w-5 h-5 text-white"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+									/>
+								</svg>
+								<!-- Book / Sales Register Icon -->
+								<svg
+									v-else-if="report.iconType === 'book'"
+									class="w-5 h-5 text-white"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+									/>
+								</svg>
+								<!-- Package / Item-wise Icon -->
+								<svg
+									v-else-if="report.iconType === 'package'"
+									class="w-5 h-5 text-white"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+									/>
+								</svg>
+								<!-- Default / Document Icon -->
+								<svg
+									v-else
+									class="w-5 h-5 text-white"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+									/>
+								</svg>
 							</div>
 							<div>
 								<div class="flex items-center gap-2">
@@ -83,7 +163,7 @@
 </template>
 
 <script setup>
-import { computed, h } from "vue"
+import { computed } from "vue"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -103,67 +183,6 @@ function close() {
 	emit("update:modelValue", false)
 }
 
-// Icon helper functions
-const BarChartIcon = () =>
-	h("svg", { fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, [
-		h("path", {
-			"stroke-linecap": "round",
-			"stroke-linejoin": "round",
-			"stroke-width": "2",
-			d: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
-		}),
-	])
-
-const TrendingIcon = () =>
-	h("svg", { fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, [
-		h("path", {
-			"stroke-linecap": "round",
-			"stroke-linejoin": "round",
-			"stroke-width": "2",
-			d: "M13 7h8m0 0v8m0-8l-8 8-4-4-6 6",
-		}),
-	])
-
-const AlertIcon = () =>
-	h("svg", { fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, [
-		h("path", {
-			"stroke-linecap": "round",
-			"stroke-linejoin": "round",
-			"stroke-width": "2",
-			d: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
-		}),
-	])
-
-const BookOpenIcon = () =>
-	h("svg", { fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, [
-		h("path", {
-			"stroke-linecap": "round",
-			"stroke-linejoin": "round",
-			"stroke-width": "2",
-			d: "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253",
-		}),
-	])
-
-const PackageIcon = () =>
-	h("svg", { fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, [
-		h("path", {
-			"stroke-linecap": "round",
-			"stroke-linejoin": "round",
-			"stroke-width": "2",
-			d: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4",
-		}),
-	])
-
-const FileTextIcon = () =>
-	h("svg", { fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, [
-		h("path", {
-			"stroke-linecap": "round",
-			"stroke-linejoin": "round",
-			"stroke-width": "2",
-			d: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
-		}),
-	])
-
 const reports = computed(() => [
 	{
 		title: __("POS Demand vs Actual"),
@@ -172,8 +191,9 @@ const reports = computed(() => [
 		description: __(
 			"Analyze customer demand captured at the till against actual sales to identify unmet demand and missed opportunities.",
 		),
-		icon: TrendingIcon,
+		iconType: "trending",
 		bgClass: "bg-orange-500",
+		bgColor: "#f97316",
 		badgeClass: "bg-orange-50 text-orange-700 border border-orange-200",
 	},
 	{
@@ -183,8 +203,9 @@ const reports = computed(() => [
 		description: __(
 			"Review cashier-recorded customer demand for products not currently listed in the catalogue.",
 		),
-		icon: AlertIcon,
+		iconType: "alert",
 		bgClass: "bg-purple-600",
+		bgColor: "#9333ea",
 		badgeClass: "bg-purple-50 text-purple-700 border border-purple-200",
 	},
 	{
@@ -194,9 +215,10 @@ const reports = computed(() => [
 		description: __(
 			"Comprehensive register of sales invoices with posting dates, payment status, customer details, and taxes.",
 		),
-		icon: BookOpenIcon,
-		bgClass: "bg-emerald-600",
-		badgeClass: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+		iconType: "book",
+		bgClass: "bg-green-600",
+		bgColor: "#16a34a",
+		badgeClass: "bg-green-50 text-green-700 border border-green-200",
 	},
 	{
 		title: __("Item-wise Sales Register"),
@@ -205,8 +227,9 @@ const reports = computed(() => [
 		description: __(
 			"Detailed register showing item-wise breakdown of sales invoices, quantities, and taxes.",
 		),
-		icon: PackageIcon,
+		iconType: "package",
 		bgClass: "bg-teal-600",
+		bgColor: "#0d9488",
 		badgeClass: "bg-teal-50 text-teal-700 border border-teal-200",
 	},
 ])
