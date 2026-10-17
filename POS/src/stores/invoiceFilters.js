@@ -1,3 +1,4 @@
+import { call } from "@/utils/apiWrapper"
 import { defineStore } from "pinia"
 import { computed, ref } from "vue"
 
@@ -12,8 +13,10 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 	const dateFrom = ref("")
 	const dateTo = ref("")
 	const customer = ref("")
+	const customerLabel = ref("")
 	const status = ref("")
 	const product = ref("")
+	const productLabel = ref("")
 	const searchTerm = ref("")
 
 	// UI state
@@ -49,7 +52,7 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 		if (customer.value) {
 			summary.push({
 				type: "customer",
-				label: customer.value,
+				label: customerLabel.value || customer.value,
 				value: customer.value,
 			})
 		}
@@ -65,7 +68,7 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 		if (product.value) {
 			summary.push({
 				type: "product",
-				label: product.value,
+				label: productLabel.value || product.value,
 				value: product.value,
 			})
 		}
@@ -98,8 +101,40 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 	function setThisMonth() {
 		const today = new Date()
 		const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+		const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0)
 		dateFrom.value = formatDateForInput(monthStart)
-		dateTo.value = formatDateForInput(today)
+		dateTo.value = formatDateForInput(monthEnd)
+	}
+
+	async function setFinancialYear(company) {
+		try {
+			const res = await call("pos_next.api.invoices.get_fiscal_year_dates", { company })
+			const fy = res?.message || res
+			if (fy?.year_start_date && fy?.year_end_date) {
+				dateFrom.value = fy.year_start_date
+				dateTo.value = fy.year_end_date
+				return
+			}
+		} catch (error) {
+			console.warn("Failed to fetch fiscal year dates:", error)
+		}
+
+		// Fallback calculation for standard financial year (April 1 - March 31)
+		const today = new Date()
+		const year = today.getFullYear()
+		const startYear = today.getMonth() >= 3 ? year : year - 1
+		dateFrom.value = `${startYear}-04-01`
+		dateTo.value = `${startYear + 1}-03-31`
+	}
+
+	function setCustomer(val, label = "") {
+		customer.value = val
+		customerLabel.value = label || val
+	}
+
+	function setProduct(val, label = "") {
+		product.value = val
+		productLabel.value = label || val
 	}
 
 	function setLast7Days() {
@@ -131,6 +166,7 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 
 	function clearCustomerFilter() {
 		customer.value = ""
+		customerLabel.value = ""
 	}
 
 	function clearStatusFilter() {
@@ -139,19 +175,26 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 
 	function clearProductFilter() {
 		product.value = ""
+		productLabel.value = ""
 	}
 
 	function clearSearchTerm() {
 		searchTerm.value = ""
 	}
 
-	function clearAllFilters() {
-		dateFrom.value = ""
-		dateTo.value = ""
+	function clearAllFilters(resetToDefaultPeriod = true) {
 		customer.value = ""
+		customerLabel.value = ""
 		status.value = ""
 		product.value = ""
+		productLabel.value = ""
 		searchTerm.value = ""
+		if (resetToDefaultPeriod) {
+			setThisMonth()
+		} else {
+			dateFrom.value = ""
+			dateTo.value = ""
+		}
 	}
 
 	function clearFilter(type) {
@@ -178,8 +221,10 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 			dateFrom: dateFrom.value,
 			dateTo: dateTo.value,
 			customer: customer.value,
+			customerLabel: customerLabel.value,
 			status: status.value,
 			product: product.value,
+			productLabel: productLabel.value,
 			createdAt: new Date().toISOString(),
 		}
 
@@ -205,8 +250,10 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 			dateFrom.value = preset.dateFrom
 			dateTo.value = preset.dateTo
 			customer.value = preset.customer
+			customerLabel.value = preset.customerLabel || preset.customer
 			status.value = preset.status
 			product.value = preset.product
+			productLabel.value = preset.productLabel || preset.product
 			currentFilterName.value = name
 		}
 	}
@@ -272,13 +319,20 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 		showFilters.value = !showFilters.value
 	}
 
+	// Default date filter: Current Month
+	if (!dateFrom.value && !dateTo.value) {
+		setThisMonth()
+	}
+
 	return {
 		// State
 		dateFrom,
 		dateTo,
 		customer,
+		customerLabel,
 		status,
 		product,
+		productLabel,
 		searchTerm,
 		showFilters,
 		savedFilters,
@@ -294,9 +348,14 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 		setYesterday,
 		setThisWeek,
 		setThisMonth,
+		setFinancialYear,
 		setLast7Days,
 		setLast30Days,
 		setDateRange,
+
+		// Actions - Custom setters
+		setCustomer,
+		setProduct,
 
 		// Actions - Clear
 		clearDateFilter,

@@ -54,10 +54,13 @@ export function useInvoiceFilters(invoices) {
 
 		// Apply customer filter
 		if (filtersStore.customer) {
+			const customerVal = filtersStore.customer.toLowerCase()
+			const customerLbl = (filtersStore.customerLabel || "").toLowerCase()
 			result = result.filter(
 				(inv) =>
-					inv.customer === filtersStore.customer ||
-					inv.customer_name === filtersStore.customer,
+					inv.customer?.toLowerCase() === customerVal ||
+					inv.customer_name?.toLowerCase() === customerVal ||
+					(customerLbl && inv.customer_name?.toLowerCase() === customerLbl),
 			)
 		}
 
@@ -69,12 +72,14 @@ export function useInvoiceFilters(invoices) {
 		// Apply product filter
 		if (filtersStore.product) {
 			const productSearch = filtersStore.product.toLowerCase()
+			const productLabelSearch = (filtersStore.productLabel || "").toLowerCase()
 			result = result.filter((inv) => {
 				if (!inv.items || !Array.isArray(inv.items)) return false
 				return inv.items.some(
 					(item) =>
+						item.item_code?.toLowerCase() === productSearch ||
 						item.item_name?.toLowerCase().includes(productSearch) ||
-						item.item_code?.toLowerCase().includes(productSearch),
+						(productLabelSearch && item.item_name?.toLowerCase().includes(productLabelSearch)),
 				)
 			})
 		}
@@ -190,12 +195,13 @@ export function useInvoiceFilters(invoices) {
 
 		// Customer
 		if (filtersStore.customer) {
-			if (
-				invoice.customer !== filtersStore.customer &&
-				invoice.customer_name !== filtersStore.customer
-			) {
-				return false
-			}
+			const customerVal = filtersStore.customer.toLowerCase()
+			const customerLbl = (filtersStore.customerLabel || "").toLowerCase()
+			const matchesCustomer =
+				invoice.customer?.toLowerCase() === customerVal ||
+				invoice.customer_name?.toLowerCase() === customerVal ||
+				(customerLbl && invoice.customer_name?.toLowerCase() === customerLbl)
+			if (!matchesCustomer) return false
 		}
 
 		// Status
@@ -207,10 +213,12 @@ export function useInvoiceFilters(invoices) {
 		if (filtersStore.product) {
 			if (!invoice.items || !Array.isArray(invoice.items)) return false
 			const productSearch = filtersStore.product.toLowerCase()
+			const productLabelSearch = (filtersStore.productLabel || "").toLowerCase()
 			const hasProduct = invoice.items.some(
 				(item) =>
+					item.item_code?.toLowerCase() === productSearch ||
 					item.item_name?.toLowerCase().includes(productSearch) ||
-					item.item_code?.toLowerCase().includes(productSearch),
+					(productLabelSearch && item.item_name?.toLowerCase().includes(productLabelSearch)),
 			)
 			if (!hasProduct) return false
 		}
@@ -250,26 +258,29 @@ export function useInvoiceFilters(invoices) {
 	}
 }
 
+const t = (str) => (typeof __ === "function" ? __(str) : str)
+
 /**
  * Quick date filter presets
  * Exported for use in filter UI components
  */
 export const DATE_PRESETS = [
-	{ label: __("Today"), value: "today", action: "setToday" },
-	{ label: __("Yesterday"), value: "yesterday", action: "setYesterday" },
-	{ label: __("This Week"), value: "week", action: "setThisWeek" },
-	{ label: __("This Month"), value: "month", action: "setThisMonth" },
-	{ label: __("Last 7 Days"), value: "last7", action: "setLast7Days" },
-	{ label: __("Last 30 Days"), value: "last30", action: "setLast30Days" },
+	{ label: t("This Month"), value: "month", action: "setThisMonth" },
+	{ label: t("Financial Year"), value: "fy", action: "setFinancialYear" },
+	{ label: t("This Week"), value: "week", action: "setThisWeek" },
+	{ label: t("Today"), value: "today", action: "setToday" },
+	{ label: t("Yesterday"), value: "yesterday", action: "setYesterday" },
+	{ label: t("Last 7 Days"), value: "last7", action: "setLast7Days" },
+	{ label: t("Last 30 Days"), value: "last30", action: "setLast30Days" },
 ]
 
 /**
  * Payment status options
  */
 export const PAYMENT_STATUS_OPTIONS = [
-	{ label: __("All Status"), value: "" },
-	{ label: __("Paid"), value: "Paid" },
-	{ label: __("Unpaid"), value: "Unpaid" },
-	{ label: __("Partly Paid"), value: "Partly Paid" },
-	{ label: __("Overdue"), value: "Overdue" },
+	{ label: t("All Status"), value: "" },
+	{ label: t("Paid"), value: "Paid" },
+	{ label: t("Unpaid"), value: "Unpaid" },
+	{ label: t("Partly Paid"), value: "Partly Paid" },
+	{ label: t("Overdue"), value: "Overdue" },
 ]

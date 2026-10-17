@@ -43,6 +43,7 @@ declare module 'vue' {
     PhoneInput: typeof import('./src/components/common/PhoneInput.vue')['default']
     POSFooter: typeof import('./src/components/common/POSFooter.vue')['default']
     POSHeader: typeof import('./src/components/pos/POSHeader.vue')['default']
+    POSReportsDialog: typeof import('./src/components/pos/POSReportsDialog.vue')['default']
     POSSettings: typeof import('./src/components/settings/POSSettings.vue')['default']
     PromotionManagement: typeof import('./src/components/sale/PromotionManagement.vue')['default']
     ReturnInvoiceDialog: typeof import('./src/components/sale/ReturnInvoiceDialog.vue')['default']
