@@ -392,7 +392,7 @@
 						<!-- Item Details -->
 						<div class="min-w-0 flex flex-wrap justify-between items-end gap-x-1 gap-y-0.5">
 							<div class="min-w-0">
-								<h3 class="text-[10px] sm:text-xs font-semibold text-gray-900 break-words [overflow-wrap:anywhere] mb-0.5 leading-tight" :title="item.item_name">
+								<h3 class="text-[10px] sm:text-xs font-semibold text-gray-900 break-words mb-0.5 leading-tight" :title="item.item_name">
 									{{ item.item_name }}
 								</h3>
 								<p class="text-[9px] sm:text-[10px] text-gray-500 leading-tight">
@@ -545,7 +545,15 @@
 								<span class="block truncate pe-2">{{ __('Sub Brand') }}</span>
 								<ColumnResizeHandle :column="subBrandColumn" />
 							</th>
-							<th v-if="showRackColumn" scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[90px]">{{ __('Rack') }}</th>
+							<th
+								v-if="showRackColumn"
+								scope="col"
+								:style="rackColumn.style"
+								class="relative px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10"
+							>
+								<span class="block truncate pe-2">{{ __('Rack') }}</span>
+								<ColumnResizeHandle :column="rackColumn" />
+							</th>
 							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]">{{ __('Rate') }}</th>
 							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]">{{ __('Qty') }}</th>
 						</tr>
@@ -567,12 +575,12 @@
 							<td class="w-full max-w-0 px-2 sm:px-3 py-2">
 								<!-- Wraps onto subsequent lines when the column gets squeezed (e.g.
 								     after widening Sub Brand) so the full name stays visible. -->
-								<div class="text-xs sm:text-sm font-medium text-gray-900 break-words [overflow-wrap:anywhere]" :title="item.item_name">
+								<div class="text-xs sm:text-sm font-medium text-gray-900 break-words" :title="item.item_name">
 									{{ item.item_name }}
 								</div>
 								<!-- Sub brand rides under the name on phones, where its own
 								     column is hidden. -->
-								<div v-if="showSubBrandColumn && item.custom_sub_brand" class="sm:hidden text-[10px] text-gray-500 break-words [overflow-wrap:anywhere]">
+								<div v-if="showSubBrandColumn && item.custom_sub_brand" class="sm:hidden text-[10px] text-gray-500 break-words">
 									{{ item.custom_sub_brand }}
 								</div>
 							</td>
@@ -584,26 +592,29 @@
 							<td v-if="showSubBrandColumn" :style="subBrandColumn.style" class="hidden sm:table-cell px-2 sm:px-3 py-2">
 								<span
 									v-if="item.custom_sub_brand"
-									class="inline-block max-w-full whitespace-normal break-words [overflow-wrap:anywhere] align-middle px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 text-[10px] sm:text-xs font-medium"
+									class="inline-block max-w-full whitespace-normal break-words align-middle px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 text-[10px] sm:text-xs font-medium"
 									:title="item.custom_sub_brand"
 								>
 									{{ item.custom_sub_brand }}
 								</span>
 								<span v-else class="text-xs sm:text-sm text-gray-400">—</span>
 							</td>
-							<td v-if="showRackColumn" class="px-2 sm:px-3 py-2 w-[70px] sm:w-[90px]">
-								<span
-									v-if="item.custom_rack_identifier"
-									:class="[
-										'inline-block px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-md shadow-sm max-w-full whitespace-normal break-words [overflow-wrap:anywhere]',
-										'text-[10px] sm:text-sm font-bold',
-										getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).color,
-										getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).textColor
-									]"
-									:title="item.custom_rack_identifier"
-								>
-									{{ item.custom_rack_identifier }}
-								</span>
+							<td v-if="showRackColumn" :style="rackColumn.style" class="px-2 sm:px-3 py-2">
+								<div v-if="item.custom_rack_identifier" class="flex flex-wrap gap-1 items-start">
+									<span
+										v-for="(rack, rIndex) in getRackList(item.custom_rack_identifier)"
+										:key="rIndex"
+										:class="[
+											'inline-block px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-md shadow-xs max-w-full text-start',
+											'text-[10px] sm:text-xs font-bold leading-normal break-words',
+											getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).color,
+											getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).textColor
+										]"
+										:title="item.custom_rack_identifier"
+									>
+										{{ rack }}
+									</span>
+								</div>
 								<span v-else class="text-xs sm:text-sm text-gray-400">—</span>
 							</td>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
@@ -874,6 +885,14 @@ const showRackColumn = computed(() =>
 	paginatedItems.value.some((item) => item?.custom_rack_identifier !== undefined)
 )
 
+function getRackList(rackIdentifier) {
+	if (!rackIdentifier) return []
+	return String(rackIdentifier)
+		.split(/[\n,;]+/)
+		.map((s) => s.trim())
+		.filter(Boolean)
+}
+
 // Sites that don't use sub-brands would otherwise get a column of dashes.
 const showSubBrandColumn = computed(() =>
 	paginatedItems.value.some((item) => item?.custom_sub_brand)
@@ -1005,6 +1024,14 @@ const subBrandColumn = createResizableColumn({
 	storageKey: "pos_items_sub_brand_width",
 	defaultWidth: 130,
 	minWidth: 60,
+	maxWidth: 400,
+})
+
+const rackColumn = createResizableColumn({
+	label: __("Rack"),
+	storageKey: "pos_items_rack_width",
+	defaultWidth: 130,
+	minWidth: 80,
 	maxWidth: 400,
 })
 
@@ -1206,6 +1233,7 @@ onUnmounted(() => {
 	// Drop any listeners left behind by an in-progress column resize
 	codeColumn.stop()
 	subBrandColumn.stop()
+	rackColumn.stop()
 })
 
 // Handle keydown for barcode scanner detection

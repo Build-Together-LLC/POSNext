@@ -549,7 +549,7 @@
 							<!-- Header: Item Name, Badges & Delete -->
 							<div class="flex items-start justify-between gap-0.5 mb-0.5">
 								<div class="flex items-start gap-1.5 flex-1 min-w-0 flex-wrap">
-									<h4 class="text-xs sm:text-sm font-extrabold text-gray-900 break-words [overflow-wrap:anywhere] leading-tight">
+									<h4 class="text-xs sm:text-sm font-extrabold text-gray-900 break-words leading-tight">
 										<span v-if="item.item_code">{{ item.item_code }} : </span>{{ item.item_name }}
 									</h4>
 									<!-- Free Item Badge -->
