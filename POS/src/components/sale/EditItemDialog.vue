@@ -32,7 +32,7 @@
 					</div>
 					<!-- Item Info -->
 					<div class="flex-1 min-w-0">
-						<h3 class="text-base font-semibold text-gray-900 break-words [overflow-wrap:anywhere]">
+						<h3 class="text-base font-semibold text-gray-900 break-words">
 							{{ localItem.item_name }}
 						</h3>
 						<p class="text-sm text-gray-500 truncate">

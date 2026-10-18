@@ -291,7 +291,7 @@ export function printInvoiceCustom(invoiceData) {
             width: 100%; table-layout: fixed; border-collapse: collapse;
             font-size: 9.5px; line-height: 1.2; margin: 0;
         }
-        .r1 td, .r2 td { vertical-align: top; white-space: normal; word-wrap: break-word; overflow-wrap: anywhere; word-break: break-word; }
+        .r1 td, .r2 td { vertical-align: top; white-space: normal; word-wrap: break-word; overflow-wrap: break-word; word-break: normal; }
         .r1 td.a0, .r2 td.a0 { width: 8%; white-space: nowrap; }
         .r2 td.a0 { text-indent: 22px; overflow: visible; }
         .r1 td.a1 { width: 44%; text-align: center; padding: 0 2px; }
