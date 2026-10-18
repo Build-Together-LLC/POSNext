@@ -261,21 +261,29 @@ const loadingProducts = ref(false)
 
 let customerSearchTimeout = null
 let productSearchTimeout = null
+let customerRequestId = 0
+let productRequestId = 0
 
 function searchCustomers(term = "") {
 	clearTimeout(customerSearchTimeout)
 	customerSearchTimeout = setTimeout(async () => {
+		const reqId = ++customerRequestId
 		loadingCustomers.value = true
 		try {
 			const res = await call("pos_next.api.invoices.get_erp_customers", {
 				search_term: term,
 				limit: 50,
 			})
+			if (reqId !== customerRequestId) return
 			erpCustomers.value = res?.message || res || []
 		} catch (err) {
-			console.error("Error searching ERP customers:", err)
+			if (reqId === customerRequestId) {
+				console.error("Error searching ERP customers:", err)
+			}
 		} finally {
-			loadingCustomers.value = false
+			if (reqId === customerRequestId) {
+				loadingCustomers.value = false
+			}
 		}
 	}, term ? 250 : 0)
 }
@@ -283,17 +291,23 @@ function searchCustomers(term = "") {
 function searchProducts(term = "") {
 	clearTimeout(productSearchTimeout)
 	productSearchTimeout = setTimeout(async () => {
+		const reqId = ++productRequestId
 		loadingProducts.value = true
 		try {
 			const res = await call("pos_next.api.invoices.get_erp_items", {
 				search_term: term,
 				limit: 50,
 			})
+			if (reqId !== productRequestId) return
 			erpProducts.value = res?.message || res || []
 		} catch (err) {
-			console.error("Error searching ERP items:", err)
+			if (reqId === productRequestId) {
+				console.error("Error searching ERP items:", err)
+			}
 		} finally {
-			loadingProducts.value = false
+			if (reqId === productRequestId) {
+				loadingProducts.value = false
+			}
 		}
 	}, term ? 250 : 0)
 }

@@ -69,17 +69,13 @@ export function useInvoiceFilters(invoices) {
 			result = result.filter((inv) => inv.status === filtersStore.status)
 		}
 
-		// Apply product filter
+		// Apply product filter (exact match on item_code)
 		if (filtersStore.product) {
-			const productSearch = filtersStore.product.toLowerCase()
-			const productLabelSearch = (filtersStore.productLabel || "").toLowerCase()
+			const productCode = filtersStore.product.toLowerCase()
 			result = result.filter((inv) => {
 				if (!inv.items || !Array.isArray(inv.items)) return false
 				return inv.items.some(
-					(item) =>
-						item.item_code?.toLowerCase() === productSearch ||
-						item.item_name?.toLowerCase().includes(productSearch) ||
-						(productLabelSearch && item.item_name?.toLowerCase().includes(productLabelSearch)),
+					(item) => item.item_code?.toLowerCase() === productCode,
 				)
 			})
 		}
@@ -209,16 +205,12 @@ export function useInvoiceFilters(invoices) {
 			if (invoice.status !== filtersStore.status) return false
 		}
 
-		// Product
+		// Product (exact match on item_code)
 		if (filtersStore.product) {
 			if (!invoice.items || !Array.isArray(invoice.items)) return false
-			const productSearch = filtersStore.product.toLowerCase()
-			const productLabelSearch = (filtersStore.productLabel || "").toLowerCase()
+			const productCode = filtersStore.product.toLowerCase()
 			const hasProduct = invoice.items.some(
-				(item) =>
-					item.item_code?.toLowerCase() === productSearch ||
-					item.item_name?.toLowerCase().includes(productSearch) ||
-					(productLabelSearch && item.item_name?.toLowerCase().includes(productLabelSearch)),
+				(item) => item.item_code?.toLowerCase() === productCode,
 			)
 			if (!hasProduct) return false
 		}

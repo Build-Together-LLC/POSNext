@@ -31,7 +31,21 @@
 
 				<!-- Reports List -->
 				<div class="p-6 overflow-y-auto space-y-4">
+					<div v-if="loadingReports" class="flex flex-col items-center justify-center py-12">
+						<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mb-3"></div>
+						<p class="text-xs text-gray-500">{{ __('Checking report permissions...') }}</p>
+					</div>
+
+					<div v-else-if="reports.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
+						<svg class="w-12 h-12 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+						</svg>
+						<p class="text-gray-700 font-semibold text-sm">{{ __('No accessible reports') }}</p>
+						<p class="text-gray-500 text-xs mt-1">{{ __('You do not have permission to view these reports in ERP.') }}</p>
+					</div>
+
 					<div
+						v-else
 						v-for="report in reports"
 						:key="report.title"
 						class="border border-gray-200 hover:border-orange-300 hover:shadow-md rounded-xl p-4 transition-all bg-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group"
@@ -163,7 +177,8 @@
 </template>
 
 <script setup>
-import { computed } from "vue"
+import { call } from "frappe-ui"
+import { computed, ref, watch } from "vue"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -183,7 +198,38 @@ function close() {
 	emit("update:modelValue", false)
 }
 
-const reports = computed(() => [
+const accessibleReports = ref(null)
+const loadingReports = ref(false)
+
+async function loadAccessibleReports() {
+	if (loadingReports.value) return
+	loadingReports.value = true
+	try {
+		const res = await call("pos_next.api.invoices.get_accessible_reports")
+		accessibleReports.value = res?.message || res || []
+	} catch (err) {
+		console.error("Error loading accessible reports:", err)
+		// On error, default to POS Demand reports which are core to POS
+		accessibleReports.value = [
+			"POS Demand vs Actual",
+			"POS Unlisted Item Demand",
+		]
+	} finally {
+		loadingReports.value = false
+	}
+}
+
+watch(
+	() => props.modelValue,
+	(val) => {
+		if (val && accessibleReports.value === null) {
+			loadAccessibleReports()
+		}
+	},
+	{ immediate: true },
+)
+
+const ALL_REPORTS = [
 	{
 		title: __("POS Demand vs Actual"),
 		reportName: "POS Demand vs Actual",
@@ -232,7 +278,16 @@ const reports = computed(() => [
 		bgColor: "#0d9488",
 		badgeClass: "bg-teal-50 text-teal-700 border border-teal-200",
 	},
-])
+]
+
+const reports = computed(() => {
+	if (accessibleReports.value === null) {
+		return ALL_REPORTS
+	}
+	return ALL_REPORTS.filter((report) =>
+		accessibleReports.value.includes(report.reportName),
+	)
+})
 
 function openReport(report) {
 	const params = new URLSearchParams()

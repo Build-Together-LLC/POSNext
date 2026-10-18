@@ -293,7 +293,7 @@
 								<!-- View Mode Switcher & Stats Bar -->
 								<div class="flex items-center justify-between mb-4">
 									<div class="text-sm font-semibold text-gray-700">
-										{{ __('{0} invoice(s) found', [filteredHistoryInvoices.length]) }}
+										{{ hasMoreHistory ? __('Showing {0}+ invoices', [filteredHistoryInvoices.length]) : __('{0} invoice(s) found', [filteredHistoryInvoices.length]) }}
 									</div>
 									<div class="flex items-center gap-1.5 bg-gray-100 border border-gray-300 rounded-lg p-1">
 										<button
@@ -544,6 +544,19 @@
 										</div>
 									</div>
 								</div>
+
+								<!-- Load More Button -->
+								<div v-if="!loadingHistory && hasMoreHistory" class="flex justify-center mt-6 mb-2">
+									<Button
+										@click="loadMoreServerHistoryInvoices"
+										:loading="loadingMoreHistory"
+										variant="subtle"
+										size="sm"
+										class="px-6 py-2 font-semibold"
+									>
+										{{ __('Load More Invoices') }}
+									</Button>
+								</div>
 							</div>
 
 							<!-- Draft Invoices Tab -->
@@ -781,6 +794,10 @@ const loading = ref(false)
 const loadingHistory = ref(false)
 const serverHistoryInvoices = ref([])
 const hasLoadedServerHistory = ref(false)
+const HISTORY_PAGE_SIZE = 100
+const hasMoreHistory = ref(false)
+const loadingMoreHistory = ref(false)
+let serverHistoryRequestId = 0
 const viewMode = ref(localStorage.getItem("pos_invoice_view_mode") || "card")
 
 function setViewMode(mode) {
@@ -810,6 +827,7 @@ const invoiceFilters = useInvoiceFilters(historyInvoicesToUse)
 async function loadServerHistoryInvoices() {
 	if (!props.posProfile) return
 
+	const reqId = ++serverHistoryRequestId
 	loadingHistory.value = true
 	try {
 		const params = {
@@ -821,17 +839,65 @@ async function loadServerHistoryInvoices() {
 			from_date: filterStore.dateFrom || undefined,
 			to_date: filterStore.dateTo || undefined,
 			status: filterStore.status || undefined,
-			limit: 200,
+			start: 0,
+			limit: HISTORY_PAGE_SIZE,
 		}
 
 		const result = await call("pos_next.api.invoices.get_invoices", params)
-		serverHistoryInvoices.value = result || []
+		if (reqId !== serverHistoryRequestId) return
+
+		const list = result || []
+		serverHistoryInvoices.value = list
+		hasMoreHistory.value = list.length === HISTORY_PAGE_SIZE
 		hasLoadedServerHistory.value = true
 	} catch (error) {
-		console.error("Error loading invoices from ERP:", error)
-		showError(error.message || __("Failed to load invoices from ERP"))
+		if (reqId === serverHistoryRequestId) {
+			console.error("Error loading invoices from ERP:", error)
+			showError(error.message || __("Failed to load invoices from ERP"))
+		}
 	} finally {
-		loadingHistory.value = false
+		if (reqId === serverHistoryRequestId) {
+			loadingHistory.value = false
+		}
+	}
+}
+
+async function loadMoreServerHistoryInvoices() {
+	if (!props.posProfile || loadingMoreHistory.value || !hasMoreHistory.value) return
+
+	const reqId = serverHistoryRequestId
+	loadingMoreHistory.value = true
+	try {
+		const params = {
+			pos_profile: props.posProfile,
+			company: props.company || undefined,
+			customer: filterStore.customer || undefined,
+			item_code: filterStore.product || undefined,
+			search_term: filterStore.searchTerm || undefined,
+			from_date: filterStore.dateFrom || undefined,
+			to_date: filterStore.dateTo || undefined,
+			status: filterStore.status || undefined,
+			start: serverHistoryInvoices.value.length,
+			limit: HISTORY_PAGE_SIZE,
+		}
+
+		const result = await call("pos_next.api.invoices.get_invoices", params)
+		if (reqId !== serverHistoryRequestId) return
+
+		const list = result || []
+		const existingNames = new Set(serverHistoryInvoices.value.map((inv) => inv.name))
+		const newInvoices = list.filter((inv) => !existingNames.has(inv.name))
+		serverHistoryInvoices.value = [...serverHistoryInvoices.value, ...newInvoices]
+		hasMoreHistory.value = list.length === HISTORY_PAGE_SIZE
+	} catch (error) {
+		if (reqId === serverHistoryRequestId) {
+			console.error("Error loading more invoices from ERP:", error)
+			showError(error.message || __("Failed to load more invoices from ERP"))
+		}
+	} finally {
+		if (reqId === serverHistoryRequestId) {
+			loadingMoreHistory.value = false
+		}
 	}
 }
 

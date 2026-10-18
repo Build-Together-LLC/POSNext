@@ -93,8 +93,21 @@ describe("useInvoiceFilters Composable", () => {
 		expect(filteredInvoices.value).toHaveLength(2)
 	})
 
-	it("filters by product code or product name", () => {
-		const invoices = ref(mockInvoices)
+	it("filters by exact product code", () => {
+		const invoices = ref([
+			...mockInvoices,
+			{
+				name: "ACC-SINV-2026-00004",
+				customer: "CUST-0001",
+				customer_name: "Alice Smith",
+				posting_date: "2026-10-14",
+				status: "Paid",
+				grand_total: 100,
+				items: [
+					{ item_code: "DETTOL-500", item_name: "Dettol 100ml", qty: 1, rate: 100 },
+				],
+			},
+		])
 		const { filteredInvoices } = useInvoiceFilters(invoices)
 		const store = useInvoiceFiltersStore()
 		store.clearDateFilter()
@@ -103,9 +116,18 @@ describe("useInvoiceFilters Composable", () => {
 		expect(filteredInvoices.value).toHaveLength(1)
 		expect(filteredInvoices.value[0].name).toBe("ACC-SINV-2026-00001")
 
-		store.setProduct("Bluetooth Speaker", "Bluetooth Speaker")
+		store.setProduct("ITEM-B", "Bluetooth Speaker")
 		expect(filteredInvoices.value).toHaveLength(1)
 		expect(filteredInvoices.value[0].name).toBe("ACC-SINV-2026-00002")
+
+		// Verify exact code match: selecting code "100" should NOT match item named "Dettol 100ml"
+		store.setProduct("100", "100")
+		expect(filteredInvoices.value).toHaveLength(0)
+
+		// But selecting exact code "DETTOL-500" should match
+		store.setProduct("DETTOL-500", "Dettol 100ml")
+		expect(filteredInvoices.value).toHaveLength(1)
+		expect(filteredInvoices.value[0].name).toBe("ACC-SINV-2026-00004")
 	})
 
 	it("filters by search term across invoice ID and customer name", () => {

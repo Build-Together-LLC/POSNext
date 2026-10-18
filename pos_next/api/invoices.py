@@ -1097,10 +1097,9 @@ def get_invoices(
 		conditions.append("""EXISTS (
 			SELECT 1 FROM `tabSales Invoice Item` sii
 			WHERE sii.parent = `tabSales Invoice`.name
-			  AND (sii.item_code = %(item_code)s OR sii.item_name LIKE %(item_code_like)s)
+			  AND sii.item_code = %(item_code)s
 		)""")
 		params["item_code"] = item_code.strip()
-		params["item_code_like"] = f"%{item_code.strip()}%"
 
 	if search_term and search_term.strip():
 		st = f"%{search_term.strip()}%"
@@ -1183,6 +1182,9 @@ def get_erp_customers(search_term="", limit=50):
 	"""
 	Search and return all customers available in ERP for POS Invoice Management filter.
 	"""
+	if not frappe.has_permission("Customer", "read"):
+		frappe.throw(_("You do not have permission to read Customers"), frappe.PermissionError)
+
 	limit = cint(limit) or 50
 	conditions = ["disabled = 0"]
 	params = {"limit": limit}
@@ -1217,6 +1219,9 @@ def get_erp_items(search_term="", limit=50):
 	"""
 	Search and return all items available in ERP for POS Invoice Management filter.
 	"""
+	if not frappe.has_permission("Item", "read"):
+		frappe.throw(_("You do not have permission to read Items"), frappe.PermissionError)
+
 	limit = cint(limit) or 50
 	conditions = ["disabled = 0"]
 	params = {"limit": limit}
@@ -1244,6 +1249,43 @@ def get_erp_items(search_term="", limit=50):
 		}
 		for item in items
 	]
+
+
+@frappe.whitelist()
+def get_accessible_reports(reports=None):
+	"""
+	Check which reports the current session user has permission to open.
+	"""
+	if not reports:
+		report_list = [
+			"POS Demand vs Actual",
+			"POS Unlisted Item Demand",
+			"Sales Register",
+			"Item-wise Sales Register",
+		]
+	elif isinstance(reports, str):
+		try:
+			report_list = json.loads(reports)
+		except Exception:
+			report_list = [reports]
+	else:
+		report_list = list(reports)
+
+	accessible = []
+	for report_name in report_list:
+		try:
+			if not frappe.db.exists("Report", report_name):
+				continue
+			doc = frappe.get_doc("Report", report_name)
+			if not doc.is_permitted():
+				continue
+			if doc.ref_doctype and not frappe.has_permission(doc.ref_doctype, "report"):
+				continue
+			accessible.append(report_name)
+		except Exception:
+			continue
+
+	return accessible
 
 
 @frappe.whitelist()
