@@ -1032,64 +1032,134 @@ def render_draft_receipt(invoice_data):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile, limit=100):
+def get_invoices(
+	pos_profile=None,
+	company=None,
+	customer=None,
+	item_code=None,
+	search_term=None,
+	from_date=None,
+	to_date=None,
+	status=None,
+	is_return=None,
+	limit=100,
+	start=0,
+):
 	"""
-	Get list of invoices for a POS Profile.
+	Get list of invoices for a POS Profile with optional ERP search/filtering.
 
 	Args:
-		pos_profile: POS Profile name
+		pos_profile: POS Profile name (optional if company specified)
+		company: Company name
+		customer: Filter by Customer name/ID
+		item_code: Filter by Item code
+		search_term: Search in invoice name, customer, customer_name
+		from_date: Start posting date (YYYY-MM-DD)
+		to_date: End posting date (YYYY-MM-DD)
+		status: Filter by status ('Paid', 'Unpaid', 'Partly Paid', 'Overdue')
+		is_return: Filter by is_return (1 for return invoices, 0 for sales invoices)
 		limit: Maximum number of invoices to return (default 100)
+		start: Offset for pagination (default 0)
 
 	Returns:
-		List of invoices with details
+		List of invoices with details and items
 	"""
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
+	limit = cint(limit) or 100
+	start = cint(start) or 0
 
-	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists(
-		"POS Profile User",
-		{"parent": pos_profile, "user": frappe.session.user}
-	)
+	if pos_profile:
+		# Check if user has access to this POS Profile
+		has_access = frappe.db.exists(
+			"POS Profile User",
+			{"parent": pos_profile, "user": frappe.session.user}
+		)
+		if not has_access and not frappe.has_permission("Sales Invoice", "read"):
+			frappe.throw(_("You don't have access to this POS Profile"))
+	elif not frappe.has_permission("Sales Invoice", "read"):
+		frappe.throw(_("You don't have permission to read Sales Invoices"))
 
-	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
-		frappe.throw(_("You don't have access to this POS Profile"))
+	conditions = ["`tabSales Invoice`.docstatus = 1", "`tabSales Invoice`.is_pos = 1"]
+	params = {
+		"limit": limit,
+		"offset": start,
+	}
 
-	# Query for invoices
-	invoices = frappe.db.sql("""
+	if pos_profile:
+		conditions.append("`tabSales Invoice`.pos_profile = %(pos_profile)s")
+		params["pos_profile"] = pos_profile
+	elif company:
+		conditions.append("`tabSales Invoice`.company = %(company)s")
+		params["company"] = company
+
+	if customer and customer.strip():
+		conditions.append("(`tabSales Invoice`.customer = %(customer)s OR `tabSales Invoice`.customer_name = %(customer)s)")
+		params["customer"] = customer.strip()
+
+	if item_code and item_code.strip():
+		conditions.append("""EXISTS (
+			SELECT 1 FROM `tabSales Invoice Item` sii
+			WHERE sii.parent = `tabSales Invoice`.name
+			  AND sii.item_code = %(item_code)s
+		)""")
+		params["item_code"] = item_code.strip()
+
+	if search_term and search_term.strip():
+		st = f"%{search_term.strip()}%"
+		conditions.append("""(
+			`tabSales Invoice`.name LIKE %(search_term)s
+			OR `tabSales Invoice`.customer LIKE %(search_term)s
+			OR `tabSales Invoice`.customer_name LIKE %(search_term)s
+		)""")
+		params["search_term"] = st
+
+	if from_date:
+		conditions.append("`tabSales Invoice`.posting_date >= %(from_date)s")
+		params["from_date"] = from_date
+
+	if to_date:
+		conditions.append("`tabSales Invoice`.posting_date <= %(to_date)s")
+		params["to_date"] = to_date
+
+	if status and status.strip():
+		conditions.append("`tabSales Invoice`.status = %(status)s")
+		params["status"] = status.strip()
+
+	if is_return is not None and is_return != "":
+		conditions.append("`tabSales Invoice`.is_return = %(is_return)s")
+		params["is_return"] = cint(is_return)
+
+	where_clause = " AND ".join(conditions)
+
+	invoices = frappe.db.sql(f"""
 		SELECT
-			name,
-			customer,
-			customer_name,
-			posting_date,
-			posting_time,
-			grand_total,
-			paid_amount,
-			outstanding_amount,
-			status,
-			docstatus,
-			is_return,
-			return_against,
-			pos_profile
+			`tabSales Invoice`.name,
+			`tabSales Invoice`.customer,
+			`tabSales Invoice`.customer_name,
+			`tabSales Invoice`.posting_date,
+			`tabSales Invoice`.posting_time,
+			`tabSales Invoice`.grand_total,
+			`tabSales Invoice`.paid_amount,
+			`tabSales Invoice`.outstanding_amount,
+			`tabSales Invoice`.status,
+			`tabSales Invoice`.docstatus,
+			`tabSales Invoice`.is_return,
+			`tabSales Invoice`.return_against,
+			`tabSales Invoice`.pos_profile
 		FROM
 			`tabSales Invoice`
 		WHERE
-			pos_profile = %(pos_profile)s
-			AND docstatus = 1
-			AND is_pos = 1
+			{where_clause}
 		ORDER BY
-			posting_date DESC,
-			posting_time DESC
-		LIMIT %(limit)s
-	""", {
-		"pos_profile": pos_profile,
-		"limit": limit
-	}, as_dict=True)
+			`tabSales Invoice`.posting_date DESC,
+			`tabSales Invoice`.posting_time DESC
+		LIMIT %(limit)s OFFSET %(offset)s
+	""", params, as_dict=True)
 
-	# Load items for each invoice for filtering purposes
-	for invoice in invoices:
+	if invoices:
+		invoice_names = [inv.name for inv in invoices]
 		items = frappe.db.sql("""
 			SELECT
+				parent,
 				item_code,
 				item_name,
 				qty,
@@ -1098,15 +1168,172 @@ def get_invoices(pos_profile, limit=100):
 			FROM
 				`tabSales Invoice Item`
 			WHERE
-				parent = %(invoice_name)s
+				parent IN %(invoice_names)s
 			ORDER BY
 				idx
-		""", {
-			"invoice_name": invoice.name
-		}, as_dict=True)
-		invoice.items = items
+		""", {"invoice_names": invoice_names}, as_dict=True)
+
+		items_map = {}
+		for item in items:
+			items_map.setdefault(item.parent, []).append(item)
+
+		for invoice in invoices:
+			invoice.items = items_map.get(invoice.name, [])
 
 	return invoices
+
+
+@frappe.whitelist()
+def get_erp_customers(search_term="", limit=50):
+	"""
+	Search and return all customers available in ERP for POS Invoice Management filter.
+	"""
+	if not frappe.has_permission("Customer", "read"):
+		frappe.throw(_("You do not have permission to read Customers"), frappe.PermissionError)
+
+	limit = cint(limit) or 50
+	conditions = ["disabled = 0"]
+	params = {"limit": limit}
+
+	if search_term and search_term.strip():
+		term = f"%{search_term.strip()}%"
+		conditions.append(
+			"(name LIKE %(term)s OR customer_name LIKE %(term)s OR mobile_no LIKE %(term)s)"
+		)
+		params["term"] = term
+
+	query = f"""
+		SELECT name, customer_name, mobile_no
+		FROM `tabCustomer`
+		WHERE {" AND ".join(conditions)}
+		ORDER BY customer_name ASC
+		LIMIT %(limit)s
+	"""
+	customers = frappe.db.sql(query, params, as_dict=True)
+	return [
+		{
+			"value": c.name,
+			"label": c.customer_name or c.name,
+			"subtitle": f"{c.name} {('• ' + c.mobile_no) if c.mobile_no else ''}".strip(),
+		}
+		for c in customers
+	]
+
+
+@frappe.whitelist()
+def get_erp_items(search_term="", limit=50):
+	"""
+	Search and return all items available in ERP for POS Invoice Management filter.
+	"""
+	if not frappe.has_permission("Item", "read"):
+		frappe.throw(_("You do not have permission to read Items"), frappe.PermissionError)
+
+	limit = cint(limit) or 50
+	conditions = ["disabled = 0"]
+	params = {"limit": limit}
+
+	if search_term and search_term.strip():
+		term = f"%{search_term.strip()}%"
+		conditions.append(
+			"(name LIKE %(term)s OR item_name LIKE %(term)s OR description LIKE %(term)s)"
+		)
+		params["term"] = term
+
+	query = f"""
+		SELECT name, item_name, item_group
+		FROM `tabItem`
+		WHERE {" AND ".join(conditions)}
+		ORDER BY item_name ASC
+		LIMIT %(limit)s
+	"""
+	items = frappe.db.sql(query, params, as_dict=True)
+	return [
+		{
+			"value": item.name,
+			"label": item.item_name or item.name,
+			"subtitle": f"{item.name} {('• ' + item.item_group) if item.item_group else ''}".strip(),
+		}
+		for item in items
+	]
+
+
+@frappe.whitelist()
+def get_accessible_reports(reports=None):
+	"""
+	Check which reports the current session user has permission to open.
+	"""
+	if not reports:
+		report_list = [
+			"POS Demand vs Actual",
+			"POS Unlisted Item Demand",
+			"Sales Register",
+			"Item-wise Sales Register",
+		]
+	elif isinstance(reports, str):
+		try:
+			report_list = json.loads(reports)
+		except Exception:
+			report_list = [reports]
+	else:
+		report_list = list(reports)
+
+	accessible = []
+	for report_name in report_list:
+		try:
+			if not frappe.db.exists("Report", report_name):
+				continue
+			doc = frappe.get_doc("Report", report_name)
+			if not doc.is_permitted():
+				continue
+			if doc.ref_doctype and not frappe.has_permission(doc.ref_doctype, "report"):
+				continue
+			accessible.append(report_name)
+		except Exception:
+			continue
+
+	return accessible
+
+
+@frappe.whitelist()
+def get_fiscal_year_dates(company=None):
+	"""Get start and end dates for current fiscal year."""
+	try:
+		from erpnext.accounts.utils import get_fiscal_year
+		fy = get_fiscal_year(date=nowdate(), company=company)
+		if fy:
+			return {
+				"name": fy[0],
+				"year_start_date": str(fy[1]),
+				"year_end_date": str(fy[2]),
+			}
+	except Exception:
+		pass
+
+	try:
+		current_date = nowdate()
+		fy = frappe.db.sql("""
+			SELECT name, year_start_date, year_end_date
+			FROM `tabFiscal Year`
+			WHERE %(date)s BETWEEN year_start_date AND year_end_date
+			  AND disabled = 0
+			ORDER BY year_start_date DESC
+			LIMIT 1
+		""", {"date": current_date}, as_dict=True)
+		if fy:
+			return {
+				"name": fy[0].name,
+				"year_start_date": str(fy[0].year_start_date),
+				"year_end_date": str(fy[0].year_end_date),
+			}
+	except Exception:
+		pass
+
+	now = get_datetime()
+	return {
+		"name": str(now.year),
+		"year_start_date": f"{now.year}-01-01",
+		"year_end_date": f"{now.year}-12-31",
+	}
 
 
 # ==========================================

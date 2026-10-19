@@ -117,9 +117,12 @@
 						</label>
 						<AutocompleteSelect
 							v-model="store.customer"
-							:options="props.uniqueCustomers"
-							:placeholder="__('Search customers...')"
+							:options="customerOptions"
+							:loading="loadingCustomers"
+							:placeholder="__('Search customers in ERP...')"
 							icon="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+							@search="searchCustomers"
+							@select="handleCustomerSelect"
 						/>
 					</div>
 
@@ -132,9 +135,12 @@
 						</label>
 						<AutocompleteSelect
 							v-model="store.product"
-							:options="props.uniqueProducts"
-							:placeholder="__('Search products...')"
+							:options="productOptions"
+							:loading="loadingProducts"
+							:placeholder="__('Search products in ERP...')"
 							icon="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+							@search="searchProducts"
+							@select="handleProductSelect"
 						/>
 					</div>
 				</div>
@@ -220,7 +226,8 @@
 <script setup>
 import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue"
 import { useInvoiceFiltersStore } from "@/stores/invoiceFilters"
-import { computed, ref } from "vue"
+import { call } from "@/utils/apiWrapper"
+import { computed, onMounted, ref } from "vue"
 import TranslatedHTML from "../common/TranslatedHTML.vue"
 
 const props = defineProps({
@@ -236,22 +243,138 @@ const props = defineProps({
 		type: Object,
 		default: null,
 	},
+	company: {
+		type: String,
+		default: "",
+	},
 })
 
 const store = useInvoiceFiltersStore()
 const showAdvanced = ref(false)
 const saveFilterName = ref("")
 
+// ERP search state
+const erpCustomers = ref([])
+const erpProducts = ref([])
+const loadingCustomers = ref(false)
+const loadingProducts = ref(false)
+
+let customerSearchTimeout = null
+let productSearchTimeout = null
+let customerRequestId = 0
+let productRequestId = 0
+
+function searchCustomers(term = "") {
+	clearTimeout(customerSearchTimeout)
+	customerSearchTimeout = setTimeout(async () => {
+		const reqId = ++customerRequestId
+		loadingCustomers.value = true
+		try {
+			const res = await call("pos_next.api.invoices.get_erp_customers", {
+				search_term: term,
+				limit: 50,
+			})
+			if (reqId !== customerRequestId) return
+			erpCustomers.value = res?.message || res || []
+		} catch (err) {
+			if (reqId === customerRequestId) {
+				console.error("Error searching ERP customers:", err)
+			}
+		} finally {
+			if (reqId === customerRequestId) {
+				loadingCustomers.value = false
+			}
+		}
+	}, term ? 250 : 0)
+}
+
+function searchProducts(term = "") {
+	clearTimeout(productSearchTimeout)
+	productSearchTimeout = setTimeout(async () => {
+		const reqId = ++productRequestId
+		loadingProducts.value = true
+		try {
+			const res = await call("pos_next.api.invoices.get_erp_items", {
+				search_term: term,
+				limit: 50,
+			})
+			if (reqId !== productRequestId) return
+			erpProducts.value = res?.message || res || []
+		} catch (err) {
+			if (reqId === productRequestId) {
+				console.error("Error searching ERP items:", err)
+			}
+		} finally {
+			if (reqId === productRequestId) {
+				loadingProducts.value = false
+			}
+		}
+	}, term ? 250 : 0)
+}
+
+const customerOptions = computed(() => {
+	const map = new Map()
+	// Add ERP customers first
+	erpCustomers.value.forEach((c) => {
+		map.set(c.value, c)
+	})
+	// Merge customers from current POS list
+	props.uniqueCustomers.forEach((c) => {
+		if (!map.has(c.value)) {
+			map.set(c.value, c)
+		}
+	})
+	// Ensure currently selected customer is present in options
+	if (store.customer && !map.has(store.customer)) {
+		map.set(store.customer, {
+			value: store.customer,
+			label: store.customerLabel || store.customer,
+		})
+	}
+	return Array.from(map.values())
+})
+
+const productOptions = computed(() => {
+	const map = new Map()
+	// Add ERP products first
+	erpProducts.value.forEach((p) => {
+		map.set(p.value, p)
+	})
+	// Merge products from current POS list
+	props.uniqueProducts.forEach((p) => {
+		if (!map.has(p.value)) {
+			map.set(p.value, p)
+		}
+	})
+	// Ensure currently selected product is present in options
+	if (store.product && !map.has(store.product)) {
+		map.set(store.product, {
+			value: store.product,
+			label: store.productLabel || store.product,
+			subtitle: store.product,
+		})
+	}
+	return Array.from(map.values())
+})
+
+function handleCustomerSelect(option) {
+	store.setCustomer(option?.value || "", option?.label || "")
+}
+
+function handleProductSelect(option) {
+	store.setProduct(option?.value || "", option?.label || "")
+}
+
 // Quick date presets (simplified)
 const quickDates = [
-	{ label: __("Today"), value: "today", action: () => store.setToday() },
+	{ label: __("This Month"), value: "month", action: () => store.setThisMonth() },
 	{
-		label: __("Yesterday"),
-		value: "yesterday",
-		action: () => store.setYesterday(),
+		label: __("Financial Year"),
+		value: "fy",
+		action: () => store.setFinancialYear(props.company),
 	},
 	{ label: __("This Week"), value: "week", action: () => store.setThisWeek() },
-	{ label: __("This Month"), value: "month", action: () => store.setThisMonth() },
+	{ label: __("Today"), value: "today", action: () => store.setToday() },
 ]
 
 // Status options (only show meaningful ones)
@@ -293,22 +416,37 @@ function isDatePresetActive(preset) {
 		case "today":
 			fromDate = toDate = formatDateForInput(today)
 			break
-		case "yesterday":
+		case "yesterday": {
 			const yesterday = new Date(today)
 			yesterday.setDate(yesterday.getDate() - 1)
 			fromDate = toDate = formatDateForInput(yesterday)
 			break
-		case "week":
+		}
+		case "week": {
 			const weekStart = new Date(today)
 			weekStart.setDate(today.getDate() - today.getDay())
 			fromDate = formatDateForInput(weekStart)
 			toDate = formatDateForInput(today)
 			break
-		case "month":
+		}
+		case "month": {
 			const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+			const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0)
 			fromDate = formatDateForInput(monthStart)
-			toDate = formatDateForInput(today)
-			break
+			const endMonth = formatDateForInput(monthEnd)
+			const endToday = formatDateForInput(today)
+			return (
+				store.dateFrom === fromDate &&
+				(store.dateTo === endMonth || store.dateTo === endToday)
+			)
+		}
+		case "fy": {
+			const year = today.getFullYear()
+			const startYear = today.getMonth() >= 3 ? year : year - 1
+			const fyStart = `${startYear}-04-01`
+			const fyEnd = `${startYear + 1}-03-31`
+			return store.dateFrom === fyStart && store.dateTo === fyEnd
+		}
 		default:
 			return false
 	}
@@ -341,6 +479,11 @@ function deleteSavedFilter(name) {
 		store.deleteFilterPreset(name)
 	}
 }
+
+onMounted(() => {
+	searchCustomers("")
+	searchProducts("")
+})
 </script>
 
 <style scoped>
