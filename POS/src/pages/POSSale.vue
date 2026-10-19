@@ -511,6 +511,7 @@
 			v-model="showReportsDialog"
 			:pos-profile="shiftStore.profileName"
 			:company="shiftStore.profileCompany"
+			@open-settings="showPOSSettings = true"
 		/>
 
 		<!-- Invoice Detail Dialog -->
@@ -2392,6 +2393,11 @@ function handleManagementMenuClick(menuItem) {
 		// Open Stock Lookup dialog in search mode
 		showStockLookup.value = true
 	} else if (menuItem === "reports") {
+		if (!posSettingsStore.enableReportsInPosNext) {
+			showWarning(
+				__('To view reports, please enable the "Enable Reports in POSNext" setting in POS Settings.')
+			)
+		}
 		showReportsDialog.value = true
 	}
 }

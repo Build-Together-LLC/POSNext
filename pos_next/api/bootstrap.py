@@ -145,6 +145,15 @@ def mrp_setting_fields():
 	]
 
 
+def report_setting_fields():
+	"""The enable_reports_in_posnext column, checked dynamically to be migration-safe."""
+	return [
+		field
+		for field in ("enable_reports_in_posnext",)
+		if frappe.db.has_column("POS Settings", field)
+	]
+
+
 def get_pos_settings(pos_profile):
 	"""Get POS Settings for a given POS Profile"""
 	if not pos_profile:
@@ -156,6 +165,7 @@ def get_pos_settings(pos_profile):
 			{"pos_profile": pos_profile, "enabled": 1},
 			[
 				*mrp_setting_fields(),
+				*report_setting_fields(),
 				"name",
 				"enabled",
 				"tax_inclusive",
@@ -183,6 +193,9 @@ def get_pos_settings(pos_profile):
 
 		if not pos_settings:
 			return get_default_pos_settings()
+
+		if "enable_reports_in_posnext" not in pos_settings:
+			pos_settings["enable_reports_in_posnext"] = 0
 
 		return pos_settings
 	except Exception:
@@ -215,7 +228,8 @@ def get_default_pos_settings():
 		"allow_multiple_mrp": 0,
 		"mrp_price_list": None,
 		"track_order_loss": 0,
-		"order_loss_max_demand_qty": 0
+		"order_loss_max_demand_qty": 0,
+		"enable_reports_in_posnext": 0
 	}
 
 

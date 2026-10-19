@@ -36,6 +36,7 @@
   "allow_return_without_invoice",
   "allow_free_batch_return",
   "allow_print_draft_invoices",
+  "enable_reports_in_posnext",
   "section_break_pricing",
   "decimal_precision",
   "tax_inclusive",
@@ -277,6 +278,13 @@
    "fieldname": "allow_print_draft_invoices",
    "fieldtype": "Check",
    "label": "Allow Print Draft Invoices"
+  },
+  {
+   "default": "0",
+   "description": "Enable viewing and accessing reports in POSNext",
+   "fieldname": "enable_reports_in_posnext",
+   "fieldtype": "Check",
+   "label": "Enable Reports in POSNext"
   },
   {
    "collapsible": 1,

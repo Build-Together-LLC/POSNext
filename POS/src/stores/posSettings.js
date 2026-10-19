@@ -66,6 +66,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		auto_select_single_batch: 1,
 		// Sales Persons
 		enable_sales_persons: "Disabled",
+		// Reports
+		enable_reports_in_posnext: 0,
 	})
 
 	const isLoading = ref(false)
@@ -228,6 +230,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	)
 	const isMultipleSalesPersons = computed(() =>
 		settings.value.enable_sales_persons === "Multiple"
+	)
+
+	// Computed - Reports
+	const enableReportsInPosNext = computed(() =>
+		Boolean(settings.value.enable_reports_in_posnext),
 	)
 
 	// Resource
@@ -512,6 +519,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		salesPersonsMode,
 		isSingleSalesPerson,
 		isMultipleSalesPersons,
+
+		// Computed - Reports
+		enableReportsInPosNext,
 
 		// Actions
 		loadSettings,

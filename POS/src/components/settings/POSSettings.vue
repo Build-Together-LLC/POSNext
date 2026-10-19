@@ -403,6 +403,11 @@
 												:label="__('Silent Print')"
 												:description="__('Print without confirmation')"
 											/>
+											<CheckboxField
+												v-model="settings.enable_reports_in_posnext"
+												:label="__('Enable Reports in POSNext')"
+												:description="__('Enable viewing and accessing reports directly from POSNext')"
+											/>
 										</div>
 									</div>
 								</div>
@@ -492,6 +497,7 @@ const settings = ref({
 	mrp_price_list: "",
 	auto_apply_offers: 0,
 	require_cart_item_review: 0,
+	enable_reports_in_posnext: 0,
 })
 
 // Stock Sync Settings (localStorage persisted)
