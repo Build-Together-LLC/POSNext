@@ -1041,6 +1041,7 @@ def get_invoices(
 	from_date=None,
 	to_date=None,
 	status=None,
+	is_return=None,
 	limit=100,
 	start=0,
 ):
@@ -1056,6 +1057,7 @@ def get_invoices(
 		from_date: Start posting date (YYYY-MM-DD)
 		to_date: End posting date (YYYY-MM-DD)
 		status: Filter by status ('Paid', 'Unpaid', 'Partly Paid', 'Overdue')
+		is_return: Filter by is_return (1 for return invoices, 0 for sales invoices)
 		limit: Maximum number of invoices to return (default 100)
 		start: Offset for pagination (default 0)
 
@@ -1121,6 +1123,10 @@ def get_invoices(
 	if status and status.strip():
 		conditions.append("`tabSales Invoice`.status = %(status)s")
 		params["status"] = status.strip()
+
+	if is_return is not None and is_return != "":
+		conditions.append("`tabSales Invoice`.is_return = %(is_return)s")
+		params["is_return"] = cint(is_return)
 
 	where_clause = " AND ".join(conditions)
 

@@ -640,8 +640,14 @@
 
 							<!-- Return Invoices Tab -->
 							<div v-if="activeTab === 'returns'">
+								<!-- Loading State -->
+								<div v-if="loadingReturns" class="flex flex-col items-center justify-center py-12">
+									<div class="animate-spin rounded-full h-10 w-10 border-b-2 border-red-600 mb-3"></div>
+									<p class="text-sm font-medium text-gray-600">{{ __('Fetching returns from ERP...') }}</p>
+								</div>
+
 								<!-- Empty State -->
-								<div v-if="returnInvoices.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
+								<div v-else-if="returnInvoices.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
 									<svg class="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
 									</svg>
@@ -699,6 +705,19 @@
 											</div>
 										</div>
 									</div>
+								</div>
+
+								<!-- Load More Returns Button -->
+								<div v-if="!loadingReturns && hasMoreReturns" class="flex justify-center mt-6 mb-2">
+									<Button
+										@click="loadMoreServerReturnInvoices"
+										:loading="loadingMoreReturns"
+										variant="subtle"
+										size="sm"
+										class="px-6 py-2 font-semibold"
+									>
+										{{ __('Load More Returns') }}
+									</Button>
 								</div>
 							</div>
 						</div>
@@ -828,6 +847,7 @@ async function loadServerHistoryInvoices() {
 	if (!props.posProfile) return
 
 	const reqId = ++serverHistoryRequestId
+	loadingMoreHistory.value = false
 	loadingHistory.value = true
 	try {
 		const params = {
@@ -839,6 +859,7 @@ async function loadServerHistoryInvoices() {
 			from_date: filterStore.dateFrom || undefined,
 			to_date: filterStore.dateTo || undefined,
 			status: filterStore.status || undefined,
+			is_return: 0,
 			start: 0,
 			limit: HISTORY_PAGE_SIZE,
 		}
@@ -877,6 +898,7 @@ async function loadMoreServerHistoryInvoices() {
 			from_date: filterStore.dateFrom || undefined,
 			to_date: filterStore.dateTo || undefined,
 			status: filterStore.status || undefined,
+			is_return: 0,
 			start: serverHistoryInvoices.value.length,
 			limit: HISTORY_PAGE_SIZE,
 		}
@@ -895,9 +917,81 @@ async function loadMoreServerHistoryInvoices() {
 			showError(error.message || __("Failed to load more invoices from ERP"))
 		}
 	} finally {
-		if (reqId === serverHistoryRequestId) {
-			loadingMoreHistory.value = false
+		loadingMoreHistory.value = false
+	}
+}
+
+// Return invoices state and requests (independent of History filters)
+const serverReturnInvoices = ref([])
+const hasLoadedServerReturns = ref(false)
+const hasMoreReturns = ref(false)
+const loadingReturns = ref(false)
+const loadingMoreReturns = ref(false)
+let serverReturnRequestId = 0
+
+async function loadServerReturnInvoices() {
+	if (!props.posProfile) return
+
+	const reqId = ++serverReturnRequestId
+	loadingMoreReturns.value = false
+	loadingReturns.value = true
+	try {
+		const params = {
+			pos_profile: props.posProfile,
+			company: props.company || undefined,
+			is_return: 1,
+			start: 0,
+			limit: HISTORY_PAGE_SIZE,
 		}
+
+		const result = await call("pos_next.api.invoices.get_invoices", params)
+		if (reqId !== serverReturnRequestId) return
+
+		const list = result || []
+		serverReturnInvoices.value = list
+		hasMoreReturns.value = list.length === HISTORY_PAGE_SIZE
+		hasLoadedServerReturns.value = true
+	} catch (error) {
+		if (reqId === serverReturnRequestId) {
+			console.error("Error loading return invoices from ERP:", error)
+			showError(error.message || __("Failed to load return invoices from ERP"))
+		}
+	} finally {
+		if (reqId === serverReturnRequestId) {
+			loadingReturns.value = false
+		}
+	}
+}
+
+async function loadMoreServerReturnInvoices() {
+	if (!props.posProfile || loadingMoreReturns.value || !hasMoreReturns.value) return
+
+	const reqId = serverReturnRequestId
+	loadingMoreReturns.value = true
+	try {
+		const params = {
+			pos_profile: props.posProfile,
+			company: props.company || undefined,
+			is_return: 1,
+			start: serverReturnInvoices.value.length,
+			limit: HISTORY_PAGE_SIZE,
+		}
+
+		const result = await call("pos_next.api.invoices.get_invoices", params)
+		if (reqId !== serverReturnRequestId) return
+
+		const list = result || []
+		const existingNames = new Set(serverReturnInvoices.value.map((inv) => inv.name))
+		const newInvoices = list.filter((inv) => !existingNames.has(inv.name))
+		serverReturnInvoices.value = [...serverReturnInvoices.value, ...newInvoices]
+		hasMoreReturns.value = list.length === HISTORY_PAGE_SIZE
+	} catch (error) {
+		if (reqId === serverReturnRequestId) {
+			console.error("Error loading more return invoices from ERP:", error)
+			showError(error.message || __("Failed to load more return invoices from ERP"))
+		}
+	} finally {
+		loadingMoreReturns.value = false
 	}
 }
 
@@ -905,7 +999,7 @@ let searchDebounceTimer = null
 watch(
 	() => filterStore.searchTerm,
 	() => {
-		if (!show.value || (activeTab.value !== "history" && activeTab.value !== "returns")) return
+		if (!show.value || activeTab.value !== "history") return
 		clearTimeout(searchDebounceTimer)
 		searchDebounceTimer = setTimeout(() => {
 			loadServerHistoryInvoices()
@@ -922,7 +1016,7 @@ watch(
 		() => filterStore.dateTo,
 	],
 	() => {
-		if (show.value && (activeTab.value === "history" || activeTab.value === "returns")) {
+		if (show.value && activeTab.value === "history") {
 			loadServerHistoryInvoices()
 		}
 	},
@@ -970,11 +1064,12 @@ const filteredUnpaidSummary = computed(() => {
 	}
 })
 
-// Return invoices (filtered from history)
+// Return invoices: prefer server queried results, fallback to props.historyInvoices
 const returnInvoices = computed(() => {
-	const allInvoices = Array.isArray(historyInvoicesToUse.value)
-		? historyInvoicesToUse.value
-		: []
+	if (hasLoadedServerReturns.value || serverReturnInvoices.value.length > 0) {
+		return serverReturnInvoices.value
+	}
+	const allInvoices = Array.isArray(props.historyInvoices) ? props.historyInvoices : []
 	return allInvoices.filter((inv) => inv.is_return)
 })
 
@@ -1090,6 +1185,7 @@ watch(
 			loadUnpaidInvoices()
 			loadUnpaidSummary()
 			loadServerHistoryInvoices()
+			loadServerReturnInvoices()
 			// Also request history refresh if we don't have data
 			if (props.historyInvoices.length === 0) {
 				emit("refresh-history")
@@ -1106,8 +1202,11 @@ watch(show, (val) => {
 watch(activeTab, (newTab) => {
 	// Always emit refresh event when switching to history or returns tabs
 	// This ensures up-to-date outstanding amounts and invoice data
-	if (newTab === "history" || newTab === "returns") {
+	if (newTab === "history") {
 		loadServerHistoryInvoices()
+		emit("refresh-history")
+	} else if (newTab === "returns") {
+		loadServerReturnInvoices()
 		emit("refresh-history")
 	} else if (newTab === "partial") {
 		// Refresh unpaid invoices when switching to partial tab
@@ -1131,7 +1230,7 @@ async function refreshCurrentTab() {
 		// Drafts are passed from parent, emit event if needed
 		emit("refresh-history")
 	} else if (activeTab.value === "returns") {
-		await loadServerHistoryInvoices()
+		await loadServerReturnInvoices()
 		emit("refresh-history")
 	}
 }
