@@ -31,7 +31,31 @@
 
 				<!-- Reports List -->
 				<div class="p-6 overflow-y-auto space-y-4">
-					<div v-if="loadingReports" class="flex flex-col items-center justify-center py-12">
+					<!-- Reports Disabled State -->
+					<div v-if="!isReportsEnabled" class="flex flex-col items-center justify-center py-12 px-6 text-center">
+						<div class="w-14 h-14 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
+							<svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+							</svg>
+						</div>
+						<h4 class="text-base font-bold text-gray-900 mb-1.5">{{ __('Reports Disabled') }}</h4>
+						<p class="text-xs text-gray-600 max-w-md leading-relaxed">
+							{{ __('To view reports, please enable the "Enable Reports in POSNext" setting in POS Settings.') }}
+						</p>
+						<button
+							type="button"
+							@click="openSettings"
+							class="mt-4 px-4 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold text-xs rounded-lg border border-orange-200 transition-colors inline-flex items-center gap-1.5"
+						>
+							<svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+							</svg>
+							<span>{{ __('Open POS Settings') }}</span>
+						</button>
+					</div>
+
+					<div v-else-if="loadingReports" class="flex flex-col items-center justify-center py-12">
 						<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mb-3"></div>
 						<p class="text-xs text-gray-500">{{ __('Checking report permissions...') }}</p>
 					</div>
@@ -179,6 +203,7 @@
 <script setup>
 import { call } from "frappe-ui"
 import { computed, ref, watch } from "vue"
+import { usePOSSettingsStore } from "@/stores/posSettings"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -192,20 +217,32 @@ const props = defineProps({
 	},
 })
 
-const emit = defineEmits(["update:modelValue"])
+const emit = defineEmits(["update:modelValue", "open-settings"])
+
+const posSettingsStore = usePOSSettingsStore()
+const isReportsEnabled = computed(() => {
+	return Boolean(posSettingsStore.enableReportsInPosNext)
+})
 
 function close() {
 	emit("update:modelValue", false)
+}
+
+function openSettings() {
+	close()
+	emit("open-settings")
 }
 
 const accessibleReports = ref(null)
 const loadingReports = ref(false)
 
 async function loadAccessibleReports() {
-	if (loadingReports.value) return
+	if (loadingReports.value || !isReportsEnabled.value) return
 	loadingReports.value = true
 	try {
-		const res = await call("pos_next.api.invoices.get_accessible_reports")
+		const res = await call("pos_next.api.invoices.get_accessible_reports", {
+			pos_profile: props.posProfile || undefined,
+		})
 		accessibleReports.value = res?.message || res || []
 	} catch (err) {
 		console.error("Error loading accessible reports:", err)
@@ -220,9 +257,9 @@ async function loadAccessibleReports() {
 }
 
 watch(
-	() => props.modelValue,
-	(val) => {
-		if (val && accessibleReports.value === null) {
+	[() => props.modelValue, isReportsEnabled],
+	([val, enabled]) => {
+		if (val && enabled && accessibleReports.value === null) {
 			loadAccessibleReports()
 		}
 	},

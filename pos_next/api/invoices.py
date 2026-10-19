@@ -1258,10 +1258,20 @@ def get_erp_items(search_term="", limit=50):
 
 
 @frappe.whitelist()
-def get_accessible_reports(reports=None):
+def get_accessible_reports(pos_profile=None, reports=None):
 	"""
 	Check which reports the current session user has permission to open.
+	If pos_profile is supplied, also verifies that reports are enabled in POS Settings.
 	"""
+	if pos_profile and frappe.db.has_column("POS Settings", "enable_reports_in_posnext"):
+		enabled = frappe.db.get_value(
+			"POS Settings",
+			{"pos_profile": pos_profile, "enabled": 1},
+			"enable_reports_in_posnext",
+		)
+		if not enabled:
+			return []
+
 	if not reports:
 		report_list = [
 			"POS Demand vs Actual",

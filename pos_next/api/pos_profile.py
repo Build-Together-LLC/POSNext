@@ -67,13 +67,14 @@ def get_pos_settings(pos_profile):
 
 	try:
 		# Get POS Settings linked to this POS Profile
-		from pos_next.api.bootstrap import mrp_setting_fields
+		from pos_next.api.bootstrap import mrp_setting_fields, report_setting_fields
 
 		pos_settings = frappe.db.get_value(
 			"POS Settings",
 			{"pos_profile": pos_profile, "enabled": 1},
 			[
 				*mrp_setting_fields(),
+				*report_setting_fields(),
 				"enabled",
 				"tax_inclusive",
 				"allow_user_to_edit_additional_discount",
@@ -114,8 +115,12 @@ def get_pos_settings(pos_profile):
 				"allow_multiple_mrp": 0,
 				"mrp_price_list": None,
 				"track_order_loss": 0,
-				"order_loss_max_demand_qty": 0
+				"order_loss_max_demand_qty": 0,
+				"enable_reports_in_posnext": 0
 			}
+
+		if "enable_reports_in_posnext" not in pos_settings:
+			pos_settings["enable_reports_in_posnext"] = 0
 
 		return pos_settings
 	except Exception as e:
