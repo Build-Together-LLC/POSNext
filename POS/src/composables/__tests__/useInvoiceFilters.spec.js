@@ -154,4 +154,65 @@ describe("useInvoiceFilters Composable", () => {
 		expect(filteredInvoices.value).toHaveLength(1)
 		expect(filteredInvoices.value[0].name).toBe("ACC-SINV-2026-00002")
 	})
+
+	it("filters by date range accurately using timezone-safe string matching", () => {
+		const invoices = ref(mockInvoices)
+		const { filteredInvoices, filterStats } = useInvoiceFilters(invoices)
+		const store = useInvoiceFiltersStore()
+
+		// Specific day (Today simulation)
+		store.setDateRange("2026-10-10", "2026-10-10")
+		expect(filteredInvoices.value).toHaveLength(1)
+		expect(filteredInvoices.value[0].name).toBe("ACC-SINV-2026-00001")
+		expect(filterStats.value.filtered).toBe(1)
+		expect(filterStats.value.total).toBe(3)
+
+		// Day with 0 matching invoices
+		store.setDateRange("2026-10-21", "2026-10-21")
+		expect(filteredInvoices.value).toHaveLength(0)
+		expect(filterStats.value.filtered).toBe(0)
+		expect(filterStats.value.total).toBe(3)
+
+		// Entire month (October 2026)
+		store.setDateRange("2026-10-01", "2026-10-31")
+		expect(filteredInvoices.value).toHaveLength(2)
+		expect(filterStats.value.filtered).toBe(2)
+
+		// Financial Year (2026-04-01 to 2027-03-31)
+		store.setDateRange("2026-04-01", "2027-03-31")
+		expect(filteredInvoices.value).toHaveLength(3)
+		expect(filterStats.value.filtered).toBe(3)
+		expect(filterStats.value.total).toBe(3)
+	})
+
+	it("maintains consistent counts and percentage in filterStats", () => {
+		const invoices = ref(mockInvoices)
+		const { filteredInvoices, filterStats } = useInvoiceFilters(invoices)
+		const store = useInvoiceFiltersStore()
+		store.clearDateFilter()
+
+		// Initially all 3 match
+		expect(filterStats.value.total).toBe(3)
+		expect(filterStats.value.filtered).toBe(3)
+		expect(filterStats.value.percentage).toBe(100)
+		expect(filteredInvoices.value.length).toBe(filterStats.value.filtered)
+
+		// Filter by customer CUST-0002 (1 invoice)
+		store.setCustomer("CUST-0002", "Bob Jones")
+		expect(filterStats.value.total).toBe(3)
+		expect(filterStats.value.filtered).toBe(1)
+		expect(filterStats.value.percentage).toBe(33)
+		expect(filteredInvoices.value.length).toBe(filterStats.value.filtered)
+
+		// Clear customer filter
+		store.clearCustomerFilter()
+		expect(filterStats.value.filtered).toBe(3)
+		expect(filterStats.value.percentage).toBe(100)
+
+		// Empty invoices array
+		invoices.value = []
+		expect(filterStats.value.total).toBe(0)
+		expect(filterStats.value.filtered).toBe(0)
+		expect(filterStats.value.percentage).toBe(0)
+	})
 })

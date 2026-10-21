@@ -32,23 +32,20 @@ export function useInvoiceFilters(invoices) {
 			)
 		}
 
-		// Apply date range filter
+		// Apply date range filter (direct ISO string comparison: timezone-safe and exact)
 		if (filtersStore.dateFrom) {
-			const fromDate = new Date(filtersStore.dateFrom)
-			fromDate.setHours(0, 0, 0, 0)
+			const from = String(filtersStore.dateFrom).slice(0, 10)
 			result = result.filter((inv) => {
-				const invDate = new Date(inv.posting_date)
-				invDate.setHours(0, 0, 0, 0)
-				return invDate >= fromDate
+				const d = String(inv.posting_date || "").slice(0, 10)
+				return d ? d >= from : false
 			})
 		}
 
 		if (filtersStore.dateTo) {
-			const toDate = new Date(filtersStore.dateTo)
-			toDate.setHours(23, 59, 59, 999)
+			const to = String(filtersStore.dateTo).slice(0, 10)
 			result = result.filter((inv) => {
-				const invDate = new Date(inv.posting_date)
-				return invDate <= toDate
+				const d = String(inv.posting_date || "").slice(0, 10)
+				return d ? d <= to : false
 			})
 		}
 
@@ -175,18 +172,15 @@ export function useInvoiceFilters(invoices) {
 
 		// Date range
 		if (filtersStore.dateFrom) {
-			const fromDate = new Date(filtersStore.dateFrom)
-			fromDate.setHours(0, 0, 0, 0)
-			const invDate = new Date(invoice.posting_date)
-			invDate.setHours(0, 0, 0, 0)
-			if (invDate < fromDate) return false
+			const from = String(filtersStore.dateFrom).slice(0, 10)
+			const d = String(invoice.posting_date || "").slice(0, 10)
+			if (!d || d < from) return false
 		}
 
 		if (filtersStore.dateTo) {
-			const toDate = new Date(filtersStore.dateTo)
-			toDate.setHours(23, 59, 59, 999)
-			const invDate = new Date(invoice.posting_date)
-			if (invDate > toDate) return false
+			const to = String(filtersStore.dateTo).slice(0, 10)
+			const d = String(invoice.posting_date || "").slice(0, 10)
+			if (!d || d > to) return false
 		}
 
 		// Customer
@@ -222,14 +216,14 @@ export function useInvoiceFilters(invoices) {
 	 * Get filter statistics
 	 */
 	const filterStats = computed(() => {
+		const total = Array.isArray(invoices.value) ? invoices.value.length : 0
+		const filtered = Array.isArray(filteredInvoices.value)
+			? filteredInvoices.value.length
+			: 0
 		return {
-			total: invoices.value?.length || 0,
-			filtered: filteredInvoices.value.length,
-			percentage: invoices.value?.length
-				? Math.round(
-						(filteredInvoices.value.length / invoices.value.length) * 100,
-					)
-				: 0,
+			total,
+			filtered,
+			percentage: total ? Math.round((filtered / total) * 100) : 0,
 		}
 	})
 
