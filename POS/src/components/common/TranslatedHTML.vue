@@ -1,28 +1,22 @@
 <template>
-    <component :is="tag" :="$attrs" ref="containerRef">
-    </component>
+	<component :is="tag" :="$attrs" v-html="sanitizedHtml" />
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import DOMPurify from 'dompurify'
+import DOMPurify from "dompurify"
+import { computed } from "vue"
 
 const props = defineProps({
-    tag: {
-        type: String,
-        required: false,
-        default: 'span'
-    },
-    inner: {
-        type: String,
-        required: true
-    }
+	tag: {
+		type: String,
+		required: false,
+		default: "span",
+	},
+	inner: {
+		type: String,
+		required: true,
+	},
 })
 
-const containerRef = ref(null)
-
-onMounted(() => {
-    const sanitized = DOMPurify.sanitize(props.inner)
-    containerRef.value.innerHTML = sanitized
-})
+const sanitizedHtml = computed(() => DOMPurify.sanitize(props.inner || ""))
 </script>

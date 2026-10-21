@@ -283,9 +283,9 @@
 								<!-- Filters Component -->
 								<div class="mb-6">
 									<InvoiceFilters
-										:unique-customers="invoiceFilters.uniqueCustomers.value"
-										:unique-products="invoiceFilters.uniqueProducts.value"
-										:filter-stats="invoiceFilters.filterStats.value"
+										:unique-customers="uniqueCustomers"
+										:unique-products="uniqueProducts"
+										:filter-stats="filterStats"
 										:company="props.company"
 									/>
 								</div>
@@ -750,7 +750,8 @@ import { getInvoiceStatusColor } from "@/utils/invoice"
 import { usePOSPermissions } from "@/composables/usePermissions"
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
-import { Button, call } from "frappe-ui"
+import { call } from "@/utils/apiWrapper"
+import { Button } from "frappe-ui"
 import { computed, onMounted, ref, watch } from "vue"
 
 const { showSuccess, showError } = useToast()
@@ -853,8 +854,18 @@ const nonReturnHistoryInvoices = computed(() => {
 const invoiceFilters = useInvoiceFilters(nonReturnHistoryInvoices)
 const filteredHistoryInvoices = invoiceFilters.filteredInvoices
 
+const uniqueCustomers = computed(() => invoiceFilters.uniqueCustomers.value)
+const uniqueProducts = computed(() => invoiceFilters.uniqueProducts.value)
+const filterStats = computed(() => ({
+	total: nonReturnHistoryInvoices.value.length,
+	filtered: filteredHistoryInvoices.value.length,
+	percentage: nonReturnHistoryInvoices.value.length
+		? Math.round((filteredHistoryInvoices.value.length / nonReturnHistoryInvoices.value.length) * 100)
+		: 0,
+}))
+
 async function loadServerHistoryInvoices() {
-	if (!props.posProfile) return
+	if (!props.posProfile && !props.company) return
 
 	const reqId = ++serverHistoryRequestId
 	loadingMoreHistory.value = false
@@ -877,7 +888,7 @@ async function loadServerHistoryInvoices() {
 		const result = await call("pos_next.api.invoices.get_invoices", params)
 		if (reqId !== serverHistoryRequestId) return
 
-		const list = result || []
+		const list = Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
 		serverHistoryInvoices.value = list
 		hasMoreHistory.value = list.length === HISTORY_PAGE_SIZE
 		hasLoadedServerHistory.value = true
@@ -894,7 +905,7 @@ async function loadServerHistoryInvoices() {
 }
 
 async function loadMoreServerHistoryInvoices() {
-	if (!props.posProfile || loadingMoreHistory.value || !hasMoreHistory.value) return
+	if ((!props.posProfile && !props.company) || loadingMoreHistory.value || !hasMoreHistory.value) return
 
 	const reqId = serverHistoryRequestId
 	loadingMoreHistory.value = true
@@ -916,7 +927,7 @@ async function loadMoreServerHistoryInvoices() {
 		const result = await call("pos_next.api.invoices.get_invoices", params)
 		if (reqId !== serverHistoryRequestId) return
 
-		const list = result || []
+		const list = Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
 		const existingNames = new Set(serverHistoryInvoices.value.map((inv) => inv.name))
 		const newInvoices = list.filter((inv) => !existingNames.has(inv.name))
 		serverHistoryInvoices.value = [...serverHistoryInvoices.value, ...newInvoices]
@@ -940,7 +951,7 @@ const loadingMoreReturns = ref(false)
 let serverReturnRequestId = 0
 
 async function loadServerReturnInvoices() {
-	if (!props.posProfile) return
+	if (!props.posProfile && !props.company) return
 
 	const reqId = ++serverReturnRequestId
 	loadingMoreReturns.value = false
@@ -957,7 +968,7 @@ async function loadServerReturnInvoices() {
 		const result = await call("pos_next.api.invoices.get_invoices", params)
 		if (reqId !== serverReturnRequestId) return
 
-		const list = result || []
+		const list = Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
 		serverReturnInvoices.value = list
 		hasMoreReturns.value = list.length === HISTORY_PAGE_SIZE
 		hasLoadedServerReturns.value = true
@@ -974,7 +985,7 @@ async function loadServerReturnInvoices() {
 }
 
 async function loadMoreServerReturnInvoices() {
-	if (!props.posProfile || loadingMoreReturns.value || !hasMoreReturns.value) return
+	if ((!props.posProfile && !props.company) || loadingMoreReturns.value || !hasMoreReturns.value) return
 
 	const reqId = serverReturnRequestId
 	loadingMoreReturns.value = true
@@ -990,7 +1001,7 @@ async function loadMoreServerReturnInvoices() {
 		const result = await call("pos_next.api.invoices.get_invoices", params)
 		if (reqId !== serverReturnRequestId) return
 
-		const list = result || []
+		const list = Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
 		const existingNames = new Set(serverReturnInvoices.value.map((inv) => inv.name))
 		const newInvoices = list.filter((inv) => !existingNames.has(inv.name))
 		serverReturnInvoices.value = [...serverReturnInvoices.value, ...newInvoices]
@@ -1253,7 +1264,7 @@ async function loadUnpaidInvoices() {
 			},
 		)
 
-		unpaidInvoices.value = result || []
+		unpaidInvoices.value = Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
 	} catch (error) {
 		console.error("Error loading unpaid invoices:", error)
 		showError(error.message || __("Failed to load unpaid invoices"))
@@ -1273,7 +1284,8 @@ async function loadUnpaidSummary() {
 			},
 		)
 
-		unpaidSummary.value = result || {
+		const summary = result?.message || result
+		unpaidSummary.value = summary || {
 			count: 0,
 			total_outstanding: 0,
 			total_paid: 0,

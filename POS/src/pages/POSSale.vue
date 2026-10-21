@@ -2416,7 +2416,7 @@ async function loadInvoiceHistoryData() {
 			limit: 100,
 		})
 
-		invoiceHistoryData.value = result || []
+		invoiceHistoryData.value = Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
 		log.info("Loaded invoice history:", invoiceHistoryData.value.length, "invoices")
 	} catch (error) {
 		log.error("Error loading invoice history:", error)

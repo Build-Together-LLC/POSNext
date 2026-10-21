@@ -1,3 +1,5 @@
+import { mount } from "@vue/test-utils"
+import TranslatedHTML from "@/components/common/TranslatedHTML.vue"
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
 import { computed, nextTick, ref } from "vue"
@@ -140,4 +142,41 @@ describe("Invoice Management Count Consistency", () => {
 		expect(showBadge({ id: "drafts", count: 0 })).toBe(false)
 		expect(showBadge({ id: "returns", count: 0 })).toBe(false)
 	})
+
+	it("TranslatedHTML reactively updates rendered content when inner prop changes", async () => {
+		const wrapper = mount(TranslatedHTML, {
+			props: {
+				inner: "<strong>2</strong> invoice(s)",
+			},
+		})
+
+		expect(wrapper.text()).toContain("2 invoice(s)")
+		expect(wrapper.find("strong").text()).toBe("2")
+
+		// Simulate filter change to Financial Year (e.g. 75 invoices)
+		await wrapper.setProps({
+			inner: "<strong>75</strong> invoice(s)",
+		})
+		expect(wrapper.text()).toContain("75 invoice(s)")
+		expect(wrapper.find("strong").text()).toBe("75")
+
+		// Simulate filter change to Today (0 invoices)
+		await wrapper.setProps({
+			inner: "<strong>0</strong> invoice(s)",
+		})
+		expect(wrapper.text()).toContain("0 invoice(s)")
+		expect(wrapper.find("strong").text()).toBe("0")
+	})
+
+	it("unwraps API responses whether returned directly as an array or inside { message: [...] }", () => {
+		const unwrap = (result) =>
+			Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
+
+		expect(unwrap([sampleInvoices[0]])).toHaveLength(1)
+		expect(unwrap({ message: [sampleInvoices[0], sampleInvoices[1]] })).toHaveLength(2)
+		expect(unwrap(null)).toEqual([])
+		expect(unwrap(undefined)).toEqual([])
+		expect(unwrap({})).toEqual([])
+	})
 })
+
