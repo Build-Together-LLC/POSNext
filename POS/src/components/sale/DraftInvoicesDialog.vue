@@ -45,7 +45,7 @@
 								<h4 class="text-sm font-semibold text-gray-900 truncate">
 									{{ draft.draft_id }}
 								</h4>
-								<p v-if="draft.customer" class="text-sm sm:text-base font-bold text-gray-900 mt-0.5 break-words">
+								<p v-if="draft.customer" class="text-sm sm:text-base font-bold sm:font-bold text-gray-900 mt-0.5 break-words">
 									{{ __('Customer: {0}', [(draft.customer?.customer_name || draft.customer?.name || draft.customer)]) }}
 								</p>
 								<p class="text-xs text-gray-400 mt-0.5">
@@ -55,7 +55,7 @@
 							<div class="flex items-center gap-1.5 shrink-0 ms-2">
 								<button
 									@click.stop="handlePrintDraft(draft)"
-									class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 border border-blue-200 rounded-lg transition-colors shadow-sm"
+									class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-bold sm:font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 border border-blue-200 rounded-lg transition-colors shadow-sm"
 									:title="__('Print draft')"
 								>
 									<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
