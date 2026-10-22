@@ -581,7 +581,7 @@
 										<div class="flex items-start justify-between mb-2">
 											<div class="flex-1">
 												<h4 class="text-sm font-semibold text-gray-900">{{ draft.draft_id }}</h4>
-												<p v-if="draft.customer" class="text-xs text-gray-500 mt-0.5">
+												<p v-if="draft.customer" class="text-sm sm:text-base font-bold sm:font-bold text-gray-900 mt-0.5 break-words">
 													{{ __('Customer: {0}', [(draft.customer?.customer_name || draft.customer?.name || draft.customer)]) }}
 												</p>
 												<p class="text-xs text-gray-400 mt-0.5">{{ formatDateTime(draft.created_at) }}</p>
