@@ -40,32 +40,33 @@
 						class="bg-white border border-gray-200 rounded-lg p-3 hover:border-blue-400 transition-all cursor-pointer"
 						@click="$emit('load-draft', draft)"
 					>
-						<div class="flex items-start justify-between mb-2">
-							<div class="flex-1">
-								<h4 class="text-sm font-semibold text-gray-900">
+						<div class="flex items-start justify-between gap-2 mb-2">
+							<div class="flex-1 min-w-0">
+								<h4 class="text-sm font-semibold text-gray-900 truncate">
 									{{ draft.draft_id }}
 								</h4>
-								<p v-if="draft.customer" class="text-xs text-gray-500 mt-0.5">
+								<p v-if="draft.customer" class="text-sm sm:text-base font-bold text-gray-900 mt-0.5 break-words">
 									{{ __('Customer: {0}', [(draft.customer?.customer_name || draft.customer?.name || draft.customer)]) }}
 								</p>
 								<p class="text-xs text-gray-400 mt-0.5">
 									{{ formatDateTime(draft.created_at) }}
 								</p>
 							</div>
-							<div class="flex items-center gap-1">
+							<div class="flex items-center gap-1.5 shrink-0 ms-2">
 								<button
 									@click.stop="handlePrintDraft(draft)"
-									class="text-gray-400 hover:text-blue-600 transition-colors p-1"
+									class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 border border-blue-200 rounded-lg transition-colors shadow-sm"
 									:title="__('Print draft')"
 								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
 									</svg>
+									<span>{{ __('Print') }}</span>
 								</button>
 								<button
 									v-if="canDeleteDrafts"
 									@click.stop="handleDeleteDraft(draft.draft_id)"
-									class="text-gray-400 hover:text-red-600 transition-colors p-1"
+									class="text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors p-1.5 rounded-lg shrink-0"
 									:title="__('Delete draft')"
 								>
 									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
