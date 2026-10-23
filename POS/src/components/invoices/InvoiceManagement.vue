@@ -27,7 +27,7 @@
 						<div class="flex items-center gap-2">
 							<Button
 								@click="refreshCurrentTab"
-								:loading="loading"
+								:loading="loading || loadingHistory || loadingReturns"
 								variant="ghost"
 								size="sm"
 							>
@@ -69,13 +69,13 @@
 									</svg>
 									<span>{{ tab.label }}</span>
 									<span
-										v-if="tab.badge && tab.badge() > 0"
+										v-if="tab.id === 'history' ? tab.count != null : (tab.count != null && tab.count > 0)"
 										:class="[
 											'ms-1 px-2 py-0.5 text-xs font-bold rounded-full',
 											activeTab === tab.id ? getBadgeActiveClass(tab.id) : getBadgeInactiveClass(tab.id)
 										]"
 									>
-										{{ tab.badge() }}
+										{{ tab.count }}
 									</span>
 								</div>
 							</button>
@@ -283,9 +283,9 @@
 								<!-- Filters Component -->
 								<div class="mb-6">
 									<InvoiceFilters
-										:unique-customers="invoiceFilters.uniqueCustomers.value"
-										:unique-products="invoiceFilters.uniqueProducts.value"
-										:filter-stats="invoiceFilters.filterStats.value"
+										:unique-customers="uniqueCustomers"
+										:unique-products="uniqueProducts"
+										:filter-stats="filterStats"
 										:company="props.company"
 									/>
 								</div>
@@ -750,7 +750,8 @@ import { getInvoiceStatusColor } from "@/utils/invoice"
 import { usePOSPermissions } from "@/composables/usePermissions"
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
-import { Button, call } from "frappe-ui"
+import { call } from "@/utils/apiWrapper"
+import { Button } from "frappe-ui"
 import { computed, onMounted, ref, watch } from "vue"
 
 const { showSuccess, showError } = useToast()
@@ -841,10 +842,30 @@ const historyInvoicesToUse = computed(() => {
 	return Array.isArray(props.historyInvoices) ? props.historyInvoices : []
 })
 
-const invoiceFilters = useInvoiceFilters(historyInvoicesToUse)
+// Non-return history invoices (returns have their own dedicated tab)
+const nonReturnHistoryInvoices = computed(() => {
+	const allInvoices = Array.isArray(historyInvoicesToUse.value)
+		? historyInvoicesToUse.value
+		: []
+	return allInvoices.filter((inv) => !inv.is_return)
+})
+
+// Single invoiceFilters composable instance using nonReturnHistoryInvoices
+const invoiceFilters = useInvoiceFilters(nonReturnHistoryInvoices)
+const filteredHistoryInvoices = invoiceFilters.filteredInvoices
+
+const uniqueCustomers = computed(() => invoiceFilters.uniqueCustomers.value)
+const uniqueProducts = computed(() => invoiceFilters.uniqueProducts.value)
+const filterStats = computed(() => ({
+	total: nonReturnHistoryInvoices.value.length,
+	filtered: filteredHistoryInvoices.value.length,
+	percentage: nonReturnHistoryInvoices.value.length
+		? Math.round((filteredHistoryInvoices.value.length / nonReturnHistoryInvoices.value.length) * 100)
+		: 0,
+}))
 
 async function loadServerHistoryInvoices() {
-	if (!props.posProfile) return
+	if (!props.posProfile && !props.company) return
 
 	const reqId = ++serverHistoryRequestId
 	loadingMoreHistory.value = false
@@ -867,7 +888,7 @@ async function loadServerHistoryInvoices() {
 		const result = await call("pos_next.api.invoices.get_invoices", params)
 		if (reqId !== serverHistoryRequestId) return
 
-		const list = result || []
+		const list = Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
 		serverHistoryInvoices.value = list
 		hasMoreHistory.value = list.length === HISTORY_PAGE_SIZE
 		hasLoadedServerHistory.value = true
@@ -884,7 +905,7 @@ async function loadServerHistoryInvoices() {
 }
 
 async function loadMoreServerHistoryInvoices() {
-	if (!props.posProfile || loadingMoreHistory.value || !hasMoreHistory.value) return
+	if ((!props.posProfile && !props.company) || loadingMoreHistory.value || !hasMoreHistory.value) return
 
 	const reqId = serverHistoryRequestId
 	loadingMoreHistory.value = true
@@ -906,7 +927,7 @@ async function loadMoreServerHistoryInvoices() {
 		const result = await call("pos_next.api.invoices.get_invoices", params)
 		if (reqId !== serverHistoryRequestId) return
 
-		const list = result || []
+		const list = Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
 		const existingNames = new Set(serverHistoryInvoices.value.map((inv) => inv.name))
 		const newInvoices = list.filter((inv) => !existingNames.has(inv.name))
 		serverHistoryInvoices.value = [...serverHistoryInvoices.value, ...newInvoices]
@@ -930,7 +951,7 @@ const loadingMoreReturns = ref(false)
 let serverReturnRequestId = 0
 
 async function loadServerReturnInvoices() {
-	if (!props.posProfile) return
+	if (!props.posProfile && !props.company) return
 
 	const reqId = ++serverReturnRequestId
 	loadingMoreReturns.value = false
@@ -947,7 +968,7 @@ async function loadServerReturnInvoices() {
 		const result = await call("pos_next.api.invoices.get_invoices", params)
 		if (reqId !== serverReturnRequestId) return
 
-		const list = result || []
+		const list = Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
 		serverReturnInvoices.value = list
 		hasMoreReturns.value = list.length === HISTORY_PAGE_SIZE
 		hasLoadedServerReturns.value = true
@@ -964,7 +985,7 @@ async function loadServerReturnInvoices() {
 }
 
 async function loadMoreServerReturnInvoices() {
-	if (!props.posProfile || loadingMoreReturns.value || !hasMoreReturns.value) return
+	if ((!props.posProfile && !props.company) || loadingMoreReturns.value || !hasMoreReturns.value) return
 
 	const reqId = serverReturnRequestId
 	loadingMoreReturns.value = true
@@ -980,7 +1001,7 @@ async function loadMoreServerReturnInvoices() {
 		const result = await call("pos_next.api.invoices.get_invoices", params)
 		if (reqId !== serverReturnRequestId) return
 
-		const list = result || []
+		const list = Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
 		const existingNames = new Set(serverReturnInvoices.value.map((inv) => inv.name))
 		const newInvoices = list.filter((inv) => !existingNames.has(inv.name))
 		serverReturnInvoices.value = [...serverReturnInvoices.value, ...newInvoices]
@@ -1073,20 +1094,10 @@ const returnInvoices = computed(() => {
 	return allInvoices.filter((inv) => inv.is_return)
 })
 
-// Filtered history using the composable (exclude returns, show in separate tab)
-const filteredHistoryInvoices = computed(() => {
-	// Filter out return invoices, then apply all filters from the store
-	const allInvoices = Array.isArray(historyInvoicesToUse.value)
-		? historyInvoicesToUse.value
-		: []
-	const nonReturnInvoices = allInvoices.filter((inv) => !inv.is_return)
-
-	// Use the filter composable with non-return invoices
-	const tempInvoicesRef = computed(() => nonReturnInvoices)
-	const tempFilters = useInvoiceFilters(tempInvoicesRef)
-
-	return tempFilters.filteredInvoices.value
-})
+const unpaidCount = computed(() => unpaidInvoices.value.length)
+const historyCount = computed(() => filteredHistoryInvoices.value.length)
+const draftsCount = computed(() => (Array.isArray(props.draftInvoices) ? props.draftInvoices.length : 0))
+const returnsCount = computed(() => returnInvoices.value.length)
 
 // Tabs configuration
 const tabs = computed(() => [
@@ -1096,7 +1107,8 @@ const tabs = computed(() => [
 		icon: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z",
 		color: "orange",
 		activeClass: "text-orange-600",
-		badge: () => unpaidInvoices.value.length,
+		count: unpaidCount.value,
+		badge: () => unpaidCount.value,
 	},
 	{
 		id: "history",
@@ -1104,7 +1116,8 @@ const tabs = computed(() => [
 		icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
 		color: "indigo",
 		activeClass: "text-indigo-600",
-		badge: () => filteredHistoryInvoices.value.length,
+		count: historyCount.value,
+		badge: () => historyCount.value,
 	},
 	{
 		id: "drafts",
@@ -1112,7 +1125,8 @@ const tabs = computed(() => [
 		icon: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
 		color: "purple",
 		activeClass: "text-purple-600",
-		badge: () => props.draftInvoices.length,
+		count: draftsCount.value,
+		badge: () => draftsCount.value,
 	},
 	{
 		id: "returns",
@@ -1120,7 +1134,8 @@ const tabs = computed(() => [
 		icon: "M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6",
 		color: "red",
 		activeClass: "text-red-600",
-		badge: () => returnInvoices.value.length,
+		count: returnsCount.value,
+		badge: () => returnsCount.value,
 	},
 ])
 
@@ -1249,7 +1264,7 @@ async function loadUnpaidInvoices() {
 			},
 		)
 
-		unpaidInvoices.value = result || []
+		unpaidInvoices.value = Array.isArray(result) ? result : Array.isArray(result?.message) ? result.message : []
 	} catch (error) {
 		console.error("Error loading unpaid invoices:", error)
 		showError(error.message || __("Failed to load unpaid invoices"))
@@ -1269,7 +1284,8 @@ async function loadUnpaidSummary() {
 			},
 		)
 
-		unpaidSummary.value = result || {
+		const summary = result?.message || result
+		unpaidSummary.value = summary || {
 			count: 0,
 			total_outstanding: 0,
 			total_paid: 0,

@@ -79,9 +79,16 @@
 			<div v-if="store.hasActiveFilters" class="active-summary">
 				<div class="summary-content">
 					<TranslatedHTML 
+						v-if="filterStats && filterStats.total > filterStats.filtered && filterStats.filtered > 0"
 						class="summary-text"
 						:inner="__('&lt;strong&gt;{0}&lt;/strong&gt; of &lt;strong&gt;{1}&lt;/strong&gt; invoice(s)', 
 							[(filterStats?.filtered || 0), (filterStats?.total || 0)]) "
+					/>
+					<TranslatedHTML 
+						v-else
+						class="summary-text"
+						:inner="__('&lt;strong&gt;{0}&lt;/strong&gt; invoice(s)', 
+							[(filterStats?.filtered || 0)]) "
 					/>
 					<div class="active-pills">
 						<button
