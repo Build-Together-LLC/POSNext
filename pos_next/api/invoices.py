@@ -969,8 +969,57 @@ def get_invoice(invoice_name):
 
 	# Get invoice document
 	invoice = frappe.get_doc("Sales Invoice", invoice_name)
+	doc_dict = invoice.as_dict()
 
-	return invoice.as_dict()
+	val = doc_dict.get("is_doc_printed")
+	if str(val).strip().lower() in ("yes", "1", "true") or doc_dict.get("posa_is_printed") == 1:
+		doc_dict["is_doc_printed"] = "Yes"
+	else:
+		doc_dict["is_doc_printed"] = "No"
+
+	return doc_dict
+
+
+@frappe.whitelist()
+def mark_invoice_printed(invoice_name):
+	"""
+	Mark an invoice document as printed ("Is Doc Printed" = "Yes").
+	Updates only after a successful print operation.
+
+	Args:
+		invoice_name: Sales Invoice (or POS Invoice) name
+
+	Returns:
+		dict with status and invoice details
+	"""
+	if not invoice_name:
+		frappe.throw(_("Invoice name is required"))
+
+	doctype = "Sales Invoice"
+	if not frappe.db.exists(doctype, invoice_name) and frappe.db.exists("POS Invoice", invoice_name):
+		doctype = "POS Invoice"
+
+	if not frappe.db.exists(doctype, invoice_name):
+		frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
+
+	if not frappe.has_permission(doctype, "write", invoice_name) and not frappe.has_permission(doctype, "read", invoice_name):
+		frappe.throw(_("You don't have permission to update this invoice"))
+
+	updates = {}
+	if frappe.db.has_column(doctype, "is_doc_printed"):
+		updates["is_doc_printed"] = "Yes"
+	if frappe.db.has_column(doctype, "posa_is_printed"):
+		updates["posa_is_printed"] = 1
+
+	if updates:
+		frappe.db.set_value(doctype, invoice_name, updates, update_modified=False)
+		frappe.db.commit()
+
+	return {"success": True, "name": invoice_name, "is_doc_printed": "Yes"}
+
+
+set_invoice_doc_printed = mark_invoice_printed
+set_is_doc_printed = mark_invoice_printed
 
 
 @frappe.whitelist()
@@ -1130,6 +1179,17 @@ def get_invoices(
 
 	where_clause = " AND ".join(conditions)
 
+	has_doc_printed_col = frappe.db.has_column("Sales Invoice", "is_doc_printed")
+	has_posa_printed_col = frappe.db.has_column("Sales Invoice", "posa_is_printed")
+	if has_doc_printed_col:
+		doc_printed_field = "IFNULL(NULLIF(`tabSales Invoice`.is_doc_printed, ''), 'No') AS is_doc_printed,"
+	elif has_posa_printed_col:
+		doc_printed_field = "IF(`tabSales Invoice`.posa_is_printed = 1, 'Yes', 'No') AS is_doc_printed,"
+	else:
+		doc_printed_field = "'No' AS is_doc_printed,"
+
+	posa_printed_field = "`tabSales Invoice`.posa_is_printed" if has_posa_printed_col else "0 AS posa_is_printed"
+
 	invoices = frappe.db.sql(f"""
 		SELECT
 			`tabSales Invoice`.name,
@@ -1144,7 +1204,9 @@ def get_invoices(
 			`tabSales Invoice`.docstatus,
 			`tabSales Invoice`.is_return,
 			`tabSales Invoice`.return_against,
-			`tabSales Invoice`.pos_profile
+			`tabSales Invoice`.pos_profile,
+			{doc_printed_field}
+			{posa_printed_field}
 		FROM
 			`tabSales Invoice`
 		WHERE
@@ -1179,6 +1241,11 @@ def get_invoices(
 
 		for invoice in invoices:
 			invoice.items = items_map.get(invoice.name, [])
+			raw_val = invoice.get("is_doc_printed")
+			if str(raw_val).strip().lower() in ("yes", "1", "true") or invoice.get("posa_is_printed") == 1:
+				invoice["is_doc_printed"] = "Yes"
+			else:
+				invoice["is_doc_printed"] = "No"
 
 	return invoices
 

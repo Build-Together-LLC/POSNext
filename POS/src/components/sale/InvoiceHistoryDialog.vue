@@ -76,6 +76,16 @@
 									>
 										{{ __(invoice.status) }}
 									</span>
+									<span
+										:class="[
+											'text-xs px-2 py-0.5 rounded-full font-medium',
+											invoice.is_doc_printed === 'Yes'
+												? 'bg-green-100 text-green-800'
+												: 'bg-gray-100 text-gray-700'
+										]"
+									>
+										{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}
+									</span>
 								</div>
 								<p class="text-xs text-gray-600 text-start">{{ invoice.customer_name }}</p>
 								<p class="text-xs text-gray-500 text-start">{{ formatDateTime(invoice.posting_date, invoice.posting_time) }}</p>
@@ -189,6 +199,8 @@ const invoicesResource = createResource({
 				"status",
 				"docstatus",
 				"is_return",
+				"is_doc_printed",
+				"posa_is_printed",
 			],
 			order_by: "creation desc",
 			start: 0,
@@ -202,6 +214,7 @@ const invoicesResource = createResource({
 			// For simplicity, show item count as 0 initially
 			invoices.value = data.map((inv) => ({
 				...inv,
+				is_doc_printed: (inv.is_doc_printed === 'Yes' || inv.posa_is_printed === 1) ? 'Yes' : 'No',
 				items_count: 0,
 			}))
 		}
@@ -257,7 +270,10 @@ function viewInvoice(invoice) {
 }
 
 function printInvoice(invoice) {
-	emit("print-invoice", invoice)
+	emit("print-invoice", invoice, () => {
+		invoice.is_doc_printed = "Yes"
+		invoice.posa_is_printed = 1
+	})
 }
 
 function createReturn(invoice) {
