@@ -31,6 +31,16 @@
 								>
 									{{ __(invoiceData.status) }}
 								</span>
+								<span
+									:class="[
+										'px-3 py-1 text-xs font-semibold rounded-full',
+										invoiceData.is_doc_printed === 'Yes'
+											? 'bg-green-100 text-green-800'
+											: 'bg-gray-100 text-gray-700'
+									]"
+								>
+									{{ __('Is Doc Printed: {0}', [invoiceData.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}
+								</span>
 							</div>
 							<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
 								<div class="text-start">
@@ -40,6 +50,17 @@
 								<div class="text-start">
 									<span class="text-gray-600">{{ __('Date:') }}</span>
 									<span class="ms-2 font-medium text-gray-900">{{ formatDate(invoiceData.posting_date) }} {{ formatTime(invoiceData.posting_time) }}</span>
+								</div>
+								<div class="text-start">
+									<span class="text-gray-600">{{ __('Is Doc Printed:') }}</span>
+									<span
+										:class="[
+											'ms-2 font-semibold',
+											invoiceData.is_doc_printed === 'Yes' ? 'text-green-600' : 'text-gray-700'
+										]"
+									>
+										{{ invoiceData.is_doc_printed === 'Yes' ? __('Yes') : __('No') }}
+									</span>
 								</div>
 								<div v-if="invoiceData.return_against" class="text-start">
 									<span class="text-gray-600">{{ __('Return Against:') }}</span>
@@ -316,6 +337,7 @@ watch(
 			loadInvoiceDetails()
 		}
 	},
+	{ immediate: true }
 )
 
 watch(show, async (val) => {
@@ -352,6 +374,14 @@ async function loadInvoiceDetails() {
 				quantity: item.qty,
 			}))
 		}
+		if (result) {
+			const isPrinted = result.is_doc_printed
+			if (String(isPrinted).trim().toLowerCase() === "yes" || isPrinted === 1 || isPrinted === true || result.posa_is_printed === 1) {
+				result.is_doc_printed = "Yes"
+			} else {
+				result.is_doc_printed = "No"
+			}
+		}
 		invoiceData.value = result
 	} catch (error) {
 		log.error("Error loading invoice details:", error)
@@ -363,7 +393,12 @@ async function loadInvoiceDetails() {
 
 function handlePrint() {
 	if (!invoiceData.value) return
-	emit("print-invoice", invoiceData.value)
+	emit("print-invoice", invoiceData.value, () => {
+		if (invoiceData.value) {
+			invoiceData.value.is_doc_printed = "Yes"
+			invoiceData.value.posa_is_printed = 1
+		}
+	})
 }
 </script>
 

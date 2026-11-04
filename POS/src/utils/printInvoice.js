@@ -86,11 +86,11 @@ export async function printDraftReceipt(invoiceData) {
  *       "POS Next Receipt" is only the last-resort fallback when the profile has none.
  */
 export async function printInvoice(invoiceData, printFormat = null, letterhead = null) {
-	try {
-		if (!invoiceData || !invoiceData.name) {
-			throw new Error("Invalid invoice data");
-		}
+	if (!invoiceData || !invoiceData.name) {
+		throw new Error("Invalid invoice data");
+	}
 
+	try {
 		const isDraft =
 			invoiceData.is_draft ||
 			invoiceData.docstatus === 0 ||
@@ -157,6 +157,10 @@ export async function printInvoice(invoiceData, printFormat = null, letterhead =
  * @param {number} invoiceData.grand_total - Invoice total amount
  */
 export function printInvoiceCustom(invoiceData) {
+	if (!invoiceData) {
+		return false;
+	}
+
 	const isDraft =
 		invoiceData.is_draft ||
 		invoiceData.docstatus === 0 ||
@@ -790,6 +794,7 @@ ${itemRowsHtml}
 		printWindow.focus();
 		printWindow.print();
 	}, 250);
+	return true;
 }
 
 function formatCurrency(amount) {
@@ -902,5 +907,22 @@ export async function printInvoiceByName(invoiceName, printFormat = null, letter
 	} catch (error) {
 		log.error("Error fetching invoice for print:", error);
 		throw error;
+	}
+}
+
+/**
+ * Mark an invoice as printed on the server ("Is Doc Printed" = "Yes").
+ * Called only after a successful print operation.
+ * @param {string} invoiceName - The name of the invoice
+ */
+export async function markInvoicePrinted(invoiceName) {
+	if (!invoiceName) return null;
+	try {
+		return await call("pos_next.api.invoices.mark_invoice_printed", {
+			invoice_name: invoiceName,
+		});
+	} catch (error) {
+		log.warn("Failed to mark invoice as printed on server:", error);
+		return null;
 	}
 }

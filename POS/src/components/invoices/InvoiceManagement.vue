@@ -186,6 +186,16 @@
 														>
 															{{ __(invoice.status) }}
 														</span>
+														<span
+															:class="[
+																'px-2 py-0.5 text-xs font-semibold rounded-full',
+																invoice.is_doc_printed === 'Yes'
+																	? 'bg-green-100 text-green-800'
+																	: 'bg-gray-100 text-gray-700'
+															]"
+														>
+															{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}
+														</span>
 													</div>
 													<div class="flex items-center gap-4 mt-1 text-sm text-gray-600">
 														<div class="flex items-center">
@@ -355,6 +365,7 @@
 													<th class="px-4 py-3.5 text-start">{{ __('Date & Time') }}</th>
 													<th class="px-4 py-3.5 text-start">{{ __('Customer') }}</th>
 													<th class="px-4 py-3.5 text-start">{{ __('Status') }}</th>
+													<th class="px-4 py-3.5 text-center">{{ __('Is Doc Printed') }}</th>
 													<th class="px-4 py-3.5 text-end">{{ __('Total') }}</th>
 													<th class="px-4 py-3.5 text-end">{{ __('Paid') }}</th>
 													<th class="px-4 py-3.5 text-end">{{ __('Outstanding') }}</th>
@@ -386,6 +397,18 @@
 															{{ __(invoice.status) }}
 														</span>
 													</td>
+													<td class="px-4 py-3.5 text-center whitespace-nowrap">
+														<span
+															:class="[
+																'text-xs px-2.5 py-1 rounded-full font-semibold',
+																invoice.is_doc_printed === 'Yes'
+																	? 'bg-green-100 text-green-800'
+																	: 'bg-gray-100 text-gray-700'
+															]"
+														>
+															{{ invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No') }}
+														</span>
+													</td>
 													<td class="px-4 py-3.5 text-end font-bold text-indigo-600 whitespace-nowrap">
 														{{ formatCurrency(invoice.grand_total) }}
 													</td>
@@ -409,7 +432,7 @@
 																<span>{{ __('View') }}</span>
 															</button>
 															<button
-																@click="$emit('print-invoice', invoice)"
+																@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes'; invoice.posa_is_printed = 1 })"
 																class="px-2.5 py-1.5 text-xs font-semibold text-green-600 bg-green-50 hover:bg-green-100 rounded-md transition-colors inline-flex items-center gap-1"
 																:title="__('Print')"
 															>
@@ -456,6 +479,16 @@
 															]"
 														>
 															{{ __(invoice.status) }}
+														</span>
+														<span
+															:class="[
+																'text-xs px-2.5 py-1 rounded-full font-semibold',
+																invoice.is_doc_printed === 'Yes'
+																	? 'bg-green-100 text-green-800'
+																	: 'bg-gray-100 text-gray-700'
+															]"
+														>
+															{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}
 														</span>
 													</div>
 												</div>
@@ -519,7 +552,7 @@
 												<span>{{ __('View') }}</span>
 											</button>
 											<button
-												@click="$emit('print-invoice', invoice)"
+												@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes'; invoice.posa_is_printed = 1 })"
 												class="px-3 py-2 text-xs font-semibold text-green-600 bg-green-50 hover:bg-green-100 rounded-lg transition-colors flex items-center gap-1"
 												:title="__('Print')"
 											>
@@ -669,6 +702,16 @@
 													<span class="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-800">
 														{{ __('Return') }}
 													</span>
+													<span
+														:class="[
+															'text-xs px-2 py-0.5 rounded-full font-medium',
+															invoice.is_doc_printed === 'Yes'
+																? 'bg-green-100 text-green-800'
+																: 'bg-gray-100 text-gray-700'
+														]"
+													>
+														{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}
+													</span>
 												</div>
 												<div class="flex items-center gap-4 text-xs text-gray-600">
 													<span>{{ invoice.customer_name }}</span>
@@ -693,7 +736,7 @@
 														</svg>
 													</button>
 													<button
-														@click="$emit('print-invoice', invoice)"
+														@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes'; invoice.posa_is_printed = 1 })"
 														class="p-1.5 hover:bg-green-50 rounded transition-colors"
 														:title="__('Print')"
 													>

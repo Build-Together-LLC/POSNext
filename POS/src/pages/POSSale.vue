@@ -772,7 +772,7 @@ import { session } from "@/data/session"
 import { useUserData } from "@/data/user"
 import { parseError } from "@/utils/errorHandler"
 import { offlineWorker } from "@/utils/offline/workerClient"
-import { printInvoiceByName, printInvoiceWithProfileFormat } from "@/utils/printInvoice"
+import { markInvoicePrinted, printInvoiceByName, printInvoiceWithProfileFormat } from "@/utils/printInvoice"
 import { Button, Dialog, createResource } from "frappe-ui"
 import { call } from "@/utils/apiWrapper"
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
@@ -2431,13 +2431,43 @@ function handleViewInvoice(invoice) {
 }
 
 // Centralized print handler - uses printInvoice.js utilities
-async function handlePrintInvoice(invoiceData) {
+async function handlePrintInvoice(invoiceData, onPrintedCallback) {
 	try {
+		const invoiceName = invoiceData?.name || (typeof invoiceData === "string" ? invoiceData : null)
+		let printResult = false
+
 		// Both paths resolve the POS Profile print format for submitted invoices
-		if (invoiceData.items && Array.isArray(invoiceData.items)) {
-			await printInvoiceWithProfileFormat(invoiceData)
-		} else {
-			await printInvoiceByName(invoiceData.name)
+		if (invoiceData && invoiceData.items && Array.isArray(invoiceData.items)) {
+			printResult = await printInvoiceWithProfileFormat(invoiceData)
+		} else if (invoiceName) {
+			printResult = await printInvoiceByName(invoiceName)
+		}
+
+		// Only update status after a successful print operation, not merely when clicked
+		if (printResult !== false && invoiceName) {
+			try {
+				await markInvoicePrinted(invoiceName)
+			} catch (err) {
+				log.warn("Error marking invoice as printed on server:", err)
+			}
+
+			// Update in local invoice history
+			const target = invoiceHistoryData.value.find((inv) => inv.name === invoiceName)
+			if (target) {
+				target.is_doc_printed = "Yes"
+				target.posa_is_printed = 1
+			}
+
+			// Also update the invoice object passed if reactive
+			if (invoiceData && typeof invoiceData === "object") {
+				invoiceData.is_doc_printed = "Yes"
+				invoiceData.posa_is_printed = 1
+			}
+
+			// Run callback if provided (e.g. from dialogs)
+			if (typeof onPrintedCallback === "function") {
+				onPrintedCallback()
+			}
 		}
 	} catch (error) {
 		log.error("Error printing invoice:", error)
