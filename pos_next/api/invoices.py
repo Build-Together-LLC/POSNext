@@ -569,6 +569,16 @@ def update_invoice(data):
         for item in invoice_doc.get("items", []):
             item_rate = flt(item.rate or 0)
             discount_pct = flt(item.discount_percentage or 0)
+            sent_list_rate = flt(item.get("price_list_rate"))
+
+            if (
+                0 < discount_pct < 100
+                and sent_list_rate > 0
+                and abs(item_rate - sent_list_rate) < 0.005
+            ):
+                item.rate = item_rate = flt(
+                    sent_list_rate * (1 - discount_pct / 100), item.precision("rate")
+                )
 
             # If item has a discount, reverse-calculate the original price_list_rate
             if discount_pct > 0 and discount_pct < 100:
@@ -1341,7 +1351,7 @@ def _serialize_pos_draft(doc):
         price_list_rate = flt(row.price_list_rate) or flt(row.rate)
         discount_percentage = flt(row.discount_percentage)
         # Per-unit on the invoice -> line total in the cart.
-        discount_amount = 0 if discount_percentage else flt(row.discount_amount) * qty
+        discount_amount = flt(row.discount_amount) * qty
         pricing_rules = rules_by_row.get(row.name) or []
 
         cart_items.append(
