@@ -914,15 +914,21 @@ export async function printInvoiceByName(invoiceName, printFormat = null, letter
  * Mark an invoice as printed on the server ("Is Doc Printed" = "Yes").
  * Called only after a successful print operation.
  * @param {string} invoiceName - The name of the invoice
+ * @returns {Promise<{success: boolean, error?: any, [key: string]: any}>}
  */
 export async function markInvoicePrinted(invoiceName) {
-	if (!invoiceName) return null;
+	if (!invoiceName) return { success: false, error: "Invoice name is required" };
 	try {
-		return await call("pos_next.api.invoices.mark_invoice_printed", {
+		const res = await call("pos_next.api.invoices.mark_invoice_printed", {
 			invoice_name: invoiceName,
 		});
+		const result = res?.message ?? res;
+		if (result && (result.success === true || result.is_doc_printed === "Yes")) {
+			return { success: true, ...result };
+		}
+		return { success: false, error: result?.error || "Failed to mark invoice as printed" };
 	} catch (error) {
 		log.warn("Failed to mark invoice as printed on server:", error);
-		return null;
+		return { success: false, error: error?.message || error };
 	}
 }

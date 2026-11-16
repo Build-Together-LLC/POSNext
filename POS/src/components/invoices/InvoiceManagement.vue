@@ -432,7 +432,7 @@
 																<span>{{ __('View') }}</span>
 															</button>
 															<button
-																@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes'; invoice.posa_is_printed = 1 })"
+																@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes' })"
 																class="px-2.5 py-1.5 text-xs font-semibold text-green-600 bg-green-50 hover:bg-green-100 rounded-md transition-colors inline-flex items-center gap-1"
 																:title="__('Print')"
 															>
@@ -552,7 +552,7 @@
 												<span>{{ __('View') }}</span>
 											</button>
 											<button
-												@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes'; invoice.posa_is_printed = 1 })"
+												@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes' })"
 												class="px-3 py-2 text-xs font-semibold text-green-600 bg-green-50 hover:bg-green-100 rounded-lg transition-colors flex items-center gap-1"
 												:title="__('Print')"
 											>
@@ -736,7 +736,7 @@
 														</svg>
 													</button>
 													<button
-														@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes'; invoice.posa_is_printed = 1 })"
+														@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes' })"
 														class="p-1.5 hover:bg-green-50 rounded transition-colors"
 														:title="__('Print')"
 													>

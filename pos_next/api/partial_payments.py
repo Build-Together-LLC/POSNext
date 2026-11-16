@@ -577,6 +577,24 @@ def get_partial_paid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIM
     elif limit > MAX_INVOICE_LIMIT:
         limit = MAX_INVOICE_LIMIT
 
+    fields = [
+        "name",
+        "customer",
+        "customer_name",
+        "posting_date",
+        "posting_time",
+        "grand_total",
+        "paid_amount",
+        "outstanding_amount",
+        "status",
+        "creation",
+        "currency",
+    ]
+    if frappe.db.has_column("Sales Invoice", "is_doc_printed"):
+        fields.append("is_doc_printed")
+    if frappe.db.has_column("Sales Invoice", "posa_is_printed"):
+        fields.append("posa_is_printed")
+
     # Get partially paid invoices using ORM
     # Filter logic: outstanding > 0 AND paid > 0 (mathematical definition of partial payment)
     invoices = frappe.get_all(
@@ -589,19 +607,7 @@ def get_partial_paid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIM
             "paid_amount": [">", 0],
             "is_return": 0,
         },
-        fields=[
-            "name",
-            "customer",
-            "customer_name",
-            "posting_date",
-            "posting_time",
-            "grand_total",
-            "paid_amount",
-            "outstanding_amount",
-            "status",
-            "creation",
-            "currency",
-        ],
+        fields=fields,
         order_by="posting_date desc, posting_time desc",
         limit=limit,
     )
@@ -610,6 +616,11 @@ def get_partial_paid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIM
     # Note: This makes additional queries. For summary-only views, use get_partial_payment_summary() instead.
     for invoice in invoices:
         enrich_invoice_with_payment_history(invoice, include_metadata=True)
+        raw_val = invoice.get("is_doc_printed")
+        if str(raw_val).strip().lower() in ("yes", "1", "true") or invoice.get("posa_is_printed") == 1:
+            invoice["is_doc_printed"] = "Yes"
+        else:
+            invoice["is_doc_printed"] = "No"
 
     return invoices
 
@@ -653,6 +664,24 @@ def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) ->
     elif limit > MAX_INVOICE_LIMIT:
         limit = MAX_INVOICE_LIMIT
 
+    fields = [
+        "name",
+        "customer",
+        "customer_name",
+        "posting_date",
+        "posting_time",
+        "grand_total",
+        "paid_amount",
+        "outstanding_amount",
+        "status",
+        "creation",
+        "currency",
+    ]
+    if frappe.db.has_column("Sales Invoice", "is_doc_printed"):
+        fields.append("is_doc_printed")
+    if frappe.db.has_column("Sales Invoice", "posa_is_printed"):
+        fields.append("posa_is_printed")
+
     # Get all unpaid invoices (any invoice with outstanding > 0)
     invoices = frappe.get_all(
         "Sales Invoice",
@@ -663,19 +692,7 @@ def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) ->
             "outstanding_amount": [">", 0],
             "is_return": 0,
         },
-        fields=[
-            "name",
-            "customer",
-            "customer_name",
-            "posting_date",
-            "posting_time",
-            "grand_total",
-            "paid_amount",
-            "outstanding_amount",
-            "status",
-            "creation",
-            "currency",
-        ],
+        fields=fields,
         order_by="posting_date desc, posting_time desc",
         limit=limit,
     )
@@ -683,6 +700,11 @@ def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) ->
     # Enrich with payment history
     for invoice in invoices:
         enrich_invoice_with_payment_history(invoice, include_metadata=True)
+        raw_val = invoice.get("is_doc_printed")
+        if str(raw_val).strip().lower() in ("yes", "1", "true") or invoice.get("posa_is_printed") == 1:
+            invoice["is_doc_printed"] = "Yes"
+        else:
+            invoice["is_doc_printed"] = "No"
 
     return invoices
 
@@ -735,6 +757,13 @@ def get_partial_payment_details(invoice_name: str) -> Dict:
         for item in invoice.items
     ]
 
+    val = getattr(invoice, "is_doc_printed", None)
+    posa_val = getattr(invoice, "posa_is_printed", None)
+    if str(val).strip().lower() in ("yes", "1", "true") or posa_val == 1:
+        is_doc_printed = "Yes"
+    else:
+        is_doc_printed = "No"
+
     return {
         "name": invoice.name,
         "customer": invoice.customer,
@@ -746,6 +775,7 @@ def get_partial_payment_details(invoice_name: str) -> Dict:
         "outstanding_amount": payment_data["outstanding"],
         "status": invoice.status,
         "currency": invoice.currency,
+        "is_doc_printed": is_doc_printed,
         "payments": payment_data["payments"],
         "payment_count": payment_data["payment_count"],
         "items": items,

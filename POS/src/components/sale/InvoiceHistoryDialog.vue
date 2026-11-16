@@ -272,7 +272,6 @@ function viewInvoice(invoice) {
 function printInvoice(invoice) {
 	emit("print-invoice", invoice, () => {
 		invoice.is_doc_printed = "Yes"
-		invoice.posa_is_printed = 1
 	})
 }
 

@@ -29,10 +29,24 @@ describe("printInvoice - Is Doc Printed handling", () => {
 		expect(res.is_doc_printed).toBe("Yes")
 	})
 
-	it("does not call backend when invoiceName is empty", async () => {
+	it("does not call backend when invoiceName is empty and returns failure", async () => {
 		const res = await markInvoicePrinted("")
 		expect(mockCall).not.toHaveBeenCalled()
-		expect(res).toBeNull()
+		expect(res.success).toBe(false)
+	})
+
+	it("returns failure when backend call rejects", async () => {
+		mockCall.mockRejectedValue(new Error("Server timeout"))
+		const res = await markInvoicePrinted("ACC-SINV-0001")
+		expect(res.success).toBe(false)
+		expect(res.error).toBe("Server timeout")
+	})
+
+	it("returns failure when backend returns success: false", async () => {
+		mockCall.mockResolvedValue({ success: false, error: "Permission denied" })
+		const res = await markInvoicePrinted("ACC-SINV-0001")
+		expect(res.success).toBe(false)
+		expect(res.error).toBe("Permission denied")
 	})
 
 	it("fails printInvoice when invoiceData is invalid without marking as printed", async () => {

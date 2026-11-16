@@ -2445,28 +2445,33 @@ async function handlePrintInvoice(invoiceData, onPrintedCallback) {
 
 		// Only update status after a successful print operation, not merely when clicked
 		if (printResult !== false && invoiceName) {
+			let markResult = null
 			try {
-				await markInvoicePrinted(invoiceName)
+				markResult = await markInvoicePrinted(invoiceName)
 			} catch (err) {
 				log.warn("Error marking invoice as printed on server:", err)
 			}
 
-			// Update in local invoice history
-			const target = invoiceHistoryData.value.find((inv) => inv.name === invoiceName)
-			if (target) {
-				target.is_doc_printed = "Yes"
-				target.posa_is_printed = 1
-			}
+			if (markResult && markResult.success) {
+				// Update in local invoice history
+				const target = invoiceHistoryData.value.find((inv) => inv.name === invoiceName)
+				if (target) {
+					target.is_doc_printed = "Yes"
+				}
 
-			// Also update the invoice object passed if reactive
-			if (invoiceData && typeof invoiceData === "object") {
-				invoiceData.is_doc_printed = "Yes"
-				invoiceData.posa_is_printed = 1
-			}
+				// Also update the invoice object passed if reactive
+				if (invoiceData && typeof invoiceData === "object") {
+					invoiceData.is_doc_printed = "Yes"
+				}
 
-			// Run callback if provided (e.g. from dialogs)
-			if (typeof onPrintedCallback === "function") {
-				onPrintedCallback()
+				// Run callback if provided (e.g. from dialogs)
+				if (typeof onPrintedCallback === "function") {
+					onPrintedCallback()
+				}
+			} else {
+				showWarning(
+					__("Invoice printed, but failed to update printed status on server.")
+				)
 			}
 		}
 	} catch (error) {
@@ -2524,4 +2529,8 @@ function handleTabSwitch(tab) {
 		uiStore.setMobileTab(tab)
 	})
 }
+
+defineExpose({
+	handlePrintInvoice,
+})
 </script>

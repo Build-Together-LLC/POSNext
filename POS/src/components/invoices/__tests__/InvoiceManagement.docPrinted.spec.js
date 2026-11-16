@@ -20,9 +20,13 @@ vi.mock("@/utils/offline/workerClient", () => ({
 }))
 
 let currentInvoices = []
+let currentUnpaidInvoices = []
 const mockCall = vi.fn((endpoint) => {
 	if (endpoint === "pos_next.api.invoices.get_invoices") {
 		return Promise.resolve(currentInvoices)
+	}
+	if (endpoint === "pos_next.api.partial_payments.get_unpaid_invoices") {
+		return Promise.resolve(currentUnpaidInvoices)
 	}
 	return Promise.resolve([])
 })
@@ -139,6 +143,45 @@ describe("InvoiceManagement - Is Doc Printed Status", () => {
 		await flushPromises()
 
 		const text = wrapper.text()
+		expect(text).toContain("Is Doc Printed: No")
+		expect(text).toContain("Is Doc Printed: Yes")
+	})
+
+	it("renders 'Is Doc Printed' status correctly for invoices in the Unpaid tab", async () => {
+		currentUnpaidInvoices = [
+			{
+				name: "ACC-SINV-2026-00010",
+				customer: "CUST-0001",
+				customer_name: "Alice",
+				posting_date: "2026-11-04",
+				posting_time: "10:00:00",
+				status: "Partly Paid",
+				grand_total: 100,
+				paid_amount: 50,
+				outstanding_amount: 50,
+				is_doc_printed: "No",
+			},
+			{
+				name: "ACC-SINV-2026-00011",
+				customer: "CUST-0002",
+				customer_name: "Bob",
+				posting_date: "2026-11-04",
+				posting_time: "11:00:00",
+				status: "Partly Paid",
+				grand_total: 200,
+				paid_amount: 100,
+				outstanding_amount: 100,
+				is_doc_printed: "Yes",
+			},
+		]
+
+		const wrapper = mountInvoiceManagement()
+		wrapper.vm.activeTab = "partial"
+		await flushPromises()
+
+		const text = wrapper.text()
+		expect(text).toContain("ACC-SINV-2026-00010")
+		expect(text).toContain("ACC-SINV-2026-00011")
 		expect(text).toContain("Is Doc Printed: No")
 		expect(text).toContain("Is Doc Printed: Yes")
 	})

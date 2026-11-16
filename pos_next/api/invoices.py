@@ -984,7 +984,7 @@ def get_invoice(invoice_name):
 def mark_invoice_printed(invoice_name):
 	"""
 	Mark an invoice document as printed ("Is Doc Printed" = "Yes").
-	Updates only after a successful print operation.
+	Updates only after a successful print operation on submitted invoices.
 
 	Args:
 		invoice_name: Sales Invoice (or POS Invoice) name
@@ -1002,24 +1002,22 @@ def mark_invoice_printed(invoice_name):
 	if not frappe.db.exists(doctype, invoice_name):
 		frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
 
+	docstatus = frappe.db.get_value(doctype, invoice_name, "docstatus")
+	if docstatus != 1:
+		frappe.throw(_("Only submitted invoices can be marked as printed"))
+
 	if not frappe.has_permission(doctype, "write", invoice_name) and not frappe.has_permission(doctype, "read", invoice_name):
 		frappe.throw(_("You don't have permission to update this invoice"))
 
 	updates = {}
 	if frappe.db.has_column(doctype, "is_doc_printed"):
 		updates["is_doc_printed"] = "Yes"
-	if frappe.db.has_column(doctype, "posa_is_printed"):
-		updates["posa_is_printed"] = 1
 
 	if updates:
 		frappe.db.set_value(doctype, invoice_name, updates, update_modified=False)
 		frappe.db.commit()
 
 	return {"success": True, "name": invoice_name, "is_doc_printed": "Yes"}
-
-
-set_invoice_doc_printed = mark_invoice_printed
-set_is_doc_printed = mark_invoice_printed
 
 
 @frappe.whitelist()

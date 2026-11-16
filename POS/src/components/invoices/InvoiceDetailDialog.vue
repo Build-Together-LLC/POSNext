@@ -396,7 +396,6 @@ function handlePrint() {
 	emit("print-invoice", invoiceData.value, () => {
 		if (invoiceData.value) {
 			invoiceData.value.is_doc_printed = "Yes"
-			invoiceData.value.posa_is_printed = 1
 		}
 	})
 }
