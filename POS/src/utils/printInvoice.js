@@ -86,11 +86,11 @@ export async function printDraftReceipt(invoiceData) {
  *       "POS Next Receipt" is only the last-resort fallback when the profile has none.
  */
 export async function printInvoice(invoiceData, printFormat = null, letterhead = null) {
-	try {
-		if (!invoiceData || !invoiceData.name) {
-			throw new Error("Invalid invoice data");
-		}
+	if (!invoiceData || !invoiceData.name) {
+		throw new Error("Invalid invoice data");
+	}
 
+	try {
 		const isDraft =
 			invoiceData.is_draft ||
 			invoiceData.docstatus === 0 ||
@@ -157,6 +157,10 @@ export async function printInvoice(invoiceData, printFormat = null, letterhead =
  * @param {number} invoiceData.grand_total - Invoice total amount
  */
 export function printInvoiceCustom(invoiceData) {
+	if (!invoiceData) {
+		return false;
+	}
+
 	const isDraft =
 		invoiceData.is_draft ||
 		invoiceData.docstatus === 0 ||
@@ -790,6 +794,7 @@ ${itemRowsHtml}
 		printWindow.focus();
 		printWindow.print();
 	}, 250);
+	return true;
 }
 
 function formatCurrency(amount) {
@@ -902,5 +907,28 @@ export async function printInvoiceByName(invoiceName, printFormat = null, letter
 	} catch (error) {
 		log.error("Error fetching invoice for print:", error);
 		throw error;
+	}
+}
+
+/**
+ * Mark an invoice as printed on the server ("Is Doc Printed" = "Yes").
+ * Called only after a successful print operation.
+ * @param {string} invoiceName - The name of the invoice
+ * @returns {Promise<{success: boolean, error?: any, [key: string]: any}>}
+ */
+export async function markInvoicePrinted(invoiceName) {
+	if (!invoiceName) return { success: false, error: "Invoice name is required" };
+	try {
+		const res = await call("pos_next.api.invoices.mark_invoice_printed", {
+			invoice_name: invoiceName,
+		});
+		const result = res?.message ?? res;
+		if (result && (result.success === true || result.is_doc_printed === "Yes")) {
+			return { success: true, ...result };
+		}
+		return { success: false, error: result?.error || "Failed to mark invoice as printed" };
+	} catch (error) {
+		log.warn("Failed to mark invoice as printed on server:", error);
+		return { success: false, error: error?.message || error };
 	}
 }
