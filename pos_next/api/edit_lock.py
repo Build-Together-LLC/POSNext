@@ -27,44 +27,21 @@ def _key(doctype: str, name: str) -> str:
 	return f"{KEY_PREFIX}:{doctype}:{name}"
 
 
-def _clean_stale_db_lock(doctype: str, name: str) -> None:
-	"""If the Redis lock has lapsed or does not exist, ensure the DB check mark is cleared."""
-	if doctype == "Sales Invoice" and name:
-		try:
-			fields_to_clear = {}
-			if frappe.db.has_column("Sales Invoice", "is_locked"):
-				if frappe.db.get_value("Sales Invoice", name, "is_locked"):
-					fields_to_clear["is_locked"] = 0
-			if frappe.db.has_column("Sales Invoice", "posa_is_locked"):
-				if frappe.db.get_value("Sales Invoice", name, "posa_is_locked"):
-					fields_to_clear["posa_is_locked"] = 0
-			if fields_to_clear:
-				frappe.db.set_value("Sales Invoice", name, fields_to_clear, update_modified=False)
-				frappe.db.commit()
-		except Exception:
-			pass
-
-
 def _set_invoice_lock_field(name: str, locked: bool) -> None:
-	"""Update the is_locked check mark on the Sales Invoice."""
+	"""Update the posa_is_locked check mark on the Sales Invoice."""
 	if not name:
 		return
 	try:
 		val = 1 if locked else 0
-		fields = {}
-		if frappe.db.has_column("Sales Invoice", "is_locked"):
-			fields["is_locked"] = val
 		if frappe.db.has_column("Sales Invoice", "posa_is_locked"):
-			fields["posa_is_locked"] = val
-		if fields:
-			frappe.db.set_value("Sales Invoice", name, fields, update_modified=False)
+			frappe.db.set_value("Sales Invoice", name, "posa_is_locked", val, update_modified=False)
 			frappe.db.commit()
 	except Exception as e:
-		frappe.log_error(f"Error setting is_locked={locked} on {name}: {e}", "Draft Lock Error")
+		frappe.log_error(f"Error setting posa_is_locked={locked} on {name}: {e}", "Draft Lock Error")
 
 
 def _holder(doctype: str, name: str) -> dict | None:
-	"""Return holder info if lock is actively held; otherwise clean up any stale DB lock."""
+	"""Return holder info if lock is actively held in cache; purely read-only."""
 	try:
 		raw = frappe.cache().get(_key(doctype, name))
 	except Exception:
@@ -73,7 +50,6 @@ def _holder(doctype: str, name: str) -> dict | None:
 		return None
 
 	if not raw:
-		_clean_stale_db_lock(doctype, name)
 		return None
 
 	try:
@@ -151,9 +127,12 @@ def claim(doctype: str = None, name: str = None) -> dict:
 	return {"ok": True, "locked": False, "user": me}
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def release(doctype: str = None, name: str = None) -> dict:
 	"""Give up the lock, but only if it is ours — never drop another user's claim."""
+	if frappe.request and frappe.request.method != "POST":
+		frappe.throw(_("Invalid Request Method: release must be a POST request"), frappe.PermissionError)
+
 	doctype = doctype or frappe.form_dict.get("doctype")
 	name = name or frappe.form_dict.get("name")
 	if not (doctype and name):
@@ -162,7 +141,12 @@ def release(doctype: str = None, name: str = None) -> dict:
 	me = frappe.session.user
 	holder = _holder(doctype, name)
 
-	if not holder or holder.get("user") == me or "System Manager" in frappe.get_roles():
+	if not holder:
+		if doctype == "Sales Invoice":
+			_set_invoice_lock_field(name, False)
+		return {"ok": True, "released": True}
+
+	if holder.get("user") == me:
 		try:
 			frappe.cache().delete(_key(doctype, name))
 		except Exception:

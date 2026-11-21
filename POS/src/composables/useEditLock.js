@@ -23,28 +23,31 @@ function sendReleaseBeacon(doctype, name) {
 	if (!doctype || !name) return
 	try {
 		const csrfToken =
-			(typeof window !== "undefined" && window.csrf_token) ||
+			(typeof window !== "undefined" && (window.csrf_token || window.frappe?.csrf_token)) ||
 			getCookie("csrf_token")
 
-		// 1. fetch with keepalive: true — standard modern browser unload API.
-		// Using GET sends authenticated session cookies without requiring a CSRF token.
-		if (typeof fetch === "function") {
-			fetch(
-				`/api/method/pos_next.api.edit_lock.release?doctype=${encodeURIComponent(doctype)}&name=${encodeURIComponent(name)}`,
-				{
-					method: "GET",
-					keepalive: true,
-					credentials: "same-origin",
-				},
-			).catch(() => {})
+		const headers = {
+			"Content-Type": "application/json",
+		}
+		if (csrfToken && csrfToken !== "None") {
+			headers["X-Frappe-CSRF-Token"] = csrfToken
 		}
 
-		// 2. navigator.sendBeacon fallback
-		if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+		// 1. fetch with keepalive: true — POST request with CSRF token
+		if (typeof fetch === "function") {
+			fetch("/api/method/pos_next.api.edit_lock.release", {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ doctype, name }),
+				keepalive: true,
+				credentials: "same-origin",
+			}).catch(() => {})
+		} else if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+			// 2. navigator.sendBeacon fallback with CSRF token in FormData
 			const data = new FormData()
 			data.append("doctype", doctype)
 			data.append("name", name)
-			if (csrfToken) {
+			if (csrfToken && csrfToken !== "None") {
 				data.append("csrf_token", csrfToken)
 			}
 			navigator.sendBeacon("/api/method/pos_next.api.edit_lock.release", data)

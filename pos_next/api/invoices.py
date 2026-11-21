@@ -1951,9 +1951,7 @@ def get_pos_drafts(pos_profile=None, pos_opening_shift=None, limit=0, owner=None
         "modified",
         "owner",
     ]
-    if frappe.db.has_column("Sales Invoice", "is_locked"):
-        fields.append("is_locked")
-    elif frappe.db.has_column("Sales Invoice", "posa_is_locked"):
+    if frappe.db.has_column("Sales Invoice", "posa_is_locked"):
         fields.append("posa_is_locked")
     if frappe.db.has_column("Sales Invoice", "posa_pos_opening_shift"):
         fields.append("posa_pos_opening_shift")
