@@ -239,6 +239,8 @@
 						:applied-offers="cartStore.appliedOffers"
 						:warehouses="profileWarehouses"
 						:is-saving-draft="isHoldingDraft || draftsStore.isSavingDraft"
+						:current-draft-id="cartStore.currentDraftId"
+						@close-draft="handleCloseDraft"
 						@update-quantity="cartStore.updateItemQuantity"
 						@remove-item="(itemCode, uom) => cartStore.removeItem(itemCode, uom)"
 						@select-customer="handleCustomerSelected"
@@ -812,7 +814,7 @@ const { onStockUpdate } = useRealtimeStock()
 const { onWarehouseChanged, onPricingChanged, onStockPolicyChanged, onSettingsChanged, onSalesOperationsChanged } = usePOSEvents()
 
 // Initialize toast
-const { showSuccess, showError, showWarning } = useToast()
+const { showSuccess, showError, showWarning, showLocked } = useToast()
 
 // Initialize logger
 const log = logger.create('POSSale')
@@ -1261,6 +1263,9 @@ onUnmounted(() => {
 		updateLayoutBounds()
 	})
 	stopResize()
+
+	// Release any active draft lock when navigating away
+	draftsStore.releaseDraftLock().catch?.(() => {})
 
 	// Stop periodic stock sync on unmount
 	offlineWorker.stopStockSync().catch(() => {})
@@ -1777,7 +1782,8 @@ function handleClearCart() {
 	uiStore.showClearCartDialog = true
 }
 
-function confirmClearCart() {
+async function confirmClearCart() {
+	await draftsStore.releaseDraftLock()
 	cartStore.clearCart()
 	// Reset cart hash when cart is cleared
 	previousCartHash = ""
@@ -1923,8 +1929,27 @@ async function handleSaveDraft() {
 	}
 }
 
+async function handleCloseDraft() {
+	await draftsStore.releaseDraftLock()
+	cartStore.clearCart()
+	previousCartHash = ""
+	showSuccess(__("Draft closed and lock released"))
+}
+
 async function handleLoadDraft(draft) {
 	try {
+		if (draft.is_locked && !draft.is_locked_by_me) {
+			const holderName = draft.locked_by || __("another user")
+			showLocked(
+				__(
+					"This draft is currently being edited by {0}. Please try again later.",
+					[holderName],
+				),
+				__("Draft Locked"),
+			)
+			return
+		}
+
 		// If current cart has items, save it as draft before loading new one
 		if (!cartStore.isEmpty) {
 			const saved = await draftsStore.saveDraftInvoice(

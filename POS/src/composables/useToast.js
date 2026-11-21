@@ -5,8 +5,8 @@ const toastNotification = ref(null)
 const showToast = ref(false)
 
 export function useToast() {
-	function showToastNotification(title, message, type = "success") {
-		toastNotification.value = { title, message, type }
+	function showToastNotification(title, message, type = "success", icon = null) {
+		toastNotification.value = { title, message, type, icon }
 		showToast.value = true
 
 		// Auto-hide after 4 seconds
@@ -22,8 +22,12 @@ export function useToast() {
 		showToastNotification("Success", message, "success")
 	}
 
-	function showError(message) {
-		showToastNotification("Error", message, "error")
+	function showError(message, icon = null) {
+		showToastNotification("Error", message, "error", icon)
+	}
+
+	function showLocked(message, title = "Draft Locked") {
+		showToastNotification(title, message, "error", "lock")
 	}
 
 	function showWarning(message) {
@@ -42,6 +46,7 @@ export function useToast() {
 		showToast,
 		showSuccess,
 		showError,
+		showLocked,
 		showWarning,
 		hideToast,
 	}

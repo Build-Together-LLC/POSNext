@@ -5,17 +5,68 @@ import { ref } from "vue"
 const HEARTBEAT_MS = 25000
 
 // Single-editor lock for documents two tills can reach at once.
-//
-// This is the friendly half: it warns the second cashier before they start typing instead of
-// letting them fill in a payment and fail on save. The binding half is the guard on the write
-// endpoints — so if a claim here fails for any reason we let the user carry on and rely on the
-// server to refuse, rather than blocking a sale over a cache blip.
+const lockedBy = ref(null)
+let timer = null
+let held = null
+
+function getCookie(name) {
+	if (typeof document === "undefined") return null
+	const value = `; ${document.cookie}`
+	const parts = value.split(`; ${name}=`)
+	if (parts.length === 2) {
+		return parts.pop().split(";").shift() || null
+	}
+	return null
+}
+
+function sendReleaseBeacon(doctype, name) {
+	if (!doctype || !name) return
+	try {
+		const csrfToken =
+			(typeof window !== "undefined" && (window.csrf_token || window.frappe?.csrf_token)) ||
+			getCookie("csrf_token")
+
+		const headers = {
+			"Content-Type": "application/json",
+		}
+		if (csrfToken && csrfToken !== "None") {
+			headers["X-Frappe-CSRF-Token"] = csrfToken
+		}
+
+		// 1. fetch with keepalive: true — POST request with CSRF token
+		if (typeof fetch === "function") {
+			fetch("/api/method/pos_next.api.edit_lock.release", {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ doctype, name }),
+				keepalive: true,
+				credentials: "same-origin",
+			}).catch(() => {})
+		} else if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+			// 2. navigator.sendBeacon fallback with CSRF token in FormData
+			const data = new FormData()
+			data.append("doctype", doctype)
+			data.append("name", name)
+			if (csrfToken && csrfToken !== "None") {
+				data.append("csrf_token", csrfToken)
+			}
+			navigator.sendBeacon("/api/method/pos_next.api.edit_lock.release", data)
+		}
+	} catch (_) {}
+}
+
+// Setup beforeunload and pagehide to immediately release lock when tab/browser closes
+if (typeof window !== "undefined") {
+	const handleUnload = () => {
+		if (held && held.doctype && held.name) {
+			sendReleaseBeacon(held.doctype, held.name)
+		}
+	}
+	window.addEventListener("beforeunload", handleUnload)
+	window.addEventListener("pagehide", handleUnload)
+}
+
 export function useEditLock() {
-	const lockedBy = ref(null)
-
-	let timer = null
-	let held = null
-
 	async function request(method, doctype, name) {
 		try {
 			return await call(`pos_next.api.edit_lock.${method}`, { doctype, name })
@@ -48,6 +99,13 @@ export function useEditLock() {
 	async function acquire(doctype, name) {
 		if (!doctype || !name) return true
 
+		if (held && held.doctype === doctype && held.name === name) {
+			if (!timer) {
+				timer = setInterval(() => request("claim", doctype, name), HEARTBEAT_MS)
+			}
+			return true
+		}
+
 		await release()
 
 		const res = await request("claim", doctype, name)
@@ -65,5 +123,15 @@ export function useEditLock() {
 		return true
 	}
 
-	return { acquire, release, lockedBy }
+	function isHolding(doctype, name) {
+		return Boolean(held && held.doctype === doctype && held.name === name)
+	}
+
+	return {
+		acquire,
+		release,
+		lockedBy,
+		isHolding,
+		heldLock: () => held,
+	}
 }

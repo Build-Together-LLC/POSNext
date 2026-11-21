@@ -15,7 +15,7 @@
 				>
 					<div class="flex-shrink-0">
 						<FeatherIcon
-							:name="toastNotification.type === 'success' ? 'check-circle' : toastNotification.type === 'error' ? 'x-circle' : 'alert-circle'"
+							:name="toastNotification.icon || (toastNotification.type === 'success' ? 'check-circle' : toastNotification.type === 'error' ? 'x-circle' : 'alert-circle')"
 							:class="[
 								'w-5 h-5',
 								toastNotification.type === 'success' ? 'text-green-600' : '',
