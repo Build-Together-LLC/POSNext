@@ -6,6 +6,7 @@ import { useSerialNumberStore } from "@/stores/serialNumber"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useStockStore } from "@/stores/stock"
 import { useToast } from "@/composables/useToast"
+import { useEditLock } from "@/composables/useEditLock"
 
 // Monotonic within the tab; line ids only have to be unique inside one cart.
 let lineIdCounter = 0
@@ -1051,6 +1052,10 @@ export function useInvoice() {
 	 * If a POS Profile is active and has a default customer, it will be pre-selected.
 	 */
 	function resetInvoice() {
+		try {
+			useEditLock().release()
+		} catch (_) {}
+
 		invoiceItems.value = []
 		payments.value = []
 		additionalDiscount.value = 0
@@ -1073,6 +1078,10 @@ export function useInvoice() {
 	 * If a POS Profile is active and has a default customer, it will be pre-selected.
 	 */
 	async function clearCart() {
+		try {
+			await useEditLock().release()
+		} catch (_) {}
+
 		// Return all serial numbers back to cache before clearing
 		for (const item of invoiceItems.value) {
 			if (item.has_serial_no && item.serial_no) {

@@ -37,14 +37,31 @@
 					<div
 						v-for="draft in filteredDrafts"
 						:key="draft.draft_id"
-						class="bg-white border border-gray-200 rounded-lg p-3 hover:border-blue-400 transition-all cursor-pointer"
-						@click="$emit('load-draft', draft)"
+						:class="[
+							'bg-white border rounded-lg p-3 transition-all',
+							draft.is_locked && !draft.is_locked_by_me
+								? 'border-red-200 bg-red-50/20 cursor-not-allowed opacity-90'
+								: 'border-gray-200 hover:border-blue-400 cursor-pointer'
+						]"
+						@click="handleSelectDraft(draft)"
 					>
 						<div class="flex items-start justify-between gap-2 mb-2">
 							<div class="flex-1 min-w-0">
-								<h4 class="text-sm font-semibold text-gray-900 truncate">
-									{{ draft.draft_id }}
-								</h4>
+								<div class="flex items-center gap-2">
+									<h4 class="text-sm font-semibold text-gray-900 truncate">
+										{{ draft.draft_id }}
+									</h4>
+									<span
+										v-if="draft.is_locked && !draft.is_locked_by_me"
+										class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded-full shrink-0"
+										:title="draft.locked_by ? __('Locked by {0}', [draft.locked_by]) : __('Locked by another user')"
+									>
+										<svg class="w-3 h-3 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+										</svg>
+										<span>{{ __('Locked') }}</span>
+									</span>
+								</div>
 								<p v-if="draft.customer" class="text-sm sm:text-base font-bold sm:font-bold text-gray-900 mt-0.5 break-words">
 									{{ __('Customer: {0}', [(draft.customer?.customer_name || draft.customer?.name || draft.customer)]) }}
 								</p>
@@ -184,7 +201,7 @@ import { usePOSShiftStore } from "@/stores/posShift"
 import { Button, Dialog, Input } from "frappe-ui"
 import { computed, onMounted, ref, watch } from "vue"
 
-const { showError } = useToast()
+const { showError, showLocked } = useToast()
 const shiftStore = usePOSShiftStore()
 // Reading through the store keeps this dialog agnostic of where drafts live -
 // IndexedDB or server-side Sales Invoice drafts. It lists both.
@@ -308,9 +325,36 @@ async function handlePrintDraft(draft) {
 	}
 }
 
+function handleSelectDraft(draft) {
+	if (draft.is_locked && !draft.is_locked_by_me) {
+		const holderName = draft.locked_by || __("another user")
+		showLocked(
+			__(
+				"This draft is currently being edited by {0}. Please try again later.",
+				[holderName],
+			),
+			__("Draft Locked"),
+		)
+		return
+	}
+	emit("load-draft", draft)
+}
+
 function handleDeleteDraft(draftId) {
 	if (!canDeleteDrafts.value) {
 		showError(__("You don't have permission to delete draft invoices"))
+		return
+	}
+	const draft = drafts.value.find((d) => d.draft_id === draftId)
+	if (draft?.is_locked && !draft?.is_locked_by_me) {
+		const holderName = draft.locked_by || __("another user")
+		showLocked(
+			__(
+				"This draft is currently being edited by {0}. Please try again later.",
+				[holderName],
+			),
+			__("Draft Locked"),
+		)
 		return
 	}
 	draftToDelete.value = draftId
