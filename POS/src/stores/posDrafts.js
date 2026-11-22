@@ -19,6 +19,7 @@ import { isStaleDocumentError, parseError } from "@/utils/errorHandler"
 import { isOffline } from "@/utils/offline"
 import { offlineState } from "@/utils/offline/offlineState"
 import { useToast } from "@/composables/useToast"
+import { useEditLock } from "@/composables/useEditLock"
 import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSOrderLossStore } from "@/stores/orderLoss"
 import { usePOSOffersStore } from "@/stores/posOffers"
@@ -43,7 +44,8 @@ import { computed, ref } from "vue"
  */
 export const usePOSDraftsStore = defineStore("posDrafts", () => {
 	// Use custom toast
-	const { showSuccess, showError, showWarning } = useToast()
+	const { showSuccess, showError, showWarning, showLocked } = useToast()
+	const editLock = useEditLock()
 
 	const settingsStore = usePOSSettingsStore()
 	const cartStore = usePOSCartStore()
@@ -453,9 +455,27 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 	async function loadDraft(draft) {
 		try {
-			// A server hold is shared, so another till may resume it too. No claim is
-			// taken: the draft carries its `modified` version, and the server refuses a
-			// save built on a copy someone else has since changed.
+			const invoiceName =
+				boundInvoiceName(draft) ||
+				(isServerDraft(draft) ? (draft.invoice_name || draft.draft_id) : null)
+
+			// Check and acquire lock for server drafts so another user cannot edit concurrently
+			if (invoiceName && !isOffline()) {
+				const acquired = await editLock.acquire("Sales Invoice", invoiceName)
+				if (!acquired) {
+					const holder = editLock.lockedBy.value
+					const holderName = holder?.full_name || holder?.user || __("another user")
+					const msg =
+						holder?.message ||
+						__(
+							"This draft is currently being edited by {0}. Please try again later.",
+							[holderName],
+						)
+					showLocked(msg, __("Draft Locked"))
+					return null
+				}
+			}
+
 			const source = isServerDraft(draft)
 				? await getServerDraftById(draft.invoice_name || draft.draft_id)
 				: draft
@@ -468,7 +488,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 				applied_offers: isServerDraft(source)
 					? buildAppliedOffersFromRules(source.applied_pricing_rules)
 					: source.applied_offers || [], // Restore applied offers
-				invoice_name: boundInvoiceName(source),
+				invoice_name: boundInvoiceName(source) || (isServerDraft(source) ? (source.invoice_name || source.draft_id) : null),
 				// Version being resumed; sent back on the next write to catch a clash.
 				modified: source.modified || null,
 				additional_discount: source.additional_discount || 0,
@@ -479,6 +499,10 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			showError(__("Failed to load draft"))
 			throw error
 		}
+	}
+
+	async function releaseDraftLock() {
+		await editLock.release()
 	}
 
 	/**
@@ -689,6 +713,18 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		// the same question as "where would the next hold go".
 		const draft = await resolveDraftDeep(draftId)
 
+		if (draft?.is_locked && !draft?.is_locked_by_me) {
+			const holderName = draft.locked_by || __("another user")
+			showLocked(
+				__(
+					"This draft is currently being edited by {0}. Please try again later.",
+					[holderName],
+				),
+				__("Draft Locked"),
+			)
+			return false
+		}
+
 		try {
 			if (!draft || isServerDraft(draft)) {
 				await deleteServerDraft(boundInvoiceName(draft) || draftId)
@@ -770,6 +806,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 	 * that invoice) is spent and goes.
 	 */
 	async function discardDraftAfterSubmit(draftId) {
+		await releaseDraftLock()
 		if (!draftId) return
 
 		// Only a cached draft has anything to clean up, and only a deep resolve
@@ -847,6 +884,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		loadDrafts,
 		saveDraftInvoice,
 		loadDraft,
+		releaseDraftLock,
 		hydrateDraft,
 		flushOfflineDrafts,
 		retryFailedDrafts,

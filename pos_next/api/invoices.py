@@ -480,6 +480,11 @@ def update_invoice(data):
 
         invoice_name = data.get("name")
 
+        # Refuse write if locked by another user
+        if invoice_name:
+            from pos_next.api.edit_lock import guard as guard_edit_lock
+            guard_edit_lock(doctype, invoice_name)
+
         # Turn the write away if another till has saved this draft since it was loaded here.
         _assert_not_stale(doctype, invoice_name, client_modified)
 
@@ -756,6 +761,11 @@ def submit_invoice(invoice=None, data=None):
 
         invoice_name = invoice.get("name")
 
+        # Refuse submit if locked by another user
+        if invoice_name:
+            from pos_next.api.edit_lock import guard as guard_edit_lock
+            guard_edit_lock(doctype, invoice_name)
+
         # Banking someone else's later changes under this cart's totals would lose them.
         _assert_not_stale(doctype, invoice_name, client_modified)
 
@@ -924,6 +934,13 @@ def submit_invoice(invoice=None, data=None):
                     alert=True,
                     indicator="orange"
                 )
+
+        # Release any edit lock held on this invoice
+        try:
+            from pos_next.api.edit_lock import release as release_edit_lock
+            release_edit_lock("Sales Invoice", invoice_doc.name)
+        except Exception:
+            pass
 
         # Return complete invoice details
         return {
@@ -1665,12 +1682,21 @@ def _serialize_pos_draft(doc):
 
     applied_rules = sorted({rule for rules in rules_by_row.values() for rule in rules})
 
+    from pos_next.api.edit_lock import _holder
+    holder = _holder("Sales Invoice", doc.name)
+    is_locked = bool(holder and holder.get("user") != frappe.session.user)
+    is_locked_by_me = bool(holder and holder.get("user") == frappe.session.user)
+    locked_by = (holder.get("full_name") or holder.get("user")) if holder else None
+
     return {
         # draft_id keeps the browser-draft contract so the dialogs, the cart's
         # currentDraftId and the delete/print handlers all work unchanged.
         "draft_id": doc.name,
         "invoice_name": doc.name,
         "server_draft": True,
+        "is_locked": is_locked,
+        "is_locked_by_me": is_locked_by_me,
+        "locked_by": locked_by,
         "pos_profile": doc.pos_profile,
         "pos_opening_shift": doc.get("posa_pos_opening_shift"),
         "customer": {
@@ -1853,12 +1879,21 @@ def _serialize_pos_draft_summary(row, item_rows):
         for item in item_rows
     ]
 
+    from pos_next.api.edit_lock import _holder
+    holder = _holder("Sales Invoice", row.get("name"))
+    is_locked = bool(holder and holder.get("user") != frappe.session.user)
+    is_locked_by_me = bool(holder and holder.get("user") == frappe.session.user)
+    locked_by = (holder.get("full_name") or holder.get("user")) if holder else None
+
     return {
         # draft_id keeps the browser-draft contract (see _serialize_pos_draft).
         "draft_id": row.get("name"),
         "invoice_name": row.get("name"),
         "server_draft": True,
         "summary": True,
+        "is_locked": is_locked,
+        "is_locked_by_me": is_locked_by_me,
+        "locked_by": locked_by,
         "pos_profile": row.get("pos_profile"),
         "pos_opening_shift": row.get("posa_pos_opening_shift"),
         "customer": {
@@ -1916,6 +1951,8 @@ def get_pos_drafts(pos_profile=None, pos_opening_shift=None, limit=0, owner=None
         "modified",
         "owner",
     ]
+    if frappe.db.has_column("Sales Invoice", "posa_is_locked"):
+        fields.append("posa_is_locked")
     if frappe.db.has_column("Sales Invoice", "posa_pos_opening_shift"):
         fields.append("posa_pos_opening_shift")
 
@@ -1985,10 +2022,14 @@ def get_pos_draft_states(invoice_names):
 @frappe.whitelist()
 def delete_pos_draft(invoice_name):
     """Delete a single held draft."""
+    from pos_next.api.edit_lock import guard as guard_edit_lock, release as release_edit_lock
+
+    guard_edit_lock("Sales Invoice", invoice_name)
     doc = _get_pos_draft_doc(invoice_name, ptype="delete")
 
     frappe.delete_doc("Sales Invoice", doc.name, force=1)
     frappe.db.commit()
+    release_edit_lock("Sales Invoice", invoice_name)
 
     return {"deleted": doc.name}
 

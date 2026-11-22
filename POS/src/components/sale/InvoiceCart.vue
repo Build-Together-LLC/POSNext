@@ -63,7 +63,31 @@
 -->
 <template>
 	<div class="flex flex-col h-full bg-white">
-                <!-- Header with Customer -->
+		<!-- Editing Draft Banner -->
+		<div
+			v-if="currentDraftId"
+			class="flex items-center justify-between px-3 py-2 bg-purple-50 border-b border-purple-200 text-xs shrink-0"
+		>
+			<div class="flex items-center gap-1.5 min-w-0 text-purple-900 font-medium truncate">
+				<svg class="w-4 h-4 text-purple-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+				</svg>
+				<span class="truncate">{{ __('Editing Draft: {0}', [currentDraftId]) }}</span>
+			</div>
+			<button
+				type="button"
+				@click="$emit('close-draft')"
+				class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-purple-700 hover:text-red-700 bg-white hover:bg-red-50 border border-purple-200 hover:border-red-300 rounded shadow-sm transition-colors shrink-0"
+				:title="__('Close this draft and release edit lock')"
+			>
+				<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+				</svg>
+				<span>{{ __('Close Draft') }}</span>
+			</button>
+		</div>
+
+		<!-- Header with Customer -->
                 <div class="px-2.5 py-2 border-b border-gray-200 bg-gray-50">
                         <!-- Inline Customer Search/Selection -->
                         <div ref="customerSearchContainer" class="relative">
@@ -1064,6 +1088,10 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	currentDraftId: {
+		type: String,
+		default: null,
+	},
 })
 
 /**
@@ -1073,6 +1101,7 @@ const props = defineProps({
  * Events emitted to parent component for cart operations
  */
 const emit = defineEmits([
+	"close-draft",        // () - Close currently loaded draft and release lock
 	"update-quantity",    // (lineRef, newQty, uom?) - Update line quantity
 	"remove-item",        // (lineRef, uom?) - Remove line from cart
 	"select-customer",    // (customer) - Select/change customer
