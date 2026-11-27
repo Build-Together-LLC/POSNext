@@ -991,8 +991,10 @@ def get_invoice(invoice_name):
 	val = doc_dict.get("is_doc_printed")
 	if str(val).strip().lower() in ("yes", "1", "true") or doc_dict.get("posa_is_printed") == 1:
 		doc_dict["is_doc_printed"] = "Yes"
+		doc_dict["doc_print_count"] = cint(doc_dict.get("doc_print_count") or 1)
 	else:
 		doc_dict["is_doc_printed"] = "No"
+		doc_dict["doc_print_count"] = cint(doc_dict.get("doc_print_count") or 0)
 
 	return doc_dict
 
@@ -1007,7 +1009,7 @@ def mark_invoice_printed(invoice_name):
 		invoice_name: Sales Invoice (or POS Invoice) name
 
 	Returns:
-		dict with status and invoice details
+		dict with status, print count and invoice details
 	"""
 	if not invoice_name:
 		frappe.throw(_("Invoice name is required"))
@@ -1030,11 +1032,70 @@ def mark_invoice_printed(invoice_name):
 	if frappe.db.has_column(doctype, "is_doc_printed"):
 		updates["is_doc_printed"] = "Yes"
 
+	has_count_col = frappe.db.has_column(doctype, "doc_print_count")
+	current_count = 0
+	if has_count_col:
+		current_count = cint(frappe.db.get_value(doctype, invoice_name, "doc_print_count") or 0)
+		updates["doc_print_count"] = current_count + 1
+
 	if updates:
 		frappe.db.set_value(doctype, invoice_name, updates, update_modified=False)
 		frappe.db.commit()
 
-	return {"success": True, "name": invoice_name, "is_doc_printed": "Yes"}
+	new_count = updates.get("doc_print_count", current_count + 1)
+	return {
+		"success": True,
+		"name": invoice_name,
+		"is_doc_printed": "Yes",
+		"doc_print_count": new_count,
+	}
+
+
+@frappe.whitelist()
+def mark_draft_printed(draft_id=None, invoice_name=None):
+	"""
+	Mark a draft invoice document as printed ("Is Draft Printed" = "Yes").
+	Updates only after a successful draft print operation on draft invoices.
+
+	Args:
+		draft_id / invoice_name: Sales Invoice name or draft identifier
+
+	Returns:
+		dict with status, draft print count and draft details
+	"""
+	name = invoice_name or draft_id
+	if not name:
+		return {"success": True, "is_draft_printed": "Yes", "draft_print_count": 1}
+
+	doctype = "Sales Invoice"
+	if not frappe.db.exists(doctype, name):
+		return {"success": True, "name": name, "is_draft_printed": "Yes", "draft_print_count": 1}
+
+	docstatus = frappe.db.get_value(doctype, name, "docstatus")
+	if docstatus != 0:
+		return {"success": False, "error": _("Invoice is no longer a draft")}
+
+	updates = {}
+	if frappe.db.has_column(doctype, "is_draft_printed"):
+		updates["is_draft_printed"] = "Yes"
+
+	has_count = frappe.db.has_column(doctype, "draft_print_count")
+	current_count = 0
+	if has_count:
+		current_count = cint(frappe.db.get_value(doctype, name, "draft_print_count") or 0)
+		updates["draft_print_count"] = current_count + 1
+
+	if updates:
+		frappe.db.set_value(doctype, name, updates, update_modified=False)
+		frappe.db.commit()
+
+	new_count = updates.get("draft_print_count", current_count + 1)
+	return {
+		"success": True,
+		"name": name,
+		"is_draft_printed": "Yes",
+		"draft_print_count": new_count,
+	}
 
 
 @frappe.whitelist()
@@ -1196,6 +1257,7 @@ def get_invoices(
 
 	has_doc_printed_col = frappe.db.has_column("Sales Invoice", "is_doc_printed")
 	has_posa_printed_col = frappe.db.has_column("Sales Invoice", "posa_is_printed")
+	has_doc_print_count_col = frappe.db.has_column("Sales Invoice", "doc_print_count")
 	if has_doc_printed_col:
 		doc_printed_field = "IFNULL(NULLIF(`tabSales Invoice`.is_doc_printed, ''), 'No') AS is_doc_printed,"
 	elif has_posa_printed_col:
@@ -1204,6 +1266,7 @@ def get_invoices(
 		doc_printed_field = "'No' AS is_doc_printed,"
 
 	posa_printed_field = "`tabSales Invoice`.posa_is_printed" if has_posa_printed_col else "0 AS posa_is_printed"
+	doc_print_count_field = "IFNULL(`tabSales Invoice`.doc_print_count, 0) AS doc_print_count," if has_doc_print_count_col else "0 AS doc_print_count,"
 
 	invoices = frappe.db.sql(f"""
 		SELECT
@@ -1221,6 +1284,7 @@ def get_invoices(
 			`tabSales Invoice`.return_against,
 			`tabSales Invoice`.pos_profile,
 			{doc_printed_field}
+			{doc_print_count_field}
 			{posa_printed_field}
 		FROM
 			`tabSales Invoice`
@@ -1259,8 +1323,10 @@ def get_invoices(
 			raw_val = invoice.get("is_doc_printed")
 			if str(raw_val).strip().lower() in ("yes", "1", "true") or invoice.get("posa_is_printed") == 1:
 				invoice["is_doc_printed"] = "Yes"
+				invoice["doc_print_count"] = cint(invoice.get("doc_print_count") or 1)
 			else:
 				invoice["is_doc_printed"] = "No"
+				invoice["doc_print_count"] = cint(invoice.get("doc_print_count") or 0)
 
 	return invoices
 
@@ -1688,6 +1754,10 @@ def _serialize_pos_draft(doc):
     is_locked_by_me = bool(holder and holder.get("user") == frappe.session.user)
     locked_by = (holder.get("full_name") or holder.get("user")) if holder else None
 
+    val = doc.get("is_draft_printed")
+    is_draft_printed = "Yes" if str(val).strip().lower() in ("yes", "1", "true") else "No"
+    draft_print_count = cint(doc.get("draft_print_count") or (1 if is_draft_printed == "Yes" else 0))
+
     return {
         # draft_id keeps the browser-draft contract so the dialogs, the cart's
         # currentDraftId and the delete/print handlers all work unchanged.
@@ -1697,6 +1767,8 @@ def _serialize_pos_draft(doc):
         "is_locked": is_locked,
         "is_locked_by_me": is_locked_by_me,
         "locked_by": locked_by,
+        "is_draft_printed": is_draft_printed,
+        "draft_print_count": draft_print_count,
         "pos_profile": doc.pos_profile,
         "pos_opening_shift": doc.get("posa_pos_opening_shift"),
         "customer": {
@@ -1885,6 +1957,10 @@ def _serialize_pos_draft_summary(row, item_rows):
     is_locked_by_me = bool(holder and holder.get("user") == frappe.session.user)
     locked_by = (holder.get("full_name") or holder.get("user")) if holder else None
 
+    val = row.get("is_draft_printed")
+    is_draft_printed = "Yes" if str(val).strip().lower() in ("yes", "1", "true") else "No"
+    draft_print_count = cint(row.get("draft_print_count") or (1 if is_draft_printed == "Yes" else 0))
+
     return {
         # draft_id keeps the browser-draft contract (see _serialize_pos_draft).
         "draft_id": row.get("name"),
@@ -1894,6 +1970,8 @@ def _serialize_pos_draft_summary(row, item_rows):
         "is_locked": is_locked,
         "is_locked_by_me": is_locked_by_me,
         "locked_by": locked_by,
+        "is_draft_printed": is_draft_printed,
+        "draft_print_count": draft_print_count,
         "pos_profile": row.get("pos_profile"),
         "pos_opening_shift": row.get("posa_pos_opening_shift"),
         "customer": {
@@ -1955,6 +2033,10 @@ def get_pos_drafts(pos_profile=None, pos_opening_shift=None, limit=0, owner=None
         fields.append("posa_is_locked")
     if frappe.db.has_column("Sales Invoice", "posa_pos_opening_shift"):
         fields.append("posa_pos_opening_shift")
+    if frappe.db.has_column("Sales Invoice", "is_draft_printed"):
+        fields.append("is_draft_printed")
+    if frappe.db.has_column("Sales Invoice", "draft_print_count"):
+        fields.append("draft_print_count")
 
     rows = frappe.get_all(
         "Sales Invoice",

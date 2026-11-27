@@ -932,3 +932,68 @@ export async function markInvoicePrinted(invoiceName) {
 		return { success: false, error: error?.message || error };
 	}
 }
+
+/**
+ * Mark a draft invoice as printed on the server and/or in local storage.
+ * Called only after a successful draft print operation.
+ * @param {Object|string} draft - The draft object or draft ID
+ * @returns {Promise<{success: boolean, is_draft_printed: string, draft_print_count: number, [key: string]: any}>}
+ */
+export async function markDraftPrinted(draft) {
+	if (!draft) return { success: false, error: "Draft is required" };
+	const draftId = typeof draft === "string" ? draft : draft.draft_id || draft.name;
+	const invoiceName =
+		typeof draft === "object"
+			? draft.invoice_name || (draft.server_draft ? draft.draft_id : null)
+			: null;
+
+	let serverResult = null;
+	if (invoiceName) {
+		try {
+			const res = await call("pos_next.api.invoices.mark_draft_printed", {
+				invoice_name: invoiceName,
+				draft_id: draftId,
+			});
+			serverResult = res?.message ?? res;
+		} catch (error) {
+			log.warn("Failed to mark draft as printed on server:", error);
+		}
+	}
+
+	const newCount =
+		serverResult?.draft_print_count ||
+		(typeof draft === "object" && draft.draft_print_count
+			? draft.draft_print_count + 1
+			: 1);
+
+	// Update in-memory draft object if provided
+	if (typeof draft === "object") {
+		draft.is_draft_printed = "Yes";
+		draft.draft_print_count = newCount;
+	}
+
+	// Update local draft in IndexedDB if available
+	try {
+		const { updateDraft, getDraftById } = await import("@/utils/draftManager");
+		const existing = await getDraftById(draftId).catch(() => null);
+		if (existing) {
+			const count = (existing.draft_print_count || 0) + 1;
+			await updateDraft(draftId, {
+				is_draft_printed: "Yes",
+				draft_print_count: count,
+			}).catch(() => {});
+			if (typeof draft === "object") {
+				draft.draft_print_count = count;
+			}
+		}
+	} catch (e) {
+		// Ignore local draft update errors in non-browser or mock environments
+	}
+
+	return {
+		success: true,
+		is_draft_printed: "Yes",
+		draft_print_count:
+			(typeof draft === "object" ? draft.draft_print_count : newCount) || newCount,
+	};
+}

@@ -188,13 +188,22 @@
 														</span>
 														<span
 															:class="[
-																'px-2 py-0.5 text-xs font-semibold rounded-full',
+																'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full',
 																invoice.is_doc_printed === 'Yes'
 																	? 'bg-green-100 text-green-800'
 																	: 'bg-gray-100 text-gray-700'
 															]"
 														>
-															{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}
+															<svg v-if="invoice.is_doc_printed === 'Yes'" class="w-3.5 h-3.5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+																<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+															</svg>
+															<span>{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}</span>
+															<span
+																v-if="invoice.is_doc_printed === 'Yes' && (invoice.doc_print_count || 1) > 0"
+																class="inline-flex items-center justify-center min-w-4.5 h-4.5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-bold shadow-sm shrink-0"
+															>
+																{{ invoice.doc_print_count || 1 }}
+															</span>
 														</span>
 													</div>
 													<div class="flex items-center gap-4 mt-1 text-sm text-gray-600">
@@ -400,13 +409,22 @@
 													<td class="px-4 py-3.5 text-center whitespace-nowrap">
 														<span
 															:class="[
-																'text-xs px-2.5 py-1 rounded-full font-semibold',
+																'inline-flex items-center justify-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-semibold',
 																invoice.is_doc_printed === 'Yes'
 																	? 'bg-green-100 text-green-800'
 																	: 'bg-gray-100 text-gray-700'
 															]"
 														>
-															{{ invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No') }}
+															<svg v-if="invoice.is_doc_printed === 'Yes'" class="w-3.5 h-3.5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+																<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+															</svg>
+															<span>{{ invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No') }}</span>
+															<span
+																v-if="invoice.is_doc_printed === 'Yes' && (invoice.doc_print_count || 1) > 0"
+																class="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-green-600 text-white text-[10px] font-bold shadow-sm shrink-0"
+															>
+																{{ invoice.doc_print_count || 1 }}
+															</span>
 														</span>
 													</td>
 													<td class="px-4 py-3.5 text-end font-bold text-indigo-600 whitespace-nowrap">
@@ -432,7 +450,7 @@
 																<span>{{ __('View') }}</span>
 															</button>
 															<button
-																@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes' })"
+																@click="$emit('print-invoice', invoice, (res) => { invoice.is_doc_printed = 'Yes'; invoice.doc_print_count = res?.doc_print_count || (invoice.doc_print_count || 0) + 1 })"
 																class="px-2.5 py-1.5 text-xs font-semibold text-green-600 bg-green-50 hover:bg-green-100 rounded-md transition-colors inline-flex items-center gap-1"
 																:title="__('Print')"
 															>
@@ -482,13 +500,22 @@
 														</span>
 														<span
 															:class="[
-																'text-xs px-2.5 py-1 rounded-full font-semibold',
+																'inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-semibold',
 																invoice.is_doc_printed === 'Yes'
 																	? 'bg-green-100 text-green-800'
 																	: 'bg-gray-100 text-gray-700'
 															]"
 														>
-															{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}
+															<svg v-if="invoice.is_doc_printed === 'Yes'" class="w-3.5 h-3.5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+																<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+															</svg>
+															<span>{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}</span>
+															<span
+																v-if="invoice.is_doc_printed === 'Yes' && (invoice.doc_print_count || 1) > 0"
+																class="inline-flex items-center justify-center min-w-4.5 h-4.5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-bold shadow-sm shrink-0"
+															>
+																{{ invoice.doc_print_count || 1 }}
+															</span>
 														</span>
 													</div>
 												</div>
@@ -552,7 +579,7 @@
 												<span>{{ __('View') }}</span>
 											</button>
 											<button
-												@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes' })"
+												@click="$emit('print-invoice', invoice, (res) => { invoice.is_doc_printed = 'Yes'; invoice.doc_print_count = res?.doc_print_count || (invoice.doc_print_count || 0) + 1 })"
 												class="px-3 py-2 text-xs font-semibold text-green-600 bg-green-50 hover:bg-green-100 rounded-lg transition-colors flex items-center gap-1"
 												:title="__('Print')"
 											>
@@ -618,7 +645,7 @@
 									>
 										<div class="flex items-start justify-between mb-2">
 											<div class="flex-1">
-												<div class="flex items-center gap-2">
+												<div class="flex items-center gap-2 flex-wrap">
 													<h4 class="text-sm font-semibold text-gray-900">{{ draft.draft_id }}</h4>
 													<span
 														v-if="draft.is_locked && !draft.is_locked_by_me"
@@ -629,6 +656,25 @@
 															<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
 														</svg>
 														<span>{{ __('Locked') }}</span>
+													</span>
+													<span
+														:class="[
+															'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full shrink-0',
+															draft.is_draft_printed === 'Yes'
+																? 'bg-green-100 text-green-800'
+																: 'bg-gray-100 text-gray-700'
+														]"
+													>
+														<svg v-if="draft.is_draft_printed === 'Yes'" class="w-3.5 h-3.5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+															<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+														</svg>
+														<span>{{ __('Is Draft Printed: {0}', [draft.is_draft_printed === 'Yes' ? __('Yes') : __('No')]) }}</span>
+														<span
+															v-if="draft.is_draft_printed === 'Yes' && (draft.draft_print_count || 1) > 0"
+															class="inline-flex items-center justify-center min-w-4.5 h-4.5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-bold shadow-sm shrink-0"
+														>
+															{{ draft.draft_print_count || 1 }}
+														</span>
 													</span>
 												</div>
 												<p v-if="draft.customer" class="text-sm sm:text-base font-bold sm:font-bold text-gray-900 mt-0.5 break-words">
@@ -658,6 +704,16 @@
 														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
 													</svg>
 													<span>{{ __('Edit') }}</span>
+												</button>
+												<button
+													@click.stop="handlePrintDraftFromManagement(draft)"
+													class="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors flex items-center gap-1"
+													:title="__('Print draft')"
+												>
+													<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+													</svg>
+													<span>{{ __('Print') }}</span>
 												</button>
 												<button
 													v-if="canDeleteDrafts"
@@ -729,13 +785,22 @@
 													</span>
 													<span
 														:class="[
-															'text-xs px-2 py-0.5 rounded-full font-medium',
+															'inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium',
 															invoice.is_doc_printed === 'Yes'
 																? 'bg-green-100 text-green-800'
 																: 'bg-gray-100 text-gray-700'
 														]"
 													>
-														{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}
+														<svg v-if="invoice.is_doc_printed === 'Yes'" class="w-3.5 h-3.5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+															<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+														</svg>
+														<span>{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}</span>
+														<span
+															v-if="invoice.is_doc_printed === 'Yes' && (invoice.doc_print_count || 1) > 0"
+															class="inline-flex items-center justify-center min-w-4.5 h-4.5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-bold shadow-sm shrink-0"
+														>
+															{{ invoice.doc_print_count || 1 }}
+														</span>
 													</span>
 												</div>
 												<div class="flex items-center gap-4 text-xs text-gray-600">
@@ -761,7 +826,7 @@
 														</svg>
 													</button>
 													<button
-														@click="$emit('print-invoice', invoice, () => { invoice.is_doc_printed = 'Yes' })"
+														@click="$emit('print-invoice', invoice, (res) => { invoice.is_doc_printed = 'Yes'; invoice.doc_print_count = res?.doc_print_count || (invoice.doc_print_count || 0) + 1 })"
 														class="p-1.5 hover:bg-green-50 rounded transition-colors"
 														:title="__('Print')"
 													>
@@ -815,6 +880,8 @@ import { useInvoiceFilters } from "@/composables/useInvoiceFilters"
 import { useInvoiceFiltersStore } from "@/stores/invoiceFilters"
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
+import { printDraftReceipt, markDraftPrinted } from "@/utils/printInvoice"
+import { usePOSDraftsStore } from "@/stores/posDrafts"
 import { usePOSPermissions } from "@/composables/usePermissions"
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
@@ -825,6 +892,7 @@ import { computed, onMounted, ref, watch } from "vue"
 const { showSuccess, showError, showLocked } = useToast()
 const { formatDate, formatDateTime, formatTime } = useFormatters()
 const { canDeleteInvoice } = usePOSPermissions()
+const draftsStore = usePOSDraftsStore()
 const canDeleteDrafts = ref(false)
 
 async function checkDeletePermission() {
@@ -1459,6 +1527,48 @@ function handleDeleteDraftFromManagement(draftId) {
 		return
 	}
 	emit("delete-draft", draftId)
+}
+
+async function handlePrintDraftFromManagement(draft) {
+	try {
+		const source = (await draftsStore.hydrateDraft(draft)) || draft
+
+		const customerObj = source.customer
+		const customerName = typeof customerObj === "object"
+			? (customerObj?.customer_name || customerObj?.name || "")
+			: (customerObj || "")
+		const addressDisplay = typeof customerObj === "object"
+			? (customerObj?.address_display || customerObj?.primary_address || customerObj?.address || "")
+			: ""
+
+		const invoiceData = {
+			name: draft.draft_id,
+			company: props.company,
+			pos_profile: source.pos_profile || props.posProfile,
+			customer: customerObj,
+			items: source.items || [],
+			payments: [],
+			grand_total: draftTotal(source),
+			posting_date: source.created_at || draft.created_at,
+			customer_name: customerName,
+			address_display: addressDisplay,
+			status: "Draft",
+			is_draft: true,
+			docstatus: 0,
+		}
+		const printResult = await printDraftReceipt(invoiceData)
+		if (printResult !== false) {
+			const markResult = await markDraftPrinted(draft)
+			if (markResult && markResult.success) {
+				draft.is_draft_printed = "Yes"
+				draft.draft_print_count = markResult.draft_print_count || (draft.draft_print_count || 0) + 1
+			}
+			emit("refresh-history")
+		}
+	} catch (error) {
+		console.error("Error printing draft from management:", error)
+		showError(__("Failed to print draft"))
+	}
 }
 
 

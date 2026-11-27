@@ -74,6 +74,7 @@ describe("InvoiceDetailDialog - Is Doc Printed Status", () => {
 				outstanding_amount: 0,
 				is_return: 0,
 				is_doc_printed: "Yes",
+				doc_print_count: 2,
 				items: [
 					{
 						item_code: "ITEM-B",
@@ -118,12 +119,13 @@ describe("InvoiceDetailDialog - Is Doc Printed Status", () => {
 		expect(text).toContain("Is Doc Printed:")
 	})
 
-	it("displays 'Yes' in invoice details for printed invoices", async () => {
+	it("displays 'Yes' in invoice details for printed invoices with tick and count", async () => {
 		const wrapper = mountDialog({ invoiceName: "ACC-SINV-2026-00002" })
 		await flushPromises()
 
 		const text = wrapper.text()
 		expect(text).toContain("Is Doc Printed: Yes")
+		expect(text).toContain("2")
 	})
 
 	it("updates status to Yes only after successful print execution", async () => {
@@ -151,13 +153,15 @@ describe("InvoiceDetailDialog - Is Doc Printed Status", () => {
 
 		// Successful print operation invokes the callback and persists to backend
 		invoiceDatabase["ACC-SINV-2026-00001"].is_doc_printed = "Yes"
+		invoiceDatabase["ACC-SINV-2026-00001"].doc_print_count = 1
 		const callback = emitted[0][1]
 		expect(typeof callback).toBe("function")
-		callback()
+		callback({ doc_print_count: 1 })
 		await nextTick()
 
-		// Details immediately updates to Yes
+		// Details immediately updates to Yes with count 1
 		expect(wrapper.text()).toContain("Is Doc Printed: Yes")
+		expect(wrapper.text()).toContain("1")
 	})
 
 	it("preserves correct status when reopening or refreshing", async () => {

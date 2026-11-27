@@ -72,6 +72,7 @@ describe("InvoiceHistoryDialog - Is Doc Printed Status", () => {
 				docstatus: 1,
 				is_return: 0,
 				is_doc_printed: "Yes",
+				doc_print_count: 3,
 			},
 		]
 	})
@@ -98,13 +99,14 @@ describe("InvoiceHistoryDialog - Is Doc Printed Status", () => {
 		return wrapper
 	}
 
-	it("renders 'Is Doc Printed' Yes/No status badges", async () => {
+	it("renders 'Is Doc Printed' Yes/No status badges with tick and count", async () => {
 		const wrapper = mountDialog()
 		await flushPromises()
 
 		const text = wrapper.text()
 		expect(text).toContain("Is Doc Printed: No")
 		expect(text).toContain("Is Doc Printed: Yes")
+		expect(text).toContain("3")
 	})
 
 	it("updates status to Yes only after successful print execution via callback", async () => {
@@ -129,14 +131,15 @@ describe("InvoiceHistoryDialog - Is Doc Printed Status", () => {
 		// Merely clicking print keeps status as "No"
 		expect(wrapper.text()).toContain("Is Doc Printed: No")
 
-		// Print succeeds and invokes callback
+		// Print succeeds and invokes callback with result count
 		const callback = emitted[0][1]
 		expect(typeof callback).toBe("function")
-		callback()
+		callback({ doc_print_count: 1 })
 		await nextTick()
 
 		// Both invoices are now printed
 		expect(wrapper.text()).not.toContain("Is Doc Printed: No")
 		expect(wrapper.text()).toContain("Is Doc Printed: Yes")
+		expect(wrapper.text()).toContain("1")
 	})
 })

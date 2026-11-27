@@ -78,13 +78,22 @@
 									</span>
 									<span
 										:class="[
-											'text-xs px-2 py-0.5 rounded-full font-medium',
+											'inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium',
 											invoice.is_doc_printed === 'Yes'
 												? 'bg-green-100 text-green-800'
 												: 'bg-gray-100 text-gray-700'
 										]"
 									>
-										{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}
+										<svg v-if="invoice.is_doc_printed === 'Yes'" class="w-3.5 h-3.5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+										</svg>
+										<span>{{ __('Is Doc Printed: {0}', [invoice.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}</span>
+										<span
+											v-if="invoice.is_doc_printed === 'Yes' && (invoice.doc_print_count || 1) > 0"
+											class="inline-flex items-center justify-center min-w-4.5 h-4.5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-bold shadow-sm shrink-0"
+										>
+											{{ invoice.doc_print_count || 1 }}
+										</span>
 									</span>
 								</div>
 								<p class="text-xs text-gray-600 text-start">{{ invoice.customer_name }}</p>
@@ -201,6 +210,7 @@ const invoicesResource = createResource({
 				"is_return",
 				"is_doc_printed",
 				"posa_is_printed",
+				"doc_print_count",
 			],
 			order_by: "creation desc",
 			start: 0,
@@ -215,6 +225,7 @@ const invoicesResource = createResource({
 			invoices.value = data.map((inv) => ({
 				...inv,
 				is_doc_printed: (inv.is_doc_printed === 'Yes' || inv.posa_is_printed === 1) ? 'Yes' : 'No',
+				doc_print_count: Number.parseInt(inv.doc_print_count, 10) || ((inv.is_doc_printed === 'Yes' || inv.posa_is_printed === 1) ? 1 : 0),
 				items_count: 0,
 			}))
 		}
@@ -270,8 +281,9 @@ function viewInvoice(invoice) {
 }
 
 function printInvoice(invoice) {
-	emit("print-invoice", invoice, () => {
+	emit("print-invoice", invoice, (res) => {
 		invoice.is_doc_printed = "Yes"
+		invoice.doc_print_count = res?.doc_print_count || (invoice.doc_print_count || 0) + 1
 	})
 }
 

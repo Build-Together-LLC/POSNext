@@ -228,14 +228,50 @@ describe("InvoiceManagement - Is Doc Printed Status", () => {
 		// Before print success callback, status remains "No"
 		expect(unprinted.is_doc_printed).toBe("No")
 
-		// Simulate print operation succeeding (executing callback)
+		// Simulate print operation succeeding (executing callback) with count
 		const callback = emitted[0][1]
 		expect(typeof callback).toBe("function")
-		callback()
+		callback({ doc_print_count: 1 })
 		await nextTick()
 
-		// Now status is "Yes"
+		// Now status is "Yes" and count is 1
 		expect(unprinted.is_doc_printed).toBe("Yes")
 		expect(wrapper.text()).toContain("Yes")
+		expect(wrapper.text()).toContain("1")
+	})
+
+	it("renders 'Is Draft Printed' status with tick and count in Drafts tab", async () => {
+		const sampleDrafts = [
+			{
+				draft_id: "DRAFT-2026-0001",
+				customer: "Alice",
+				created_at: "2026-11-27T10:00:00Z",
+				items: [{ item_name: "Item A", quantity: 1, rate: 100 }],
+				is_draft_printed: "No",
+				draft_print_count: 0,
+			},
+			{
+				draft_id: "DRAFT-2026-0002",
+				customer: "Bob",
+				created_at: "2026-11-27T11:00:00Z",
+				items: [{ item_name: "Item B", quantity: 2, rate: 50 }],
+				is_draft_printed: "Yes",
+				draft_print_count: 2,
+			},
+		]
+
+		const wrapper = mountInvoiceManagement({
+			draftInvoices: sampleDrafts,
+		})
+
+		wrapper.vm.activeTab = "drafts"
+		await flushPromises()
+
+		const text = wrapper.text()
+		expect(text).toContain("DRAFT-2026-0001")
+		expect(text).toContain("DRAFT-2026-0002")
+		expect(text).toContain("Is Draft Printed: No")
+		expect(text).toContain("Is Draft Printed: Yes")
+		expect(text).toContain("2")
 	})
 })
