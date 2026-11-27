@@ -33,13 +33,22 @@
 								</span>
 								<span
 									:class="[
-										'px-3 py-1 text-xs font-semibold rounded-full',
+										'inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full',
 										invoiceData.is_doc_printed === 'Yes'
 											? 'bg-green-100 text-green-800'
 											: 'bg-gray-100 text-gray-700'
 									]"
 								>
-									{{ __('Is Doc Printed: {0}', [invoiceData.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}
+									<svg v-if="invoiceData.is_doc_printed === 'Yes'" class="w-3.5 h-3.5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+									</svg>
+									<span>{{ __('Is Doc Printed: {0}', [invoiceData.is_doc_printed === 'Yes' ? __('Yes') : __('No')]) }}</span>
+									<span
+										v-if="invoiceData.is_doc_printed === 'Yes' && (invoiceData.doc_print_count || 1) > 0"
+										class="inline-flex items-center justify-center min-w-4.5 h-4.5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-bold shadow-sm shrink-0"
+									>
+										{{ invoiceData.doc_print_count || 1 }}
+									</span>
 								</span>
 							</div>
 							<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
@@ -55,11 +64,20 @@
 									<span class="text-gray-600">{{ __('Is Doc Printed:') }}</span>
 									<span
 										:class="[
-											'ms-2 font-semibold',
+											'ms-2 font-semibold inline-flex items-center gap-1.5',
 											invoiceData.is_doc_printed === 'Yes' ? 'text-green-600' : 'text-gray-700'
 										]"
 									>
-										{{ invoiceData.is_doc_printed === 'Yes' ? __('Yes') : __('No') }}
+										<svg v-if="invoiceData.is_doc_printed === 'Yes'" class="w-4 h-4 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+										</svg>
+										<span>{{ invoiceData.is_doc_printed === 'Yes' ? __('Yes') : __('No') }}</span>
+										<span
+											v-if="invoiceData.is_doc_printed === 'Yes' && (invoiceData.doc_print_count || 1) > 0"
+											class="inline-flex items-center justify-center min-w-4.5 h-4.5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-bold shadow-sm shrink-0"
+										>
+											{{ invoiceData.doc_print_count || 1 }}
+										</span>
 									</span>
 								</div>
 								<div v-if="invoiceData.return_against" class="text-start">
@@ -378,8 +396,10 @@ async function loadInvoiceDetails() {
 			const isPrinted = result.is_doc_printed
 			if (String(isPrinted).trim().toLowerCase() === "yes" || isPrinted === 1 || isPrinted === true || result.posa_is_printed === 1) {
 				result.is_doc_printed = "Yes"
+				result.doc_print_count = Number.parseInt(result.doc_print_count, 10) || 1
 			} else {
 				result.is_doc_printed = "No"
+				result.doc_print_count = Number.parseInt(result.doc_print_count, 10) || 0
 			}
 		}
 		invoiceData.value = result
@@ -393,9 +413,10 @@ async function loadInvoiceDetails() {
 
 function handlePrint() {
 	if (!invoiceData.value) return
-	emit("print-invoice", invoiceData.value, () => {
+	emit("print-invoice", invoiceData.value, (res) => {
 		if (invoiceData.value) {
 			invoiceData.value.is_doc_printed = "Yes"
+			invoiceData.value.doc_print_count = res?.doc_print_count || (invoiceData.value.doc_print_count || 0) + 1
 		}
 	})
 }

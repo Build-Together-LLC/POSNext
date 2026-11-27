@@ -53,6 +53,9 @@ def remove_custom_fields():
 			"Sales Invoice-posa_pos_opening_shift",
 			"Sales Invoice-posa_is_printed",
 			"Sales Invoice-is_doc_printed",
+			"Sales Invoice-doc_print_count",
+			"Sales Invoice-is_draft_printed",
+			"Sales Invoice-draft_print_count",
 			# Note: Item-custom_company is shared with Nexus app
 			# Only remove if Nexus is not installed
 		]
@@ -245,6 +248,9 @@ def get_custom_fields_for_cleanup():
 		"Sales Invoice-posa_pos_opening_shift",
 		"Sales Invoice-posa_is_printed",
 		"Sales Invoice-is_doc_printed",
+		"Sales Invoice-doc_print_count",
+		"Sales Invoice-is_draft_printed",
+		"Sales Invoice-draft_print_count",
 	])
 
 	# Conditional removal (shared with other apps)

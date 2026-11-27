@@ -594,6 +594,8 @@ def get_partial_paid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIM
         fields.append("is_doc_printed")
     if frappe.db.has_column("Sales Invoice", "posa_is_printed"):
         fields.append("posa_is_printed")
+    if frappe.db.has_column("Sales Invoice", "doc_print_count"):
+        fields.append("doc_print_count")
 
     # Get partially paid invoices using ORM
     # Filter logic: outstanding > 0 AND paid > 0 (mathematical definition of partial payment)
@@ -619,8 +621,10 @@ def get_partial_paid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIM
         raw_val = invoice.get("is_doc_printed")
         if str(raw_val).strip().lower() in ("yes", "1", "true") or invoice.get("posa_is_printed") == 1:
             invoice["is_doc_printed"] = "Yes"
+            invoice["doc_print_count"] = cint(invoice.get("doc_print_count") or 1)
         else:
             invoice["is_doc_printed"] = "No"
+            invoice["doc_print_count"] = cint(invoice.get("doc_print_count") or 0)
 
     return invoices
 
@@ -681,6 +685,8 @@ def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) ->
         fields.append("is_doc_printed")
     if frappe.db.has_column("Sales Invoice", "posa_is_printed"):
         fields.append("posa_is_printed")
+    if frappe.db.has_column("Sales Invoice", "doc_print_count"):
+        fields.append("doc_print_count")
 
     # Get all unpaid invoices (any invoice with outstanding > 0)
     invoices = frappe.get_all(
@@ -703,8 +709,10 @@ def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) ->
         raw_val = invoice.get("is_doc_printed")
         if str(raw_val).strip().lower() in ("yes", "1", "true") or invoice.get("posa_is_printed") == 1:
             invoice["is_doc_printed"] = "Yes"
+            invoice["doc_print_count"] = cint(invoice.get("doc_print_count") or 1)
         else:
             invoice["is_doc_printed"] = "No"
+            invoice["doc_print_count"] = cint(invoice.get("doc_print_count") or 0)
 
     return invoices
 
@@ -776,6 +784,7 @@ def get_partial_payment_details(invoice_name: str) -> Dict:
         "status": invoice.status,
         "currency": invoice.currency,
         "is_doc_printed": is_doc_printed,
+        "doc_print_count": cint(getattr(invoice, "doc_print_count", 0) or (1 if is_doc_printed == "Yes" else 0)),
         "payments": payment_data["payments"],
         "payment_count": payment_data["payment_count"],
         "items": items,

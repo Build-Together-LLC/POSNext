@@ -47,7 +47,7 @@
 					>
 						<div class="flex items-start justify-between gap-2 mb-2">
 							<div class="flex-1 min-w-0">
-								<div class="flex items-center gap-2">
+								<div class="flex items-center gap-2 flex-wrap">
 									<h4 class="text-sm font-semibold text-gray-900 truncate">
 										{{ draft.draft_id }}
 									</h4>
@@ -60,6 +60,25 @@
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
 										</svg>
 										<span>{{ __('Locked') }}</span>
+									</span>
+									<span
+										:class="[
+											'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full shrink-0',
+											draft.is_draft_printed === 'Yes'
+												? 'bg-green-100 text-green-800'
+												: 'bg-gray-100 text-gray-700'
+										]"
+									>
+										<svg v-if="draft.is_draft_printed === 'Yes'" class="w-3.5 h-3.5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+										</svg>
+										<span>{{ __('Is Draft Printed: {0}', [draft.is_draft_printed === 'Yes' ? __('Yes') : __('No')]) }}</span>
+										<span
+											v-if="draft.is_draft_printed === 'Yes' && (draft.draft_print_count || 1) > 0"
+											class="inline-flex items-center justify-center min-w-4.5 h-4.5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-bold shadow-sm shrink-0"
+										>
+											{{ draft.draft_print_count || 1 }}
+										</span>
 									</span>
 								</div>
 								<p v-if="draft.customer" class="text-sm sm:text-base font-bold sm:font-bold text-gray-900 mt-0.5 break-words">
@@ -193,7 +212,7 @@
 
 <script setup>
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
-import { printDraftReceipt } from "@/utils/printInvoice"
+import { markDraftPrinted, printDraftReceipt } from "@/utils/printInvoice"
 import { useToast } from "@/composables/useToast"
 import { usePOSDraftsStore } from "@/stores/posDrafts"
 import { usePOSPermissions } from "@/composables/usePermissions"
@@ -318,7 +337,15 @@ async function handlePrintDraft(draft) {
 			is_draft: true,
 			docstatus: 0,
 		}
-		printDraftReceipt(invoiceData)
+		const printResult = await printDraftReceipt(invoiceData)
+		if (printResult !== false) {
+			const markResult = await markDraftPrinted(draft)
+			if (markResult && markResult.success) {
+				draft.is_draft_printed = "Yes"
+				draft.draft_print_count = markResult.draft_print_count || (draft.draft_print_count || 0) + 1
+			}
+			emit("drafts-updated")
+		}
 	} catch (error) {
 		console.error("Error printing draft:", error)
 		showError(__("Failed to print draft"))

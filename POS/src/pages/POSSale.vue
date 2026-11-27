@@ -2480,18 +2480,21 @@ async function handlePrintInvoice(invoiceData, onPrintedCallback) {
 			if (markResult && markResult.success) {
 				// Update in local invoice history
 				const target = invoiceHistoryData.value.find((inv) => inv.name === invoiceName)
+				const newCount = markResult.doc_print_count || ((target?.doc_print_count || 0) + 1)
 				if (target) {
 					target.is_doc_printed = "Yes"
+					target.doc_print_count = newCount
 				}
 
 				// Also update the invoice object passed if reactive
 				if (invoiceData && typeof invoiceData === "object") {
 					invoiceData.is_doc_printed = "Yes"
+					invoiceData.doc_print_count = newCount
 				}
 
 				// Run callback if provided (e.g. from dialogs)
 				if (typeof onPrintedCallback === "function") {
-					onPrintedCallback()
+					onPrintedCallback(markResult)
 				}
 			} else {
 				showWarning(
